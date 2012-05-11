@@ -29,8 +29,6 @@ class SWFBasicAssembler {
 		
 		if($swfFile->compressed) {
 			fwrite($this->output, "\x78\x9C");		// zlib header
-			$path = StreamProxy::add($this->output);
-			$this->output = fopen($path, "wb");
 			$filter = stream_filter_append($this->output, "zlib.deflate");
 		}
 
@@ -170,6 +168,10 @@ class SWFBasicAssembler {
 	protected function writeUI32($value) {
 		$bytes = pack('V', $value);
 		$this->writeBytes($bytes);
+	}
+	
+	protected function writeString($value) {
+		$this->writeBytes("$value\0");
 	}
 	
 	protected function writeBytes($bytes) {

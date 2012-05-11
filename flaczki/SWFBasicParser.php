@@ -216,9 +216,37 @@ class SWFBasicParser {
 			return $array[1];
 		}
 	}
+
+	protected function readString($max) {
+		$bytes = null;
+		$read = 0;
+		while(($byte = $this->readBytes(1)) !== null && $read < $max) {
+			if($byte === "\0") {
+				$bytes .= '';
+				break;
+			} else {
+				$bytes .=  $byte;
+			}
+			$read++;
+		}
+		return $bytes;
+	}
 	
 	protected function readBytes($count) {
 		$bytes = fread($this->input, $count);
+		$read = strlen($bytes);
+		
+		while($read < $count) {
+			// sometimes fread() doesn't read the requested number of bytes
+			// keep calling it til enough bytes are read or eof is encountered
+			$chunk = fread($this->input, $count - $read);
+			if($chunk != '') {
+				$bytes .= $chunk;
+				$read += strlen($chunk);
+			} else {
+				break;
+			}			
+		}
 		return ($bytes != '') ? $bytes : null;
 	}	
 }

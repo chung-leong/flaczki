@@ -54,6 +54,7 @@ class StreamMemory {
 		$this->reference .= $data;
 		$this->length += $written;
 		$this->position += $written;
+		return $written;
 	}
 }
 
