@@ -7,10 +7,9 @@ class ODTParser {
 	protected $span;
 	protected $previousSpan;
 	protected $style;
-	protected $styleName;
-	protected $font;
-	protected $fontName;
 	protected $fileName;
+	
+	protected $styleNameRemap = array();
 
 	public function parse($input) {
 		if(gettype($input) == 'string') {
@@ -47,7 +46,7 @@ class ODTParser {
 
 					// parse it with PHP's SAX event-based parser, which requires less memory than a tree-based 
 					// parser and is perfect for on-the-fly processing
-					$parser = xml_parser_create_ns();
+					$parser = xml_parser_create();
 					xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
 					xml_set_object($parser, $this);
 					xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
@@ -65,81 +64,76 @@ class ODTParser {
 		$this->document = $this->paragraph = $this->span = $this->previousSpan = $this->style = $this->font = null;
 		return $document;
 	}
-
+	
 	public function processStartTag($parser, $name, $attributes) {
+		$name = $this->stripPrefix($name);
 		switch($name) {
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:s':
-				$this->processCharacterData($parser, " ");
+			case 's':
+				if(isset($attributes['c'])) {
+					$this->processCharacterData($parser, str_repeat(" ", $attributes['c']));
+				} else {
+					$this->processCharacterData($parser, " ");
+				}
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:tab':
+			case 'tab':
 				$this->processCharacterData($parser, "\t");
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:span':
-				$styleName = $attributes['urn:oasis:names:tc:opendocument:xmlns:text:1.0:style-name'];
-				$style = $this->document->styleTable[$styleName];
-				if($this->previousSpan && $this->previousSpan->style === $style) {
-					// the style is the same--continue to add text to previous span
+			case 'span':
+				// see if this style name isn't remapped to some other name
+				if(isset($attributes['style-name'])) {
+					$styleName = $attributes['style-name'];
+					if(isset($this->styleNameRemap[$styleName])) {
+						$attributes['style-name'] = $this->styleNameRemap[$styleName];
+					}
+				}
+
+				$this->span = new ODTSpan;
+				$this->copyProperties($this->span, $attributes);
+				
+				// see if the new span has the same attributes as the previous one
+				if($this->previousSpan && ($this->previousSpan->styleName == $this->span->styleName && $this->previousSpan->classNames == $this->span->classNames)) {
+					// continue to add text to previous span instead
 					$this->span = $this->previousSpan;
-				} else {
-					$this->span = new ODTSpan;
-					$this->span->style = $style;
 				}
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:p':
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:h':
-				$styleName = $attributes['urn:oasis:names:tc:opendocument:xmlns:text:1.0:style-name'];
-				$style = $this->document->styleTable[$styleName];
+			case 'p':
 				$this->paragraph = new ODTParagraph;
-				$this->paragraph->type = $this->stripNs($name);
-				$this->paragraph->style = $style;
+				$this->copyProperties($this->paragraph, $attributes);
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:style':
+			case 'h':
+				$this->paragraph = new ODTHeader;
+				$this->copyProperties($this->paragraph, $attributes);
+				break;
+			case 'style':
+			case 'default-style':
 				$this->style = new ODTStyle;
-				$this->styleName = $attributes['urn:oasis:names:tc:opendocument:xmlns:style:1.0:name'];
-				unset($attributes['urn:oasis:names:tc:opendocument:xmlns:style:1.0:name']);
-				foreach($attributes as $name => $value) {
-					$this->style->attributes[$this->stripNs($name)] = $value;
-				}
+				$this->copyProperties($this->style, $attributes);
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:default-style':
-				$this->style = new ODTStyle;
-				$this->styleName = $attributes['urn:oasis:names:tc:opendocument:xmlns:style:1.0:family'];
-				unset($attributes['urn:oasis:names:tc:opendocument:xmlns:style:1.0:family']);
-				foreach($attributes as $name => $value) {
-					$this->style->attributes[$this->stripNs($name)] = $value;
-				}
+			case 'paragraph-properties':
+				$this->style->paragraphProperties = new ODTParagraphProperties;
+				$this->copyProperties($this->style->paragraphProperties, $attributes);
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:paragraph-properties':
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:text-properties':
-				if($this->style) {
-					foreach($attributes as $name => $value) {
-						$this->style->attributes[$this->stripNs($name)] = $value;
-					}
-				}
+			case 'text-properties':
+				$this->style->textProperties = new ODTTextProperties;
+				$this->copyProperties($this->style->textProperties, $attributes);
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:tab-stop':
-				if($this->style) {
-					$tabStop = new ODTTabStop;
-					foreach($attributes as $name => $value) {
-						$tabStop->attributes[$this->stripNs($name)] = $value;
-					}
-					$this->style->tabStops[] = $tabStop;
-				}
+			case 'tab-stop':
+				$tabStop = new ODTTabStop;
+				$this->copyProperties($tabStop, $attributes);
+				$this->style->paragraphProperties->tabStops[] = $tabStop;
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:font-face':
-				$this->font = new ODTFont;
-				$this->fontName = $attributes['urn:oasis:names:tc:opendocument:xmlns:style:1.0:name'];
-				unset($attributes['urn:oasis:names:tc:opendocument:xmlns:style:1.0:name']);
-				foreach($attributes as $name => $value) {
-					$this->font->attributes[$this->stripNs($name)] = $value;
-				}
+			case 'font-face':
+				$font = new ODTFont;
+				$this->copyProperties($font, $attributes);
+				$this->document->fonts[$font->name] = $font;
 				break;
 		}
 	}
 
 	public function processEndTag($parser, $name) {
+		$name = $this->stripPrefix($name);
 		switch($name) {
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:span':
+			case 'span':
 				// don't add the span if it's been added already
 				if($this->previousSpan !== $this->span) {
 					if($this->paragraph) {
@@ -149,33 +143,34 @@ class ODTParser {
 				}
 				$this->span = null;
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:p':
-			case 'urn:oasis:names:tc:opendocument:xmlns:text:1.0:h':
+			case 'p':
+			case 'h':
 				$this->document->paragraphs[] = $this->paragraph;
 				$this->paragraph = null;
 				$this->span = null;
 				$this->previousSpan = null;
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:style':
-				// see if there's already a style object matching this one
+			case 'style':
 				if($this->fileName == 'content.xml') {
-					$name = array_search($this->style, $this->document->styleTable);
-					$this->document->styleTable[$this->styleName] = ($name) ? $this->document->styleTable[$name] : $this->style;
+					// ODT file from GoogleDocs contains a style for EVERY word and EVERY white-space
+					// we want to merge identical ones together to reduce the number of spans
+					
+					// see if there's already a style object matching this one
+					$name = $this->findIdenticalStyle($this->document->automaticStyles, $this->style);
+					if($name) {
+						// remap style name to existing style
+						$this->styleNameRemap[$this->style->name] = $name;
+					} else {
+						$this->document->automaticStyles[$this->style->name] = $this->style;
+					}
 				} else {
-					$this->document->commonStyleTable[$this->styleName] = $this->style;
+					$this->document->commonStyles[$this->style->name] = $this->style;
 				}
 				$this->style = null;
-				$this->styleName = null;
 				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:default-style':
-				$this->document->defaultStyleTable[$this->styleName] = $this->style;
+			case 'default-style':
+				$this->document->defaultStyles[$this->style->name] = $this->style;
 				$this->style = null;
-				$this->styleName = null;
-				break;
-			case 'urn:oasis:names:tc:opendocument:xmlns:style:1.0:font-face':
-				$this->document->fonts[$this->fontName] = $this->font;
-				$this->font = null;
-				$this->fontName = null;
 				break;
 		}
 	}
@@ -189,9 +184,35 @@ class ODTParser {
 			$this->span->text .= $text;
 		}
 	}
+	
+	protected function copyProperties(&$object, $attributes) {
+		foreach($attributes as $name => $value) {
+			$name = $this->stripPrefix($name);
+			
+			if(strpos($name, '-')) {
+				// convert the name to camel case
+				$name = str_replace(' ', '', ucwords(str_replace('-', ' ', $name)));
+				$name = strtolower($name[0]) . substr($name, 1);
+			}
+			if(property_exists($object, $name)) {
+				$object->$name = $value;
+			}
+		}
+	}
+	
+	protected function findIdenticalStyle($list, $style) {
+		foreach($list as $key => $existingStyle) {
+			if($existingStyle->family == $style->family
+			&& $existingStyle->parentStyleName == $style->parentStyleName
+			&& $existingStyle->textProperties == $style->textProperties
+			&& $existingStyle->paragraphProperties == $style->paragraphProperties) {
+				return $key;
+			}
+		}
+	}
 
-	protected function stripNs($s) {
-		$pos = strrpos($s, ':');
+	protected function stripPrefix($s) {
+		$pos = strpos($s, ':');
 		return ($pos !== false) ? substr($s, $pos + 1) : $s;
 	}
 
@@ -230,38 +251,93 @@ class ODTParser {
 }
 
 class ODTDocument {
-	public $styleTable = array();
-	public $commonStyleTable = array();
+	public $automaticStyles = array();
+	public $commonStyles = array();
+	public $defaultStyle = array();
 	public $paragraphs = array();
 	public $fonts = array();
 }
 
 class ODTParagraph {
-	public $style;
+	public $styleName;
+	public $classNames;
+	
 	public $spans = array();
-	public $type;
+}
+
+class ODTHeader extends ODTParagraph {
 }
 
 class ODTSpan {
-	public $style;
+	public $styleName;
+	public $classNames;
+	
 	public $text;
 }
 
-class ODTStyle {
-	public $attributes = array();
-	public $tabStops = array();
+class ODTHyperlink extends ODTSpan {
+	public $href;
+}
 
-	public function __toString() {
-		return print_r($this->attributes, true);
-	}
+class ODTStyle {
+	public $name;
+	public $family;
+	public $parentStyleName;
+	
+	public $textProperties;
+	public $paragraphProperties;
+}
+
+class ODTParagraphProperties {
+	public $breakBefore;
+	public $marginBottom;
+	public $marginLeft;
+	public $marginRight;
+	public $marginTop;	
+	public $lineDistance;
+	public $lineHeight;
+	public $tabStops;
+	public $tabStopDistance;
+	public $textIndent;
+	public $textAlign;
+	public $textAlignLast;
+	public $writingMode;
+}
+
+class ODTTextProperties {
+	public $backgroundColor;
+	public $color;
+	public $country;
+	public $fontName;
+	public $fontFamily;
+	public $fontSize;
+	public $fontStyle;
+	public $fontVariant;
+	public $fontWeight;
+	public $language;
+	public $letterSpacing;
+	public $textLineThroughStyle;
+	public $textPosition;
+	public $textTransformations;
+	public $textUnderlineType;
+	public $textUnderlineStyle;	
 }
 
 class ODTTabStop {
-	public $attributes = array();
+	public $type;
+	public $char;
+	public $position;	
 }
 
 class ODTFont {
-	public $attributes = array();
+	public $name;
+	public $fontFamily;
+	public $fontFamilyGeneric;
+	public $fontStyle;
+	public $fontPitch;
+	public $fontVariant;
+	public $fontWeight;
+	public $panose1;
 }
 
 class ODTZipHeader {

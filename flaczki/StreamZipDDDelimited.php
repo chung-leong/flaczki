@@ -8,9 +8,9 @@ class StreamZipDDDelimited {
 	private $eof;
 	
 	public static function add($handle) {
-		$record = new ZipDDDelimitedStreamRecord;
+		$record = new StreamZipDDDelimitedRecord;
 		$record->handle = $handle;
-		$path = StreamWrapperStaticStorage::add('zipaddd', $record);
+		$path = StreamWrapperStaticStorage::add('zipddd', $record);
 		return $path; 
 	}
 	
