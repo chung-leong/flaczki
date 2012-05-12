@@ -40,7 +40,6 @@ class CFFParser {
 }
 
 class CFFFont {
-	public $name;
 	public $bold;
 	public $italic;
 	public $oblique;
