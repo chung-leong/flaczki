@@ -29,19 +29,19 @@ class TLFParser {
 		switch($name) {
 			case 'span':
 				$this->span = new TLFSpan;
-				$this->span->attributes = $attributes;
+				$this->copyProperties($this->span->style, $attributes);
 				break;
 			case 'p':
 				$this->paragraph = new TLFParagraph;
-				$this->paragraph->attributes = $attributes;
+				$this->copyProperties($this->paragraph->style, $attributes);
 				break;
 			case 'TextFlow':
 				$this->textFlow = new TLFTextFlow;
-				$this->textFlow->attributes = $attributes;
+				$this->copyProperties($this->textFlow->style, $attributes);
 				break;
 			case 'tlfTextObject':
 				$this->textObject = new TLFTextObject;
-				$this->textObject->attributes = $attributes;
+				$this->copyProperties($this->textObject->style, $attributes);
 				break;
 		}
 	}
@@ -76,26 +76,131 @@ class TLFParser {
 			$this->span->text .= $text;
 		}
 	}
+	
+	protected function copyProperties($object, $attributes) {
+		foreach($attributes as $name => $value) {
+			$object->$name = $value;
+		}
+	}
 }
 
 class TLFTextObject {
-	public $attributes = array();
+	public $style;
 	public $textFlow;
+	
+	public function __construct() {
+		$this->style = new TLFTextObjectStyle;
+	}
 }
 
-class TLFTextFlow {
-	public $attributes = array();
+class TLFTextObjectStyle {
+	public $type;
+	public $editPolicy;
+	public $columnCount;
+	public $columnGap;
+	public $verticalAlign;
+	public $firstBaselineOffset;
+	public $paddingLeft;
+	public $paddingTop;
+	public $paddingRight;
+	public $paddingBottom;
+	public $background;
+	public $backgroundColor;
+	public $backgroundAlpha;
+	public $border;
+	public $borderColor;
+	public $borderAlpha;
+	public $borderWidth;
+	public $paddingLock;
+	public $multiline;
+	public $antiAliasType;
+	public $embedFonts;
+}
+
+class TLFFlowElement {
+	public $style;
+	
+	public function __construct() {
+		$this->style = new TLFFlowElementStyle;
+	}
+}
+
+class TLFTextFlow extends TLFFlowElement {
 	public $paragraphs = array();
+	
+	public function __construct() {
+		$this->style->whiteSpaceCollapse = "preserve";
+		$this->style->version = "2.0.0"; 
+		$this->style->xmlns = "http://ns.adobe.com/textLayout/2008";
+	}
 }
 
-class TLFParagraph {
-	public $attributes = array();
+class TLFParagraph extends TLFFlowElement {
 	public $spans = array();
 }
 
-class TLFSpan {
-	public $attributes = array();
+class TLFSpan extends TLFFlowElement {
 	public $text;
+}
+
+class TLFFlowElementStyle {
+	public $alignmentBaseline;
+	public $backgroundAlpha;
+	public $backgroundColor;
+	public $baselineShift;
+	public $blockProgression;
+	public $breakOpportunity;
+	public $clearFloats;
+	public $color;
+	public $columnCount;
+	public $columnGap;
+	public $columnWidth;
+	public $digitCase;
+	public $digitWidth;
+	public $direction;
+	public $dominantBaseline;
+	public $firstBaselineOffset;
+	public $fontFamily;
+	public $fontLookup;
+	public $fontSize;
+	public $fontStyle;
+	public $fontWeight;
+	public $justificationRule;
+	public $justificationStyle;
+	public $kerning;
+	public $lineBreak;
+	public $lineHeight;
+	public $lineThrough;
+	public $locale;
+	public $paddingBottom;
+	public $paddingLeft;
+	public $paddingRight;
+	public $paddingTop;
+	public $paragraphEndIndent;
+	public $paragraphSpaceAfter;
+	public $paragraphSpaceBefore;
+	public $paragraphStartIndent;
+	public $tabStops;
+	public $textAlign;
+	public $textAlignLast;
+	public $textAlpha;
+	public $textDecoration;
+	public $textIndent;
+	public $textJustify;
+	public $textLength;
+	public $textRotation;
+	public $tracking;
+	public $trackingLeft;
+	public $trackingRight;
+	public $typographicCase;
+	public $verticalAlign;
+	public $wordSpacing;	
+}
+
+class TLFTabStopFormat {
+	public $alignment;
+ 	public $decimalAlignmentToken;
+ 	public $position;
 }
 
 ?>

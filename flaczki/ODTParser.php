@@ -79,14 +79,6 @@ class ODTParser {
 				$this->processCharacterData($parser, "\t");
 				break;
 			case 'span':
-				// see if this style name isn't remapped to some other name
-				if(isset($attributes['style-name'])) {
-					$styleName = $attributes['style-name'];
-					if(isset($this->styleNameRemap[$styleName])) {
-						$attributes['style-name'] = $this->styleNameRemap[$styleName];
-					}
-				}
-
 				$this->span = new ODTSpan;
 				$this->copyProperties($this->span, $attributes);
 				
@@ -169,7 +161,7 @@ class ODTParser {
 				$this->style = null;
 				break;
 			case 'default-style':
-				$this->document->defaultStyles[$this->style->name] = $this->style;
+				$this->document->defaultStyles[$this->style->family] = $this->style;
 				$this->style = null;
 				break;
 		}
@@ -188,6 +180,13 @@ class ODTParser {
 	protected function copyProperties(&$object, $attributes) {
 		foreach($attributes as $name => $value) {
 			$name = $this->stripPrefix($name);
+			
+			if($name == 'style-name') {
+				// see if this style name isn't remapped to some other name
+				if(isset($this->styleNameRemap[$value])) {
+					$value = $this->styleNameRemap[$value];
+				}
+			}
 			
 			if(strpos($name, '-')) {
 				// convert the name to camel case
@@ -253,7 +252,7 @@ class ODTParser {
 class ODTDocument {
 	public $automaticStyles = array();
 	public $commonStyles = array();
-	public $defaultStyle = array();
+	public $defaultStyles = array();
 	public $paragraphs = array();
 	public $fonts = array();
 }

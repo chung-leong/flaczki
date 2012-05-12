@@ -16,14 +16,19 @@ class TLFAssembler {
 		}
 		$this->written = 0;
 		
-		$this->writeStartTag('tlfTextObject', $textObject->attributes);
+		$this->writeStartTag('tlfTextObject', $textObject->style);
 		if($textObject->textFlow) {
 			$textFlow = $textObject->textFlow;
-			$this->writeStartTag('TextFlow', $textFlow->attributes);
+			$this->writeStartTag('TextFlow', $textFlow->style);
 			foreach($textFlow->paragraphs as $paragraph) {
-				$this->writeStartTag('p', $paragraph->attributes);
+				$this->writeStartTag('p', $paragraph->style);
+				if($paragraph->style->tabStops) {
+					foreach($tabStops as $tabStop) {
+						$this->writeStartTag('tabStop', $tabStop);
+					}
+				}
 				foreach($paragraph->spans as $span) {
-					$this->writeStartTag('span', $span->attributes);
+					$this->writeStartTag('span', $span->style);
 					$this->writeText($span->text);
 					$this->writeEndTag('span');
 				}
@@ -39,11 +44,14 @@ class TLFAssembler {
 		return $written;
 	}
 	
-	protected function writeStartTag($name, $attributes, $end = false) {
+	protected function writeStartTag($name, $style, $end = false) {
 		static $entities = array('"' => '&quot;', "'" => '&apos;', '&' => '&amp;', '<' => '&lt;', '>' => '&gt;');
+		$properties = get_object_vars($style);
 		$s = "<$name";
-		foreach($attributes as $name => $value) {
-			$s .= ' ' . $name . '="' . strtr($value, $entities) . '"';
+		foreach($properties as $name => $value) {
+			if(is_scalar($value)) {
+				$s .= ' ' . $name . '="' . strtr($value, $entities) . '"';
+			}
 		}
 		$s .= ($end) ? "/>" : ">";
 		$this->writeBytes($s);
