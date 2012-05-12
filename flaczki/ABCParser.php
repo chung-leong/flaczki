@@ -5,7 +5,14 @@ class ABCParser {
 	protected $input;
 	
 	public function parse($input) {
-		$this->input = $input;
+		if(gettype($input) == 'string') {
+			$path = StreamMemory::add($input);
+			$this->input = fopen($path, "rb");
+		} else if(gettype($input) == 'resource') {
+			$this->input = $input;
+		} else {
+			throw new Exception("Invalid input");
+		}
 		$abcFile = new ABCFile;
 		
 		// AVM version info--should be 16.46

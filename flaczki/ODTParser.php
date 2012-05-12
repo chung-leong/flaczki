@@ -13,6 +13,14 @@ class ODTParser {
 	protected $fileName;
 
 	public function parse($input) {
+		if(gettype($input) == 'string') {
+			$path = StreamMemory::add($input);
+			$input = fopen($path, "rb");
+		} else if(gettype($input) == 'resource') {
+		} else {
+			throw new Exception("Invalid input");
+		}
+		
 		$document = $this->document = new ODTDocument;
 		// since we expect the file to be from a remote source, we're going to parse it as data comes in to improve performance
 		// instead of going to the ZIP file's central directory, we'll scan the individual file records
@@ -45,9 +53,8 @@ class ODTParser {
 					xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
 					xml_set_character_data_handler($parser, 'processCharacterData');
 					while($data = fread($stream, 1024)) {
-						xml_parse($parser, $data, !$data);
+						xml_parse($parser, $data, strlen($data) != 1024);
 					}
-					//xml_parser_free($parser);
 				} else {
 					// just pull the data through so we can reach the next file record
 					while($data = fread($stream, 1024)) {

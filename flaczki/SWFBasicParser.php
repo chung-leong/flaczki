@@ -4,8 +4,15 @@ class SWFBasicParser {
 
 	protected $input;
 	
-	public function parse($input) {
-		$this->input = $input;
+	public function parse(&$input) {
+		if(gettype($input) == 'string') {
+			$path = StreamMemory::add($input);
+			$this->input = fopen($path, "rb");
+		} else if(gettype($input) == 'resource') {
+			$this->input = $input;
+		} else {
+			throw new Exception("Invalid output");
+		}
 		$swfFile = new SWFFile;
 	
 		// signature

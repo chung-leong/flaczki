@@ -5,36 +5,43 @@ class ABCAssembler {
 	protected $output;
 	protected $written;
 
-	public function assemble($output, $abc) {
-		$this->output = $output;
+	public function assemble(&$output, $abcFile) {
+		if(gettype($output) == 'string') {
+			$path = StreamMemory::create($output);
+			$this->output = fopen($path, "wb");
+		} else if(gettype($output) == 'resource') {
+			$this->output = $output;
+		} else {
+			throw new Exception("Invalid output");
+		}
 		$this->written = 0;
-		$written = 0;
-		$this->writeU16($abc->majorVersion);
-		$this->writeU16($abc->minorVersion);
 		
-		$this->writeU32(count($abc->intTable) > 1 ? count($abc->intTable) : 0);
-		foreach($abc->intTable as $index => $intValue)  {
+		$this->writeU16($abcFile->majorVersion);
+		$this->writeU16($abcFile->minorVersion);
+		
+		$this->writeU32(count($abcFile->intTable) > 1 ? count($abcFile->intTable) : 0);
+		foreach($abcFile->intTable as $index => $intValue)  {
 			if($index != 0) {
 				$this->writeS32($intValue);
 			}
 		}
 		
-		$this->writeU32(count($abc->uintTable) > 1 ? count($abc->uintTable) : 0);
-		foreach($abc->uintTable as $index => $uintValue) {
+		$this->writeU32(count($abcFile->uintTable) > 1 ? count($abcFile->uintTable) : 0);
+		foreach($abcFile->uintTable as $index => $uintValue) {
 			if($index != 0) {
 				$this->writeU32($uintValue);
 			}
 		}
 		
-		$this->writeU32(count($abc->doubleTable) > 1 ? count($abc->doubleTable) : 0);
-		foreach($abc->doubleTable as $index => $doubleValue) {
+		$this->writeU32(count($abcFile->doubleTable) > 1 ? count($abcFile->doubleTable) : 0);
+		foreach($abcFile->doubleTable as $index => $doubleValue) {
 			if($index != 0) {
 				$this->writeD64($doubleValue);
 			}
 		}
 
-		$this->writeU32(count($abc->stringTable));
-		foreach($abc->stringTable as $index => $stringValue) {
+		$this->writeU32(count($abcFile->stringTable));
+		foreach($abcFile->stringTable as $index => $stringValue) {
 			if($index != 0) {
 				$length = strlen($stringValue);
 				$this->writeU32($length);
@@ -44,53 +51,53 @@ class ABCAssembler {
 			}
 		}
 		
-		$this->writeU32(count($abc->namespaceTable));
-		foreach($abc->namespaceTable as $index => $namespace) {
+		$this->writeU32(count($abcFile->namespaceTable));
+		foreach($abcFile->namespaceTable as $index => $namespace) {
 			if($index != 0) {
 				$this->writeNamespace($namespace);
 			}
 		}
 		
-		$this->writeU32(count($abc->namespaceSetTable));
-		foreach($abc->namespaceSetTable as $index => $namespaceSet) {
+		$this->writeU32(count($abcFile->namespaceSetTable));
+		foreach($abcFile->namespaceSetTable as $index => $namespaceSet) {
 			if($index != 0) {
 				$this->writeNamespaceSet($namespaceSet);
 			}
 		}
 		
 		
-		$this->writeU32(count($abc->multinameTable));
-		foreach($abc->multinameTable as $index => $multiname) {
+		$this->writeU32(count($abcFile->multinameTable));
+		foreach($abcFile->multinameTable as $index => $multiname) {
 			if($index != 0) {
 				$this->writeMultiname($multiname);
 			}
 		}
 
-		$this->writeU32(count($abc->methodTable));
-		foreach($abc->methodTable as $method) {
+		$this->writeU32(count($abcFile->methodTable));
+		foreach($abcFile->methodTable as $method) {
 			$this->writeMethod($method);
 		}
 		
-		$this->writeU32(count($abc->metadataTable));
-		foreach($abc->metadataTable as $metadata) {
+		$this->writeU32(count($abcFile->metadataTable));
+		foreach($abcFile->metadataTable as $metadata) {
 			$this->writeMetadata($metadata);
 		}
 
-		$this->writeU32(count($abc->instanceTable));
-		foreach($abc->instanceTable as $instance) {
+		$this->writeU32(count($abcFile->instanceTable));
+		foreach($abcFile->instanceTable as $instance) {
 			$this->writeInstance($instance);
 		}
-		foreach($abc->classTable as $class) {
+		foreach($abcFile->classTable as $class) {
 			$this->writeClass($class);
 		}
 		
-		$this->writeU32(count($abc->scriptTable));
-		foreach($abc->scriptTable as $script) {
+		$this->writeU32(count($abcFile->scriptTable));
+		foreach($abcFile->scriptTable as $script) {
 			$this->writeScript($script);
 		}
 		
-		$this->writeU32(count($abc->methodBodyTable));
-		foreach($abc->methodBodyTable as $methodBody) {
+		$this->writeU32(count($abcFile->methodBodyTable));
+		foreach($abcFile->methodBodyTable as $methodBody) {
 			$this->writeMethodBody($methodBody);
 		}
 		

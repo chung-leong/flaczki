@@ -1,0 +1,70 @@
+<?php
+
+class TLFAssembler {
+
+	protected $output;
+	protected $written;
+
+	public function assemble(&$output, $textObject) {
+		if(gettype($output) == 'string') {
+			$path = StreamMemory::create($output);
+			$this->output = fopen($path, "wb");
+		} else if(gettype($output) == 'resource') {
+			$this->output = $output;
+		} else {
+			throw new Exception("Invalid output");
+		}
+		$this->written = 0;
+		
+		$this->writeStartTag('tlfTextObject', $textObject->attributes);
+		if($textObject->textFlow) {
+			$textFlow = $textObject->textFlow;
+			$this->writeStartTag('TextFlow', $textFlow->attributes);
+			foreach($textFlow->paragraphs as $paragraph) {
+				$this->writeStartTag('p', $paragraph->attributes);
+				foreach($paragraph->spans as $span) {
+					$this->writeStartTag('span', $span->attributes);
+					$this->writeText($span->text);
+					$this->writeEndTag('span');
+				}
+				$this->writeEndTag('p');
+			}				
+			$this->writeEndTag('TextFlow');
+		}
+		$this->writeEndTag('tlfTextObject');
+		
+		$written = $this->written;
+		$this->written = 0;
+		$this->output = null;
+		return $written;
+	}
+	
+	protected function writeStartTag($name, $attributes, $end = false) {
+		static $entities = array('"' => '&quot;', "'" => '&apos;', '&' => '&amp;', '<' => '&lt;', '>' => '&gt;');
+		$s = "<$name";
+		foreach($attributes as $name => $value) {
+			$s .= ' ' . $name . '="' . strtr($value, $entities) . '"';
+		}
+		$s .= ($end) ? "/>" : ">";
+		$this->writeBytes($s);
+	}
+	
+	protected function writeEndTag($name) {
+		$s = "</$name>";
+		$this->writeBytes($s);
+	}
+	
+	protected function writeText($text) {
+		static $entities = array('&' => '&amp;', '<' => '&lt;', '>' => '&gt;');
+		if($text) {
+			$s = strtr($text, $entities);
+			$this->writeBytes($s);
+		}
+	}
+	
+	protected function writeBytes($bytes) {
+		$this->written .= fwrite($this->output, $bytes);
+	}
+}
+
+?>

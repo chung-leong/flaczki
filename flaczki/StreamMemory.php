@@ -2,19 +2,27 @@
 
 class StreamMemory {
 	
-	private $reference;
+	private $bytes;
 	private $length;
 	private $position;
 
-	public static function add(&$reference) {
+	// for writeable streams
+	public static function create(&$bytes) {
 		$record = new StreamMemoryRecord;
-		$record->reference =& $reference;
+		$record->bytes =& $bytes;
+		$path = StreamWrapperStaticStorage::add('memory', $record);
+		return $path; 
+	}
+	
+	// for readable streams (pass by value to avoid trigger copy-on-write)
+	public static function add($bytes) {
+		$record = new StreamMemoryRecord;
+		$record->bytes = $bytes;
 		$path = StreamWrapperStaticStorage::add('memory', $record);
 		return $path; 
 	}
 	
 	public function stream_close() {
-		unset($this->reference);
 		return true;
 	}
 	
@@ -26,15 +34,17 @@ class StreamMemory {
 		$record = StreamWrapperStaticStorage::get($path);
 		if($record) {
 			StreamWrapperStaticStorage::remove($path);
-			$this->reference =& $record->reference;
 			if(strchr($mode, 'a')) {
-				$this->position = $this->length = strlen($this->reference);
+				$this->bytes =& $record->bytes;
+				$this->position = $this->length = strlen($this->bytes);
 			} else if(strchr($mode, 'w')) {
-				$this->reference = '';
+				$this->bytes =& $record->bytes;
+				$this->bytes = '';
 				$this->position = $this->length = 0;
 			} else if(strchr($mode, 'r')) {
+				$this->bytes = $record->bytes;
 				$this->position = 0;
-				$this->length = strlen($this->reference);
+				$this->length = strlen($this->bytes);
 			}
 			return true;
 		} else {
@@ -43,7 +53,7 @@ class StreamMemory {
 	}
 	
 	public function stream_read($count) {
-		$data = substr($this->handle, $this->reference, $count);
+		$data = substr($this->handle, $this->bytes, $count);
 		$read = strlen($data);
 		$this->position += $read;
 		return $data;
@@ -51,7 +61,7 @@ class StreamMemory {
 	
 	public function stream_write($data) {
 		$written = strlen($data);
-		$this->reference .= $data;
+		$this->bytes .= $data;
 		$this->length += $written;
 		$this->position += $written;
 		return $written;
@@ -59,7 +69,7 @@ class StreamMemory {
 }
 
 class StreamMemoryRecord {
-	public $reference;
+	public $bytes;
 }
 
 stream_wrapper_register('memory', 'StreamMemory');

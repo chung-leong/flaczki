@@ -5,8 +5,15 @@ class SWFBasicAssembler {
 	protected $output;
 	protected $written;
 	
-	public function assemble($output, $swfFile) {
-		$this->output = $output;
+	public function assemble(&$output, $swfFile) {
+		if(gettype($output) == 'string') {
+			$path = StreamMemory::create($output);
+			$this->output = fopen($path, "wb");
+		} else if(gettype($output) == 'resource') {
+			$this->output = $output;
+		} else {
+			throw new Exception("Invalid output");
+		}
 		$this->written = 0;
 
 		// prepare the tags for writing (making sure the tag lengths are correct, etc.)
@@ -114,12 +121,11 @@ class SWFBasicAssembler {
 	protected function finalizeDefineBinaryDataTag($tag) {
 		if(!$tag->data && $tag->swfFile) {
 			// the tag is an embedded SWF file
-			// create a memory stream and assemble the file using a clone of $this
+			// assemble the file using a clone of $this
 			echo "<div style='margin-Left:2em; border: 1px dotted lightgrey'>";
-			$path = StreamMemory::add($tag->data);
-			$stream = fopen($path, "wb");
+			$tag->data = '';
 			$assembler = clone $this;
-			$assembler->assemble($stream, $tag->swfFile);
+			$assembler->assemble($tag->data, $tag->swfFile);
 			$tag->length = 6 + strlen($tag->data);
 			echo "</div>";
 		}
