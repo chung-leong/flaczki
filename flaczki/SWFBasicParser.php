@@ -101,7 +101,11 @@ class SWFBasicParser {
 			} else {
 				$headerLength = 2;
 			}
-			$tagName = $TAG_NAMES[$tagCode];
+			if(isset($TAG_NAMES[$tagCode])) {
+				$tagName = $TAG_NAMES[$tagCode];
+			} else {
+				$tagName = "UnknownTag$tagCode";
+			}
 			
 			$methodName = "read{$tagName}Tag";
 			if(method_exists($this, $methodName)) {

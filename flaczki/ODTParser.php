@@ -289,6 +289,7 @@ class ODTStyle {
 
 class ODTParagraphProperties {
 	public $breakBefore;
+	public $breakAfter;
 	public $marginBottom;
 	public $marginLeft;
 	public $marginRight;
@@ -313,10 +314,13 @@ class ODTTextProperties {
 	public $fontStyle;
 	public $fontVariant;
 	public $fontWeight;
+	public $justifySingleWord;
 	public $language;
+	public $letterKerning;
 	public $letterSpacing;
 	public $textLineThroughStyle;
 	public $textPosition;
+	public $textRotationAngle;
 	public $textTransformations;
 	public $textUnderlineType;
 	public $textUnderlineStyle;	
