@@ -6,4 +6,8 @@ function __flaczki_autoload($class_name) {
 
 spl_autoload_register('__flaczki_autoload');
 
+function trace($s) {
+	//echo $s;
+}
+
 ?>

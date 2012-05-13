@@ -127,12 +127,6 @@ class TLFFlowElement {
 
 class TLFTextFlow extends TLFFlowElement {
 	public $paragraphs = array();
-	
-	public function __construct() {
-		$this->style->whiteSpaceCollapse = "preserve";
-		$this->style->version = "2.0.0"; 
-		$this->style->xmlns = "http://ns.adobe.com/textLayout/2008";
-	}
 }
 
 class TLFParagraph extends TLFFlowElement {

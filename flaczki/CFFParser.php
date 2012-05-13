@@ -19,7 +19,7 @@ class CFFParser {
 			$font = new CFFFont;
 			for($i = 0, $n = $header['numTables'], $offset = 12; $i < $n; $i++) {
 				$table = unpack('Ntag/NcheckSum/Noffset/Nlength', substr($data, $offset, 16));
-				if($table['tag'] == 0x4F532F32) {	// OS/2
+				if($table['tag'] == 0x4F532F32) {	// 'OS/2'
 					$tableData = substr($data, $table['offset'], $table['length']);
 					$os2 = unpack('nversion/navgCharWidth/nweightClass/nwidthClass/nfsType/nsubscriptXSize/nsubscriptYSize/nsubscriptXOffset/nsubscriptYOffset/nsuperscriptXSize/nsuperscriptYSize/nsuperscriptXOffset/nsuperscriptYOffset/nstrikeoutSize/nstrikeoutPosition/nfamilyClass/C10panose/N4unicodeRange/a4vendId/nselection/nfirstCharIndex/nlastCharIndex/ntypoAscender/ntypoDescender/ntypeLineGap/nwinAscent/nwinDescent/NcodePageRange1/NcodePageRange2', $tableData);
 					$font->weight = $os2['weightClass'];
@@ -27,8 +27,8 @@ class CFFParser {
 					$font->italic = ($os2['selection'] & 0x0001) != 0;
 					$font->oblique = ($os2['selection'] & 0x0200) != 0;
 					$font->bold = ($os2['selection'] & 0x0020) != 0;
-					for($i = 1; $i <= 10; $i++) {
-						$font->panose[$i] = $os2["panose$i"];
+					for($j = 1; $j <= 10; $j++) {
+						$font->panose[$j] = $os2["panose$j"];
 					}
 					break;
 				}

@@ -86,6 +86,8 @@ class ODTParser {
 				if($this->previousSpan && ($this->previousSpan->styleName == $this->span->styleName && $this->previousSpan->classNames == $this->span->classNames)) {
 					// continue to add text to previous span instead
 					$this->span = $this->previousSpan;
+				} else {
+					$this->paragraph->spans[] = $this->span;
 				}
 				break;
 			case 'p':
@@ -126,13 +128,6 @@ class ODTParser {
 		$name = $this->stripPrefix($name);
 		switch($name) {
 			case 'span':
-				// don't add the span if it's been added already
-				if($this->previousSpan !== $this->span) {
-					if($this->paragraph) {
-						$this->paragraph->spans[] = $this->span;
-					}
-					$this->previousSpan = $this->span;
-				}
 				$this->span = null;
 				break;
 			case 'p':

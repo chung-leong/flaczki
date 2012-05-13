@@ -49,7 +49,7 @@ class SWFBasicParser {
 			$swfFile->tags[] = $tag;
 		}
 		
-		echo "<h3>Length: $fileLength</h3>";
+		trace("<h3>Length: $fileLength</h3>");
 		$this->input = null;
 		return $swfFile;
 	}
@@ -113,7 +113,7 @@ class SWFBasicParser {
 			} else {
 				$tag = $this->readGenericTag($tagLength);
 			}
-			echo "$tagName ($tagLength)<br>";
+			trace("$tagName ($tagLength)<br>");
 			$tag->code = $tagCode;
 			$tag->name = $tagName;
 			$tag->length = $tagLength;
@@ -135,8 +135,8 @@ class SWFBasicParser {
 		$tag->spriteId = $this->readUI16();
 		$tag->frameCount = $this->readUI16();
 		$bytesRemaining = $tagLength - 4;
-		echo "<div style='margin-Left:2em; border: 1px dotted lightgrey'>";
-		echo "<h3>Sprite #$tag->spriteId</h3>";
+		trace("<div style='margin-Left:2em; border: 1px dotted lightgrey'>");
+		trace("<h3>Sprite #$tag->spriteId</h3>");
 		while($bytesRemaining > 0 && ($child = $this->readTag())) {
 			$tag->tags[] = $child;
 			$bytesRemaining -= $child->headerLength + $child->length;
@@ -144,7 +144,7 @@ class SWFBasicParser {
 		if($bytesRemaining) {
 			$this->readBytes($bytesRemaining);
 		}
-		echo "</div>";
+		trace("</div>");
 		return $tag;
 	}
 		
@@ -162,10 +162,10 @@ class SWFBasicParser {
 				// create a partial stream and parse the file with a clone of $this
 				$path = StreamPartial::add($this->input, $bytesRemaining, $signature);
 				$stream = fopen($path, "rb");
-				echo "<div style='margin-Left:2em; border: 1px dotted lightgrey'>";
+				trace("<div style='margin-Left:2em; border: 1px dotted lightgrey'>");
 				$parser = clone $this;
 				$tag->swfFile = $parser->parse($stream);
-				echo "</div>";
+				trace("</div>");
 			} else {
 				$tag->data = ($bytesRemaining) ? $signature . $this->readBytes($bytesRemaining) : $signature;
 			}
