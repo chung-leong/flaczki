@@ -5,9 +5,9 @@ class StreamZipArchive {
 	const PROTOCOL = 'ziparchive';
 	
 	private $archive;	
-	private $fileRecord;
-	private $buffer = '';
 	private $stream;
+	private $eof;
+	private $dirPath = '';
 
 	public static function open($handle) {
 		$archive = new StreamZipArchiveRecord;
@@ -20,7 +20,11 @@ class StreamZipArchive {
 		$archive = new StreamZipArchiveRecord;
 		$archive->handle = $handle;
 		$archive->writable = true;
-		$archive->path = StreamWrapperStaticStorage::add(self::PROTOCOL, $archive);
+		$archive->path = StreamWrapperStaticStorage::add(self::PROTOCOL, $archive);		
+		$datetime = date('Y n j G i s');
+		sscanf($datetime, '%d %d %d %d %d %d', $year, $month, $day, $hour, $min, $sec);
+		$archive->time = ($hour << 11) | ($min << 5) | ($sec >> 1);
+		$archive->date = (($year - 1980) << 9) | ($month << 5) | $day;
 		return $archive->path; 
 	}
 	
@@ -46,27 +50,91 @@ class StreamZipArchive {
 		} 
 	}
 	
+	public function dir_closedir() {
+	}
+	
+	public function dir_opendir($path, $options) {
+		$rootPath = $this->getArchivePath($path);
+		$zipPath = substr($path, strlen($rootPath) + 1);
+		$zipPath = str_replace('\\', '/', $zipPath);
+		$archive = StreamWrapperStaticStorage::get($rootPath);
+		if($archive && !$archive->writable) {
+			$this->archive = $archive;
+			if($zipPath) {
+				if(substr($zipPath, -1) != '/') {
+					$zipPath .= '/';
+				}
+				$this->dirPath = $zipPath;
+			}
+			return true;
+		}
+		return false;
+	}
+	
+	public function dir_readdir() {
+		$archive = $this->archive;
+		if(!$archive->currentFileRecord || $archive->currentFileRecord->name == $archive->lastReturnedPath) {
+			// read in a new record
+			$this->readNextLocalHeader();
+		}
+		while($fileRecord = $archive->currentFileRecord) {			
+			$pathLen = strlen($this->dirPath);
+			if(!$pathLen || (strlen($fileRecord->name) > $pathLen && substr_compare($fileRecord->name, $this->dirPath, 0, $pathLen) == 0)) {
+				$relativePath = substr($fileRecord->name, strlen($this->dirPath));
+				$slashPos = strpos($relativePath, '/');
+				if($slashPos === false) {
+					// a file in this directory
+					$fullPath = $fileRecord->name;
+				} else {
+					// a file in a subdirectory
+					$relativePath = substr($relativePath, 0, $slashPos);
+					$fullPath = $this->dirPath . $relativePath;
+				}
+				if($archive->lastReturnedPath == $fullPath) {
+					// it's the same as the last one we returned--read another header
+					$this->readNextLocalHeader();
+				} else {					
+					// return it
+					$archive->lastReturnedPath = $fullPath;
+					return $relativePath;
+				}
+			} else {
+				break;
+			}
+		}
+		return false;
+	}
+	
+	public function dir_rewinddir() {
+		return false;
+	}
+	
 	public function stream_close() {
 		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
 		if($archive->activeStream === $this) {
-			if(!$this->stream) {
-				// stream is closing before the write buffer filled up
-				// we can figure out the crc32 and compressed size ahead of time then
-				$this->fileRecord->crc32 = crc32($this->buffer);
-				$this->fileRecord->uncompressedSize = strlen($this->buffer);
-				if($archive->compressionLevel == 0) {
-					$data = $this->buffer;
-					$this->fileRecord->compressedSize = $this->fileRecord->uncompressedSize;
+			if($archive->writable) {
+				if(!$this->stream) {
+					// stream is closing before the write buffer filled up
+					// we can figure out the crc32 and compressed size ahead of time then
+					$fileRecord->crc32 = crc32($archive->buffer);
+					$fileRecord->uncompressedSize = strlen($archive->buffer);
+					if($archive->compressionLevel == 0) {
+						$data = $archive->buffer;
+						$fileRecord->compressedSize = $fileRecord->uncompressedSize;
+					} else {
+						$data = gzdeflate($archive->buffer, $archive->compressionLevel);
+						$fileRecord->compressedSize = strlen($data);
+					}
+					$this->writeLocalHeader();
+					$archive->position += fwrite($archive->handle, $data);
 				} else {
-					$data = gzdeflate($this->buffer, $archive->compressionLevel);
-					$this->fileRecord->compressedSize = strlen($data);
+					// need to add a data descriptor following the data
+					fclose($this->stream);
+					self::writeDataDescriptor($archive, $fileRecord);
 				}
-				self::writeLocalHeader($archive, $this->fileRecord);
-				fwrite($archive->handle, $data);
 			} else {
-				// need to add a data descriptor following the data
 				fclose($this->stream);
-				self::writeDataDescriptor($archive, $this->fileRecord);
 			}
 			$archive->activeStream = null;
 		}
@@ -74,51 +142,7 @@ class StreamZipArchive {
 	}
 	
 	public function stream_eof() {
-		return false;
-	}
-	
-	public function stream_write($data) {
-		$archive = $this->archive;
-		if($archive->writable) {
-			$count = strlen($data);
-						
-			// we're still filling up the buffer
-			if(!$this->stream) {
-				$bufferedCount = strlen($this->buffer);
-				if($bufferedCount + $count < 1024) {
-					$this->buffer .= $data;
-					return $count;
-				} else {
-					// write the local header without empty size and crc
-					// need a data descriptor to follow the data
-					$this->fileRecord->flags |= 0x08;					
-					self::writeLocalHeader($archive, $this->fileRecord);
-
-					// create a proxy stream and attach the deflate filter to it 
-					// the wrapper class will set $this->fileRecord->compressedSize to the number of bytes written into it
-					// need to do this because ftell() is somewhat unreliable with filters are involved
-					$path = StreamProxy::add($archive->handle, $this->fileRecord->compressedSize);
-					$this->stream = fopen($path, "wb");
-					if($this->fileRecord->compressionMethod == 8) {					
-						$params = array('level' => $this->archive->compressionLevel);
-						stream_filter_append($this->stream, 'zlib.deflate', STREAM_FILTER_WRITE, $params);
-					}
-					
-					// set the initial CRC32 value
-					$this->fileRecord->crc32 = crc32($this->buffer);
-					$this->fileRecord->uncompressedSize += $bufferedCount;
-					
-					// write the buffered data
-					$written = fwrite($this->stream, $this->buffer);
-					$this->buffer = '';
-				}
-			} 
-			// update the CRC32
-			$this->fileRecord->crc32 = $this->crc32_combine($this->fileRecord->crc32, crc32($data), $count);
-			$this->fileRecord->uncompressedSize += $count;
-			return fwrite($this->stream, $data);
-		}
-		return false;
+		return $this->eof;
 	}
 	
 	public function stream_open($path, $mode, $options, &$opened_path) {
@@ -131,10 +155,15 @@ class StreamZipArchive {
 			if($archive->activeStream) {
 				$archive->activeStream->stream_close();
 			}
-			if((strchr($mode, 'r') && !$archive->writable)) {						
-				if(isset($archive->fileRecords[$zipPath])) {
+			if((strchr($mode, 'r') && !$archive->writable)) {
+				// can only open the current file record
+				if($archive->currentFileRecord->name == $zipPath) {
 					$this->archive = $archive;
-					$this->fileRecord = $archive->fileRecords[$zipPath];
+					$path = StreamCallback::add(array($this, 'stream_read_raw'));
+					$this->stream = fopen($path, "rb");
+					if($archive->currentFileRecord->compressionMethod == 8) {
+						stream_filter_append($this->stream, 'zlib.inflate', STREAM_FILTER_READ);
+					}
 					$archive->activeStream = $this;
 					return true;
 				}
@@ -142,10 +171,10 @@ class StreamZipArchive {
 				if(!isset($archive->fileRecords[$zipPath])) {
 					$this->archive = $archive;
 					$fileRecord = new StreamZipArchiveFileRecord;
-					$fileRecord->offset = ftell($archive->handle);
+					$fileRecord->offset = $archive->position;
 					$fileRecord->name = $zipPath;
 					$fileRecord->compressionMethod = ($archive->compressionLevel == 0) ? 0 : 8;
-					$this->fileRecord = $archive->fileRecords[$zipPath] = $fileRecord;
+					$archive->currentFileRecord = $archive->fileRecords[$zipPath] = $fileRecord;
 					$archive->activeStream = $this;
 					return true;
 				}
@@ -154,38 +183,326 @@ class StreamZipArchive {
 		return false;
 	}
 		
+	public function stream_read($count) {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
+		if(!$archive->writable && $archive->activeStream == $this) {
+			$data = fread($this->stream, $count);
+			$count = strlen($data);
+			if($count > 0) {
+				if(($fileRecord->flags & 0x08)) {
+					// update the size and crc32
+					$fileRecord->uncompressedSize += $count;
+					$fileRecord->crc32 = $this->combineCRC32($fileRecord->crc32, crc32($data), $count);
+				}
+			} else {
+				$this->eof = true;
+			}
+			return $data;
+		}
+		return false;
+	}
+	
+	public function stream_read_raw($count) {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
+		$data = false;
+		if($fileRecord) {
+			$bufferedCount = strlen($archive->buffer);
+			if($bufferedCount < $count) {
+				$archive->buffer .= fread($archive->handle, max($count - $bufferedCount, 64));
+				$bufferedCount = strlen($archive->buffer);
+			}			
+			if(!($fileRecord->flags & 0x08)) {
+				// the compressed size is known
+				$bytesRead = $archive->position - $fileRecord->offset;
+				$bytesRemaining = $fileRecord->compressedSize - $bytesRead;
+				if($count > $bytesRemaining) {
+					$count = $bytesRemaining;
+				}
+				if($count > 0) {
+					if($count < $bufferedCount) {
+						$data = substr($archive->buffer, 0, $count);
+						$archive->buffer = substr($archive->buffer, $count);
+						$archive->position += $count;
+					} else {
+						$data = $archive->buffer;
+						$archive->buffer = '';
+						$archive->position += $bufferedCount;
+					}
+				}
+			} else {
+				// the compressed size is not known
+				// need to look for the data descriptor signature 0x08074b50
+				$signaturePos = strpos($archive->buffer, "\x50\x4b\x07\x08");
+				if($signaturePos === false) {
+					// return three bytes less, in case the buffer ends in the middle of a signature
+					$data = substr($archive->buffer, 0, $bufferedCount - 3);
+					$archive->buffer = substr($archive->buffer, $bufferedCount - 3);
+					$archive->position += $bufferedCount - 3;
+				} else {
+					if($signaturePos > 0) {
+						// return bytes up to the possible data descriptor
+						$data = substr($archive->buffer, 0, $signaturePos);
+						$archive->buffer = substr($archive->buffer, $signaturePos);
+						$archive->position += $signaturePos;
+					} else {
+						// see if the compressed size match
+						$array = unpack('Vsignature/Vcrc32/VcompressedSize/VuncompressedSize', $archive->buffer);
+						if($array['compressedSize'] == $fileRecord->compressedSize) {
+							$archive->buffer = substr($archive->buffer, 16);
+							$archive->position += 16;
+						} else {
+							$data = substr($archive->buffer, 0, 4);
+							$archive->buffer = substr($archive->buffer, 4);
+							$archive->position += 4;
+						}
+					}
+				}
+				// update the file entry
+				if($data) {
+					$fileRecord->compressedSize += strlen($data);
+				}
+			}		
+		}
+		return $data;
+	}
+	
+	public function stream_stat() {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
+		if($archive->activeStream == $this) {
+			$time = $this->convertDosDateTime($fileRecord->date, $fileRecord->time);
+			$mode = ($archive->writable) ? 0222 : 0444;
+			return array(
+				'dev' => 0,
+				'ino' => 0,
+				'mode' => $mode,
+				'nlink' => 1,
+				'uid' => 0,
+				'gid' => 0,
+				'rdev' => 0,
+				'size' => $fileRecord->uncompressedSize,
+				'atime' => $time,
+				'mtime' => $time,
+				'ctime' => $time,
+				'blksize' => -1,
+				'blocks' => -1
+			);
+		}
+		return false;
+	}
+	
+	public function stream_write($data) {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
+		if($archive->writable && $archive->activeStream === $this) {
+			$count = strlen($data);
+						
+			// we're still filling up the buffer
+			if(!$this->stream) {
+				$bufferedCount = strlen($archive->buffer);
+				if($bufferedCount + $count < 1024) {
+					$archive->buffer .= $data;
+					return $count;
+				} else {
+					// write the local header without empty size and crc
+					// need a data descriptor to follow the data
+					$fileRecord->flags |= 0x08;					
+					$this->writeLocalHeader($archive, $fileRecord);
+
+					// create a callback stream that calls stream_write_raw() and append a deflate filter to it
+					// this allows use to figure out what the compressed size is
+					$path = StreamCallback::add(array($this, 'stream_write_raw'));
+					$this->stream = fopen($path, "wb");
+					if($fileRecord->compressionMethod == 8) {					
+						$params = array('level' => $this->archive->compressionLevel);
+						stream_filter_append($this->stream, 'zlib.deflate', STREAM_FILTER_WRITE, $params);
+					}
+					
+					// set the initial CRC32 value
+					$fileRecord->crc32 = crc32($archive->buffer);
+					$fileRecord->uncompressedSize += $bufferedCount;
+					
+					// write the buffered data
+					$written = fwrite($this->stream, $archive->buffer);
+					$archive->buffer = '';
+				}
+			} 
+			// update the CRC32
+			$fileRecord->crc32 = $this->combineCRC32($fileRecord->crc32, crc32($data), $count);
+			$fileRecord->uncompressedSize += $count;
+			return fwrite($this->stream, $data);
+		}
+		return false;
+	}
+	
+	public function stream_write_raw($data) {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
+		$fileRecord->compressedSize += strlen($data);
+		$written = fwrite($archive->handle, $data);
+		$archive->position += $written;
+		return $written;
+	}
+	
+	public function url_stat($url, $flags) {
+		$rootPath = $this->getArchivePath($url);
+		$zipPath = substr($url, strlen($rootPath) + 1);
+		$zipPath = str_replace('\\', '/', $zipPath);
+		$archive = StreamWrapperStaticStorage::get($rootPath);
+		if($archive) {
+			$this->archive = $archive;
+			if(isset($archive->fileRecords[$zipPath])) {
+				$fileRecord = $archive->fileRecords[$zipPath];
+				$time = $this->convertDosDateTime($fileRecord->date, $fileRecord->time);
+				$mode = ($archive->writable) ? 0222 : 0444;
+				return array(
+					'dev' => 0,
+					'ino' => 0,
+					'mode' => $mode,
+					'nlink' => 1,
+					'uid' => 0,
+					'gid' => 0,
+					'rdev' => 0,
+					'size' => $fileRecord->uncompressedSize,
+					'atime' => $time,
+					'mtime' => $time,
+					'ctime' => $time,
+					'blksize' => -1,
+					'blocks' => -1
+				);
+			} else if($fileRecord = $this->findDirectory($zipPath)) {
+				// a directory by that name exists
+				$time = $this->convertDosDateTime($fileRecord->date, $fileRecord->time);
+				$mode = (($archive->writable) ? 0222 : 0444) | 040000;
+				return array(
+					'dev' => 0,
+					'ino' => 0,
+					'mode' => $mode,
+					'nlink' => 1,
+					'uid' => 0,
+					'gid' => 0,
+					'rdev' => 0,
+					'size' => 0,
+					'atime' => $time,
+					'mtime' => $time,
+					'ctime' => $time,
+					'blksize' => -1,
+					'blocks' => -1
+				);
+			}
+		}
+		return false;
+	}
+	
 	private function getArchivePath($path) {
 		$si = strpos($path, '://') + 3;
 		$ei = strpos($path, '/', $si);
-		return substr($path, 0, $ei);
-	}	
-	
-	private static function writeLocalHeader($archive, $fileRecord) {
+		return ($ei) ? substr($path, 0, $ei) : $path;
+	}
+		
+	private function writeLocalHeader() {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
 		$bytes = pack("Vv5V3v2", 0x04034b50, 20, $fileRecord->flags, $fileRecord->compressionMethod, $archive->time, $archive->date, $fileRecord->crc32, $fileRecord->compressedSize, $fileRecord->uncompressedSize, strlen($fileRecord->name), strlen($fileRecord->extra)) . $fileRecord->name . $fileRecord->extra;
-		fwrite($archive->handle, $bytes);
+		$archive->position += fwrite($archive->handle, $bytes);
 	}
 	
-	private static function writeDataDescriptor($archive, $fileRecord) {
+	private function writeDataDescriptor() {
+		$archive = $this->archive;
+		$fileRecord = $archive->currentFileRecord;
 		$bytes = pack("V4", 0x08074b50, $fileRecord->crc32, $fileRecord->compressedSize, $fileRecord->uncompressedSize);
-		fwrite($archive->handle, $bytes);
+		$archive->position += fwrite($archive->handle, $bytes);
 	}
 	
 	private static function writeCentralDirectory($archive) {
-		$offset = ftell($archive->handle);
+		$offset = $archive->position;
 		$recordCount = 0;
 		$directorySize = 0;
 		foreach($archive->fileRecords as $fileRecord) {
 			$bytes = pack('Vv6V3v5V2', 0x02014b50, 20, 20, $fileRecord->flags, $fileRecord->compressionMethod, $archive->time, $archive->date, $fileRecord->crc32, $fileRecord->compressedSize, $fileRecord->uncompressedSize, strlen($fileRecord->name), strlen($fileRecord->extra), 0, 0, 0, $fileRecord->attributes, $fileRecord->offset) . $fileRecord->name . $fileRecord->extra;
-			fwrite($archive->handle, $bytes);
+			$archive->position += fwrite($archive->handle, $bytes);
 			$recordCount++;
 			$directorySize += strlen($bytes);
 		}
 		
 		$bytes = pack('Vv4V2v', 0x06054b50, 0, 0, $recordCount, $recordCount, $directorySize, $offset, strlen($archive->comments)) . $archive->comments;
-		fwrite($archive->handle, $bytes);
+		$archive->position += fwrite($archive->handle, $bytes);
 	}
 	
-	private function crc32_combine($crc1, $crc2, $len2) {
+	private function readNextLocalHeader() {
+		$archive = $this->archive;
+		while($this->stream_read_raw(1024)) {
+			// remove any file content
+		}
+		$bufferedCount = strlen($archive->buffer);		
+		if($bufferedCount < 30) {
+			// there should be at least 30 bytes in the read buffer
+			$archive->buffer .= fread($archive->handle, 64);
+			$bufferedCount = strlen($archive->buffer);
+		}
+		$archive->currentFileRecord = null;
+		while($bufferedCount >= 30) {
+			$array = unpack("Vsignature/vversion/vflags/vmethod/vlastModifiedTime/vlastModifiedDate/Vcrc32/VcompressedSize/VuncompressedSize/vnameLength/vextraLength", $archive->buffer);
+			if($array['signature'] == 0x04034b50) {
+				$fileRecord = new StreamZipArchiveFileRecord;
+				$fileRecord->flags = $array['flags'];
+				$fileRecord->compressionMethod = $array['method'];
+				$fileRecord->crc32 = $array['crc32'];
+				$fileRecord->compressedSize = $array['compressedSize'];
+				$fileRecord->uncompressedSize = $array['uncompressedSize'];				
+				$bufferedCount -= 30;				
+				$archive->buffer = substr($archive->buffer, 30);				
+				$archive->position += 30;
+				$nameLength = $array['nameLength'];
+				$extraLength = $array['extraLength'];
+				if($bufferedCount < $nameLength + $extraLength) {
+					$archive->buffer .= fread($archive->handle, $nameLength + $extraLength);
+				}
+				$fileRecord->name = substr($archive->buffer, 0, $nameLength);
+				$fileRecord->extra = substr($archive->buffer, $nameLength, $extraLength);
+				$archive->buffer = substr($archive->buffer, $nameLength + $extraLength);
+				$archive->position += $nameLength + $extraLength;
+				$fileRecord->offset = $archive->position;
+				$archive->fileRecords[$fileRecord->name] = $archive->currentFileRecord = $fileRecord;
+				return true;
+			} else if($array['signature'] == 0x02014b50) {
+				// we've reached the central directory
+				break;
+			} else {
+				// shift one byte forward and try again
+				$archive->buffer = substr($archive->buffer, 1);
+				$archive->position++;
+				$bufferedCount--;
+				if($bufferedCount < 30) {
+					$archive->buffer .= fread($archive->handle, 64);
+					$bufferedCount = strlen($archive->buffer);
+				}
+			}
+		}
+		return false;
+	}
+	
+	private function convertDosDateTime($date, $time) {
+		return mktime(($time >> 11) & 0x1F, ($time >> 5) & 0x3F, ($time << 1) & 0x1F, ($date >> 5) & 0x0F, $date & 0x1F, ($date >> 9) & 0x7F);	
+	}
+	
+	private function findDirectory($zipPath) {
+		$archive = $this->archive;
+		if(substr($zipPath, -1) != '/') {
+			$zipPath .= '/';
+		}
+		$pathLen = strlen($zipPath);
+		foreach($archive->fileRecords as $filePath => $fileRecord) {
+			if(strlen($filePath) > $pathLen && substr_compare($filePath, $zipPath, 0, $pathLen) == 0) {
+				return $fileRecord;
+			}
+		}
+		return false;
+	}
+	
+	private function combineCRC32($crc1, $crc2, $len2) {
 		// precalculated matrices (valid up to $len2 = 2147483647)
 		static $matrices = array(
 			array(	0x76dc4190,0xedb88320,0x00000001,0x00000002,0x00000004,0x00000008,0x00000010,0x00000020,
@@ -377,21 +694,18 @@ class StreamZipArchiveRecord {
 	public $time;
 	public $date;
 	public $fileRecords = array();
+	public $currentFileRecord;
 	public $compressionLevel = -1;
 	public $comments = '';	
 	public $writable = false;
 	public $activeStream;
-	
-	public function __construct() {
-		$datetime = date('Y n j G i s');
-		sscanf($datetime, '%d %d %d %d %d %d', $year, $month, $day, $hour, $min, $sec);
-		$this->time = ($hour << 11) | ($min << 5) | ($sec >> 1);
-		$this->date = (($year - 1980) << 9) | ($month << 5) | $day;
-	}
+	public $buffer;
+	public $position = 0;
+	public $lastReturnedPath;
 }
 
 class StreamZipArchiveFileRecord {
-	public $name;
+	public $name = '';
 	public $offset;
 	public $flags = 0;
 	public $compressionMethod = 0;
@@ -400,6 +714,8 @@ class StreamZipArchiveFileRecord {
 	public $uncompressedSize = 0;
 	public $extra = '';
 	public $attributes = 0x0020;		// DOS attributes
+	public $time;
+	public $date;
 }
 
 stream_wrapper_register(StreamZipArchive::PROTOCOL, 'StreamZipArchive');
