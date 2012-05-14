@@ -2,12 +2,16 @@
 
 class StreamProxy {
 	
+	const PROTOCOL = 'proxy';
+	
 	private $handle;
+	private $count;
 
-	public static function add($handle) {
+	public static function add($handle, &$count = 0) {
 		$record = new StreamProxyRecord;
 		$record->handle = $handle;
-		$path = StreamWrapperStaticStorage::add('proxy', $record);
+		$record->count =& $count;
+		$path = StreamWrapperStaticStorage::add(self::PROTOCOL, $record);
 		return $path; 
 	}
 	
@@ -24,6 +28,8 @@ class StreamProxy {
 		if($record) {
 			StreamWrapperStaticStorage::remove($path);
 			$this->handle = $record->handle;
+			$this->count =& $record->count;
+			$this->count = 0;
 			return true;
 		} else {
 			return false;
@@ -31,18 +37,23 @@ class StreamProxy {
 	}
 	
 	public function stream_read($count) {
-		return fread($this->handle, $count);
+		$read = fread($this->handle, $count);
+		$this->count += $read;
+		return $read;
 	}
 	
 	public function stream_write($count) {
-		return fwrite($this->handle, $count);
+		$written = fwrite($this->handle, $count);
+		$this->count += $written;
+		return $written;
 	}
 }
 
 class StreamProxyRecord {
 	public $handle;
+	public $count;
 }
 
-stream_wrapper_register('proxy', 'StreamProxy');
+stream_wrapper_register(StreamProxy::PROTOCOL, 'StreamProxy');
 
 ?>
