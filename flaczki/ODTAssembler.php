@@ -114,11 +114,11 @@ class ODTAssembler {
 		$this->writeEndTag('office:font-face-decls');
 		
 		// write the automatic styles
-		$this->writeStartTag('office:styles');
+		$this->writeStartTag('office:automatic-styles');
 		foreach($document->automaticStyles as $style) {
-			$this->writeStyleTag($style, true);
+			$this->writeStyleTag($style);
 		}
-		$this->writeEndTag('office:styles');
+		$this->writeEndTag('office:automatic-styles');
 		
 		// write the document body
 		$this->writeStartTag('office:body');
@@ -253,7 +253,7 @@ class ODTAssembler {
 				$this->addAttribute($attributes, 'fo:text-align-last', $paragraphProperties->textAlignLast);
 				$this->addAttribute($attributes, 'style:writing-mode', $paragraphProperties->writingMode);
 				if($paragraphProperties->tabStops) {
-					$this->writeStartTag('style:paragraph-properties', $attributes, true);
+					$this->writeStartTag('style:paragraph-properties', $attributes);
 					$this->writeStartTag('style:tab-stops');
 					foreach($paragraphProperties->tabStops as $tabStop) {
 						$attributes = array();
@@ -265,7 +265,7 @@ class ODTAssembler {
 					$this->writeEndTag('style:tab-stops');
 					$this->writeEndTag('style:paragraph-properties');
 				} else {
-					$this->writeTag('style:paragraph-properties', $attributes, true);
+					$this->writeTag('style:paragraph-properties', $attributes);
 				}
 			}
 			if($style->textProperties) {
@@ -303,11 +303,11 @@ class ODTAssembler {
 		$attributes = array();
 		$this->addAttribute($attributes, 'text:style-name', $paragraph->styleName);
 		$this->addAttribute($attributes, 'text:class-names', $paragraph->classNames);
-		if($paragraph instanceof ODTHeader) {
+		if($paragraph instanceof ODTHeading) {
 			$this->addAttribute($attributes, 'text:outline-level', $paragraph->outlineLevel);
-			$tagName = 'h';
+			$tagName = 'text:h';
 		} else {
-			$tagName = 'p';
+			$tagName = 'text:p';
 		}
 		if($paragraph->spans) {
 			$hyperlink = null;
@@ -353,23 +353,23 @@ class ODTAssembler {
 					// special character
 					switch($chunk) {
 						case "\n":
-							$this->writeTag('text:line-break', null);
+							$this->writeTag('text:line-break');
 							break;
 						case "\t":
-							$this->writeTag('text:tab', null);
+							$this->writeTag('text:tab');
 							break;
 						default:
-							$this->writeTag('text:s', array( 'c' => strlen($chunk)));
+							$this->writeTag('text:s', array( 'text:c' => strlen($chunk)));
 							break;
 						
 					}
 				}
 			}			
-			$this->writeEndTag('text:span', $attributes);
+			$this->writeEndTag('text:span');
 		}
 	}
 	
-	protected function writeTag($name, $attributes, $text = '') {
+	protected function writeTag($name, $attributes = null, $text = '') {
 		if($text != '') {
 			$this->writeStartTag($name, $attributes);
 			$this->writeText($text);
