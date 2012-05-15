@@ -38,7 +38,6 @@ class StreamZipArchive {
 			
 			// write the central directory
 			self::writeCentralDirectory($archive);
-			fclose($archive->handle);
 			StreamWrapperStaticStorage::remove($path);
 		}
 	}
@@ -119,13 +118,14 @@ class StreamZipArchive {
 					// we can figure out the crc32 and compressed size ahead of time then
 					$fileRecord->crc32 = crc32($archive->buffer);
 					$fileRecord->uncompressedSize = strlen($archive->buffer);
-					if($archive->compressionLevel == 0) {
+					if($fileRecord->compressionMethod == 0) {
 						$data = $archive->buffer;
 						$fileRecord->compressedSize = $fileRecord->uncompressedSize;
-					} else {
+					} else if($fileRecord->compressionMethod == 8) {
 						$data = gzdeflate($archive->buffer, $archive->compressionLevel);
 						$fileRecord->compressedSize = strlen($data);
 					}
+					$archive->buffer = '';
 					$this->writeLocalHeader();
 					$archive->position += fwrite($archive->handle, $data);
 				} else {

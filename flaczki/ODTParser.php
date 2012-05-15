@@ -6,6 +6,7 @@ class ODTParser {
 	protected $paragraph;
 	protected $span;
 	protected $previousSpan;
+	protected $hyperlink;
 	protected $style;
 	protected $fileName;
 	
@@ -23,10 +24,10 @@ class ODTParser {
 		$document = $this->document = new ODTDocument;
 		$zipPath = StreamZipArchive::open($input);
 		$dir = opendir($zipPath);
-		while($filename = readdir($dir)) {
-			echo "\n$filename\n";
-			if($filename == 'content.xml' || $filename == 'styles.xml') {
-				$path = "$zipPath/$filename";
+		while($file = readdir($dir)) {
+			if($file == 'content.xml' || $file == 'styles.xml') {
+				$this->fileName = $file;
+				$path = "$zipPath/$file";
 				$stream = fopen($path, "rb");
 				
 				// parse it with PHP's SAX event-based parser, which requires less memory than a tree-based 
@@ -36,8 +37,8 @@ class ODTParser {
 				xml_set_object($parser, $this);
 				xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
 				xml_set_character_data_handler($parser, 'processCharacterData');
-				while($data = fread($stream, 4096)) {
-					xml_parse($parser, $data, strlen($data) != 4096);
+				while($data = fread($stream, 1024)) {
+					xml_parse($parser, $data, strlen($data) != 1024);
 				}
 			}
 		}		
@@ -58,24 +59,32 @@ class ODTParser {
 			case 'tab':
 				$this->processCharacterData($parser, "\t");
 				break;
+			case 'line-break':
+				$this->processCharacterData($parser, "\n");
+				break;
 			case 'span':
 				$this->span = new ODTSpan;
 				$this->copyProperties($this->span, $attributes);
+				$this->span->hyperlink = $this->hyperlink;
 				
 				// see if the new span has the same attributes as the previous one
-				if($this->previousSpan && ($this->previousSpan->styleName == $this->span->styleName && $this->previousSpan->classNames == $this->span->classNames)) {
+				if($this->previousSpan && ($this->previousSpan->styleName == $this->span->styleName && $this->previousSpan->classNames == $this->span->classNames && $this->previousSpan->hyperlink == $this->span->hyperlink)) {
 					// continue to add text to previous span instead
 					$this->span = $this->previousSpan;
 				} else {
 					$this->paragraph->spans[] = $this->span;
 				}
 				break;
+			case 'a':
+				$this->hyperlink = new ODTHyperlink;
+				$this->copyProperties($this->hyperlink, $attributes);
+				break;
 			case 'p':
 				$this->paragraph = new ODTParagraph;
 				$this->copyProperties($this->paragraph, $attributes);
 				break;
 			case 'h':
-				$this->paragraph = new ODTHeader;
+				$this->paragraph = new ODTHeading;
 				$this->copyProperties($this->paragraph, $attributes);
 				break;
 			case 'style':
@@ -108,7 +117,13 @@ class ODTParser {
 		$name = $this->stripPrefix($name);
 		switch($name) {
 			case 'span':
-				$this->span = null;
+				if($this->span) {
+					$this->previousSpan = $this->span;
+					$this->span = null;
+				}
+				break;
+			case 'a':
+				$this->hyperlink = null;
 				break;
 			case 'p':
 			case 'h':
@@ -152,7 +167,7 @@ class ODTParser {
 		}
 	}
 	
-	protected function copyProperties(&$object, $attributes) {
+	protected function copyProperties($object, $attributes) {
 		foreach($attributes as $name => $value) {
 			$name = $this->stripPrefix($name);
 			
@@ -206,7 +221,8 @@ class ODTParagraph {
 	public $spans = array();
 }
 
-class ODTHeader extends ODTParagraph {
+class ODTHeading extends ODTParagraph {
+	public $outlineLevel;
 }
 
 class ODTSpan {
@@ -214,10 +230,13 @@ class ODTSpan {
 	public $classNames;
 	
 	public $text;
+	public $hyperlink;
 }
 
-class ODTHyperlink extends ODTSpan {
+class ODTHyperlink {
 	public $href;
+	public $targetFrameName;
+	public $type;
 }
 
 class ODTStyle {
@@ -236,7 +255,6 @@ class ODTParagraphProperties {
 	public $marginLeft;
 	public $marginRight;
 	public $marginTop;	
-	public $lineDistance;
 	public $lineHeight;
 	public $tabStops;
 	public $tabStopDistance;
@@ -261,11 +279,12 @@ class ODTTextProperties {
 	public $letterKerning;
 	public $letterSpacing;
 	public $textLineThroughStyle;
+	public $textLineThroughType;
 	public $textPosition;
 	public $textRotationAngle;
 	public $textTransformations;
-	public $textUnderlineType;
 	public $textUnderlineStyle;	
+	public $textUnderlineType;
 }
 
 class ODTTabStop {
