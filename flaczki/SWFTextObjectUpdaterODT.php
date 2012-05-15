@@ -19,8 +19,8 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			$nextParagraphStyle = ($nextParagraph) ? $this->getApplicableStyle($nextParagraph) : null;
 			
 			if(!$section) {
-				// look for the name of the section in a header
-				if($paragraph instanceof ODTHeader) {
+				// look for the name of the section in a heading
+				if($paragraph instanceof ODTHeading) {
 					$sectionName = '';
 					foreach($paragraph->spans as $span) {
 						$sectionName .= $span->text;

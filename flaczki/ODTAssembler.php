@@ -233,6 +233,7 @@ class ODTAssembler {
 		$attributes = array();
 		$tagName = 'style:' . ($default ? 'default-style' : 'style');
 		$this->addAttribute($attributes, 'style:name', $style->name);
+		$this->addAttribute($attributes, 'style:display-name', $style->displayName);
 		$this->addAttribute($attributes, 'style:family', $style->family);
 		$this->addAttribute($attributes, 'style:parent-style-name', $style->parentStyleName);		
 		if($style->textProperties || $style->paragraphProperties) {

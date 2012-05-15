@@ -241,6 +241,7 @@ class ODTHyperlink {
 
 class ODTStyle {
 	public $name;
+	public $displayName;
 	public $family;
 	public $parentStyleName;
 	
