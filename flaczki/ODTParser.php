@@ -21,46 +21,26 @@ class ODTParser {
 		}
 		
 		$document = $this->document = new ODTDocument;
-		// since we expect the file to be from a remote source, we're going to parse it as data comes in to improve performance
-		// instead of going to the ZIP file's central directory, we'll scan the individual file records
-		while($header = $this->readZipHeader($input)) {
-			if($header->compressedSize != 0) {
-				// if the compressed size is known, then create a partial stream encompassing that byte range
-				$path = StreamPartial::add($input, $header->compressedSize);
-			} else if($header->flags | 0x08) {
-				// compressed since is unknown, there should be a 16-byte data descriptor at the end of 
-				// the file record; the substream ends there
-				$path = StreamZipDDDelimited::add($input);
-			} else {
-				// file must be empty or something
-				$path = null;
-			}
-			if($path) {
+		$zipPath = StreamZipArchive::open($input);
+		$dir = opendir($zipPath);
+		while($filename = readdir($dir)) {
+			echo "\n$filename\n";
+			if($filename == 'content.xml' || $filename == 'styles.xml') {
+				$path = "$zipPath/$filename";
 				$stream = fopen($path, "rb");
-				if($header->name == 'content.xml' || $header->name == 'styles.xml') {
-					if($header->method == 8) {
-						// inflate the content with the inflate filter
-						stream_filter_append($stream, "zlib.inflate");
-					}
-					$this->fileName = $header->name;
-
-					// parse it with PHP's SAX event-based parser, which requires less memory than a tree-based 
-					// parser and is perfect for on-the-fly processing
-					$parser = xml_parser_create();
-					xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
-					xml_set_object($parser, $this);
-					xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
-					xml_set_character_data_handler($parser, 'processCharacterData');
-					while($data = fread($stream, 1024)) {
-						xml_parse($parser, $data, strlen($data) != 1024);
-					}
-				} else {
-					// just pull the data through so we can reach the next file record
-					while($data = fread($stream, 1024)) {
-					}
+				
+				// parse it with PHP's SAX event-based parser, which requires less memory than a tree-based 
+				// parser and is perfect for on-the-fly processing
+				$parser = xml_parser_create();
+				xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
+				xml_set_object($parser, $this);
+				xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
+				xml_set_character_data_handler($parser, 'processCharacterData');
+				while($data = fread($stream, 4096)) {
+					xml_parse($parser, $data, strlen($data) != 4096);
 				}
 			}
-		}
+		}		
 		$this->document = $this->paragraph = $this->span = $this->previousSpan = $this->style = $this->font = null;
 		return $document;
 	}
@@ -209,39 +189,6 @@ class ODTParser {
 		$pos = strpos($s, ':');
 		return ($pos !== false) ? substr($s, $pos + 1) : $s;
 	}
-
-	protected function readZipHeader($input) {
-		$header = fread($input, 30);
-		while(strlen($header) == 30) {
-			$array = unpack("Vsignature/vversion/vflags/vmethod/vlastModifiedTime/vlastModifiedDate/Vcrc32/VcompressedSize/VuncompressedSize/vnameLength/vextraLength", $header);
-			if($array['signature'] == 0x04034b50) {
-				$header = new ODTZipHeader;
-				$header->flags = $array['flags'];
-				$header->method = $array['method'];
-				$header->lastModifiedTime = $array['lastModifiedTime'];
-				$header->lastModifiedDate = $array['lastModifiedDate'];
-				$header->crc32 = $array['crc32'];
-				$header->compressedSize = $array['compressedSize'];
-				$header->uncompressedSize = $array['uncompressedSize'];
-				if($array['nameLength'] > 0) {
-					$header->name = fread($input, $array['nameLength']);
-				}
-				if($array['extraLength'] > 0) {
-					$header->extra = fread($input, $array['extraLength']);
-				}
-				return $header;
-			} else if($array['signature'] == 0x02014b50) {
-				// we've reached the central directory--just pull the data thru
-				while($data = fread($input, 1024)) {
-				}
-				break;
-			} else {
-				// shift one byte forward and try again
-				$header = substr($header, 1) . fread($input, 1);
-			}
-		}
-		return null;
-	}
 }
 
 class ODTDocument {
@@ -336,18 +283,6 @@ class ODTFont {
 	public $fontVariant;
 	public $fontWeight;
 	public $panose1;
-}
-
-class ODTZipHeader {
-	public $flags;
-	public $method;
-	public $lastModifiedTime;
-	public $lastModifiedDate;
-	public $crc32;
-	public $compressedSize;
-	public $uncompressedSize;
-	public $name;
-	public $extra;
 }
 
 ?>

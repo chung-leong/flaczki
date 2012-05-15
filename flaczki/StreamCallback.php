@@ -27,14 +27,18 @@ class StreamCallback {
 			$this->callback = $callback;
 			return true;
 		}
+		return false;
 	}
 
 	public function stream_read($count) {
-		$data = call_user_func($this->callback, $count);
-		if($data !== false) {
-			$this->eof = true;
+		if(!$this->eof) {
+			$data = call_user_func($this->callback, $count);
+			if($data === false) {
+				$this->eof = true;
+			}
+			return $data;
 		}
-		return $data;
+		return false;
 	}
 	
 	public function stream_write($data) {

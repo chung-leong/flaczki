@@ -6,7 +6,7 @@ class StreamZipArchive {
 	
 	private $archive;	
 	private $stream;
-	private $eof;
+	private $eof = false;
 	private $dirPath = '';
 
 	public static function open($handle) {
@@ -187,18 +187,22 @@ class StreamZipArchive {
 		$archive = $this->archive;
 		$fileRecord = $archive->currentFileRecord;
 		if(!$archive->writable && $archive->activeStream == $this) {
-			$data = fread($this->stream, $count);
-			$count = strlen($data);
-			if($count > 0) {
-				if(($fileRecord->flags & 0x08)) {
-					// update the size and crc32
-					$fileRecord->uncompressedSize += $count;
-					$fileRecord->crc32 = $this->combineCRC32($fileRecord->crc32, crc32($data), $count);
+			if(!$this->eof) {
+				$data = fread($this->stream, $count);
+				if($data) {
+					$count = strlen($data);
+					if($count > 0) {
+						if(($fileRecord->flags & 0x08)) {
+							// update the size and crc32
+							$fileRecord->uncompressedSize += $count;
+							$fileRecord->crc32 = $this->combineCRC32($fileRecord->crc32, crc32($data), $count);
+						}
+					}
+				} else {
+					$this->eof = true;
 				}
-			} else {
-				$this->eof = true;
+				return $data;
 			}
-			return $data;
 		}
 		return false;
 	}
@@ -237,9 +241,13 @@ class StreamZipArchive {
 				$signaturePos = strpos($archive->buffer, "\x50\x4b\x07\x08");
 				if($signaturePos === false) {
 					// return three bytes less, in case the buffer ends in the middle of a signature
-					$data = substr($archive->buffer, 0, $bufferedCount - 3);
-					$archive->buffer = substr($archive->buffer, $bufferedCount - 3);
-					$archive->position += $bufferedCount - 3;
+					if($bufferedCount > 3) {
+						$data = substr($archive->buffer, 0, $bufferedCount - 3);
+						$archive->buffer = substr($archive->buffer, $bufferedCount - 3);
+						$archive->position += $bufferedCount - 3;
+					} else {
+						$data = '';
+					}
 				} else {
 					if($signaturePos > 0) {
 						// return bytes up to the possible data descriptor
@@ -252,6 +260,7 @@ class StreamZipArchive {
 						if($array['compressedSize'] == $fileRecord->compressedSize) {
 							$archive->buffer = substr($archive->buffer, 16);
 							$archive->position += 16;
+							$fileRecord->flags &= ~0x08;
 						} else {
 							$data = substr($archive->buffer, 0, 4);
 							$archive->buffer = substr($archive->buffer, 4);
