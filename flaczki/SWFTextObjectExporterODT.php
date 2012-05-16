@@ -9,10 +9,13 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		$this->document = ($document) ? $document : new ODTDocument;
 	}
 
-	public function export($textObjects, $fontFamilies) {
-		$this->addFonts($textObjects, $fontFamilies);
-
-		$standardFontName = 'Calibri';
+	protected function exportSections($sections, $fontFamilies) {
+		// add font references
+		$fontUsage = $this->getFontUsage($sections);
+		$this->addFonts($fontFamilies, $fontUsage);
+		
+		// add default style, using the most frequently used font as the standard font
+		$standardFontName = key($fontUsage);
 		$this->addDefaultStyles($standardFontName);
 		
 		// add heading style for the first section--not starting with a page break
@@ -29,24 +32,23 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		$sectionHeadingStyle->paragraphProperties->breakBefore = "page";
 		$this->addAutomaticStyle($sectionHeadingStyle);
 				
-		foreach($textObjects as $textObject) {
-			$tlfObject = $this->tlfParser->parse($textObject->xml);
-			
+		foreach($sections as $section) {
 			// add section name as heading
 			$heading = new ODTHeading;
 			$heading->styleName = (count($this->document->paragraphs) > 0) ? $sectionHeadingStyle->name : $firstSectionHeadingStyle->name;
 			$heading->outlineLevel = 10;
 			$span = new ODTSpan;
-			$span->text = $this->beautifySectionName($textObject->name);
+			$span->text = $this->beautifySectionName($section->name);
 			$heading->spans[] = $span;
 			$this->document->paragraphs[] = $heading;
 			
 			// add the paragraphs
-			foreach($tlfObject->textFlow->paragraphs as $tlfParagraph) {
+			$textFlow = $section->tlfObject->textFlow;
+			foreach($textFlow->paragraphs as $tlfParagraph) {
 				$odtParagraph = new ODTParagraph;
 				$odtParagraphStyle = new ODTStyle;
 				$odtParagraphStyle->family = 'paragraph';
-				$this->translateProperties($odtParagraphStyle, $tlfObject->textFlow->style);
+				$this->translateProperties($odtParagraphStyle, $textFlow->style);
 				$this->translateProperties($odtParagraphStyle, $tlfParagraph->style);
 
 				foreach($tlfParagraph->spans as $tlfSpan) {
@@ -155,7 +157,7 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 						break;
 					case 'fontFamily':
 						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->fontFamily = $value;
+						$odtStyle->textProperties->fontName = $value;
 						break;
 					case 'fontSize':
 						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
@@ -450,65 +452,107 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		}
 	}
 	
-	protected function addFonts($textObjects, $fontFamilies) {	
+	protected function addFonts($fontFamilies, $fontUsage) {
 		// add properties of embedded fonts
 		foreach($fontFamilies as $fontFamily) {
-			if(!isset($document->fonts[$fontFamily->name])) {
+			if(!isset($document->fonts[$fontFamily->name])) {				
+				$odtFont = new ODTFont;
+				$odtFont->name = $fontFamily->name;
+				$odtFont->fontFamily = $fontFamily->name;
+
+				// use the information from the normal version of the font if possible
+				$isBold = $isItalic = false;
 				if($fontFamily->normal) {
 					$embeddedFont = $fontFamily->normal;
-					$odtFont = new ODTFont;			
-					$odtFont->name = $fontFamily->name;
-					$odtFont->fontFamily = $fontFamily->name;
-					if($embeddedFont->panose) {
-						$panose = $embeddedFont->panose;
-					
-						// set generic font family based on panose values
-						if($panose[1] == 3) {
-							$odtFont->fontFamilyGeneric = 'script';
-						} else if($panose[1] == 4) {
-							$odtFont->fontFamilyGeneric = 'decorative';
-						} else if($panose[1] == 5) {
-							$odtFont->fontFamilyGeneric = 'system';
-						} else if($panose[1] == 2) {
-							if($panose[2] >= 11) {
-								// sans-serif
-								$odtFont->fontFamilyGeneric = 'swiss';
-							} else {
-								// serif
-								$odtFont->fontFamilyGeneric = 'roman';
-							}
-						}
-						
-						// set the weight (if it isn't 'normal')
-						if($panose[3] >= 2 && $panose[3] <= 11) {
-							$weight = min(($panose[3] - 1) * 100, 900);
-							if($weight < 400 || $weight > 500) {
-								$odtFont->fontWeight = $weight;
-							}
-						}
-						
-						// set the pitch
-						if($panose[1] == 2) {
-							if($panose[4] == 9) {
-								$odtFont->fontPitch = 'fixed';
-							} else {
-								$odtFont->fontPitch = 'variable';
-							}
-						} else if($panose[1] == 3) {
-							if($panose[4] == 3) {
-								$odtFont->fontPitch = 'fixed';
-							} else {
-								$odtFont->fontPitch = 'variable';
-							}
-						}
-						
-						$odtFont->panose1 = sprintf("%d %d %d %d %d %d %d %d %d %d", $panose[1], $panose[2], $panose[3], $panose[4], $panose[5], $panose[6], $panose[7], $panose[8], $panose[9], $panose[10]);
-					}
-					$this->document->fonts[$fontFamily->name] = $odtFont;
+				} else if($fontFamily->bold) {
+					$embeddedFont = $fontFamily->bold;
+					$isBold = true;
+				} else if($fontFamily->italic) {
+					$embeddedFont = $fontFamily->italic;
+					$isItalic = true;
+				} else if($fontFamily->boldItalic) {
+					$embeddedFont = $fontFamily->boldItalic;
+					$isBold = true;
+					$isItalic = true;
 				}
+				if($embeddedFont->panose) {
+					$this->addFontProperties($odtFont, $embeddedFont->panose, $isBold, $isItalic);
+				}
+				$this->document->fonts[$fontFamily->name] = $odtFont;
+			}
+		}
+		
+		// add properties of other referenced fonts
+		foreach($fontUsage as $fontFamilyName => $usage) {
+			if(!isset($this->document->fonts[$fontFamilyName])) {
+				$odtFont = new ODTFont;
+				$odtFont->name = $fontFamilyName;
+				$odtFont->fontFamily = $fontFamilyName;
+				
+				// see if we know this font's appearance
+				$panose = PanoseDatabase::find($fontFamilyName);
+				if($panose) {
+					$this->addFontProperties($odtFont, $panose);
+				}
+				$this->document->fonts[$fontFamilyName] = $odtFont;
 			}
 		}
 	}	
+	
+	protected function addFontProperties($odtFont, $panose, $isBold = false, $isItalic = false) {
+		// set generic font-family based on panose values
+		if($panose[1] == 3) {
+			$odtFont->fontFamilyGeneric = 'script';
+		} else if($panose[1] == 4) {
+			$odtFont->fontFamilyGeneric = 'decorative';
+		} else if($panose[1] == 5) {
+			$odtFont->fontFamilyGeneric = 'system';
+		} else if($panose[1] == 2) {
+			if($panose[2] >= 11) {
+				// sans-serif
+				$odtFont->fontFamilyGeneric = 'swiss';
+			} else {
+				// serif
+				$odtFont->fontFamilyGeneric = 'roman';
+			}
+		}
+
+		// set the style if it is oblique (even when the regular version is used)
+		if(!$isItalic) {
+			if($panose[1] == 2) {
+				if($panose[8] >= 9) {
+					$odtFont->fontStyle = 'oblique';
+				}
+			}
+		}
+		
+		// set the weight if it isn't 'normal' 
+		if(!$isBold) {
+			if($panose[3] >= 2 && $panose[3] <= 11) {
+				$weight = min(($panose[3] - 1) * 100, 900);
+				if($weight < 400 || $weight > 500) {
+					$odtFont->fontWeight = $weight;
+				}
+			}
+		}
+		
+		// set the pitch
+		if($panose[1] == 2) {
+			if($panose[4] == 9) {
+				$odtFont->fontPitch = 'fixed';
+			} else {
+				$odtFont->fontPitch = 'variable';
+			}
+		} else if($panose[1] == 3) {
+			if($panose[4] == 3) {
+				$odtFont->fontPitch = 'fixed';
+			} else {
+				$odtFont->fontPitch = 'variable';
+			}
+		}
+		
+		$odtFont->panose1 = sprintf("%d %d %d %d %d %d %d %d %d %d", $panose[1], $panose[2], $panose[3], $panose[4], $panose[5], $panose[6], $panose[7], $panose[8], $panose[9], $panose[10]);
+	}
 }
 
 require_once 'ODTParser.php'	// need ODTDocument

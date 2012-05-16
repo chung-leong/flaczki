@@ -8,7 +8,44 @@ abstract class SWFTextObjectExporter {
 		$this->tlfParser = new TLFParser;
 	}
 
-	abstract protected function export($textObjects, $fontFamilies);
+	public function export($textObjects, $fontFamilies) {
+		$sections = array();
+		foreach($textObjects as $textObject) {
+			$section = new SWFTextObjectExportSection;
+			$section->name = $textObject->name;
+			$section->tlfObject = $this->tlfParser->parse($textObject->xml);
+			$sections[] = $section;
+		}
+		return $this->exportSections($sections, $fontFamilies);
+	}
+	
+	protected function getFontUsage($sections) {
+		$hash = array();
+		foreach($sections as $section) {
+			$textFlow = $section->tlfObject->textFlow;
+			$textFlowFontFamily = $textFlow->style->fontFamily;
+			if(!$textFlowFontFamily) {
+				$textFlowFontFamily = 'Arial';	// TLF default
+			}
+			foreach($textFlow->paragraphs as $paragraph) {
+				$paragraphFontFamily = $paragraph->style->fontFamily;
+				if(!$paragraphFontFamily) {
+					$paragraphFontFamily = $textFlowFontFamily;
+				}
+				foreach($paragraph->spans as $span) {
+					$spanFontFamily = $span->style->fontFamily;
+					if(!$spanFontFamily) {
+						$spanFontFamily = $paragraphFontFamily;
+					}
+					$value =& $hash[$spanFontFamily];
+					$value += strlen($span->text);
+				}
+			}
+		}
+		// sort the array it the most frequently used font is listed first
+		arsort($hash);
+		return $hash;
+	}
 			
 	protected function beautifySectionName($name) {
 		if(strpos($name, '_') === false) {	// don't change the name if underscores are used
@@ -18,6 +55,11 @@ abstract class SWFTextObjectExporter {
 		}
 		return $name;
 	}
+}
+
+class SWFTextObjectExportSection {
+	public $name;
+	public $tlfObject;
 }
 
 ?>

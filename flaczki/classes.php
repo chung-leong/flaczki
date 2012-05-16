@@ -10,8 +10,8 @@ function trace($s) {
 	//echo $s;
 }
 
-function dump($s) {
-	echo nl2br(htmlspecialchars(var_dump($s)));
+function dump($v) {
+	echo str_replace("=>","&#8658;",str_replace("Array","<font color=\"red\"><b>Array</b></font>",nl2br(str_replace(" "," &nbsp; ",htmlspecialchars(print_r($v,true))))));
 }
 
 function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
