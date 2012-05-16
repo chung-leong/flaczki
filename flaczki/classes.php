@@ -10,7 +10,9 @@ function trace($s) {
 	//echo $s;
 }
 
-set_error_handler('backtrace_error_handler');
+function dump($s) {
+	echo nl2br(htmlspecialchars(var_dump($s)));
+}
 
 function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
 	$errorType = array (
@@ -29,15 +31,14 @@ function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
                E_RECOVERABLE_ERROR  => 'RECOVERABLE ERROR'
                );
         
-        echo "<b>{$errorType[$errno]}</b>: ";
-               	
-	echo "$errstr in $errfile on $errline<br>";
-		
+	echo "<b>{$errorType[$errno]}</b>: $errstr in $errfile on $errline<br>";		
 	$trace = debug_backtrace();
 	for($i = 1; $i < count($trace); $i++) {
 		$function = $trace[$i]['function'];
 		echo "$function()<br>";
-	}
+	}	
 }
+
+set_error_handler('backtrace_error_handler');
 
 ?>

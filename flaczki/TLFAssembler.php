@@ -44,12 +44,11 @@ class TLFAssembler {
 		return $written;
 	}
 	
-	protected function writeStartTag($name, $style, $end = false) {
+	protected function writeStartTag($name, $attributes, $end = false) {
 		static $entities = array('"' => '&quot;', "'" => '&apos;', '&' => '&amp;', '<' => '&lt;', '>' => '&gt;');
-		$properties = get_object_vars($style);
 		$s = "<$name";
-		foreach($properties as $name => $value) {
-			if(is_scalar($value)) {
+		foreach($attributes as $name => $value) {
+			if($value !== null && is_scalar($value)) {
 				$s .= ' ' . $name . '="' . strtr($value, $entities) . '"';
 			}
 		}

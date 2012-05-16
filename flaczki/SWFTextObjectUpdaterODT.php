@@ -121,8 +121,7 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		$tlfStyle->fontFamily = 'Calibri';
 		$tlfStyle->fontLookup = 'device';
 						
-		$properties = get_object_vars($odtProperties);
-		foreach($properties as $name => $value) {
+		foreach($odtProperties as $name => $value) {
 			if($value !== null) {
 				switch($name) {
 					//case '?':
@@ -347,13 +346,12 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 	}
 	
 	protected function copyMissingProperties($object1, $object2) {
-		$vars = get_object_vars($object1);
-		foreach($vars as $name => &$value) {
-			if($value === null) {
+		foreach($object1 as $name => &$value1) {
+			if($value1 === null) {
 				$value2 = $object2->$name;
-				$object1->$name = is_object($value2) ? clone $value2 : $value2;
-			} else if(is_object($value) && $object2->$name) {
-				$this->copyMissingProperties($value, $object2->$name);
+				$value1 = is_object($value2) ? clone $value2 : $value2;
+			} else if(is_object($value1) && $object2->$name) {
+				$this->copyMissingProperties($value1, $object2->$name);
 			}
 		}
 	}
