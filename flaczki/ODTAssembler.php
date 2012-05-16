@@ -276,7 +276,7 @@ class ODTAssembler {
 				$this->addAttribute($attributes, 'fo:color', $textProperties->color);
 				$this->addAttribute($attributes, 'fo:country', $textProperties->country);
 				$this->addAttribute($attributes, 'style:font-name', $textProperties->fontName);
-				$this->addAttribute($attributes, 'fo:font-family:', $textProperties->fontFamily);
+				$this->addAttribute($attributes, 'fo:font-family', $textProperties->fontFamily);
 				$this->addAttribute($attributes, 'fo:font-size', $textProperties->fontSize);
 				$this->addAttribute($attributes, 'style:font-style', $textProperties->fontStyle);
 				$this->addAttribute($attributes, 'fo:font-variant', $textProperties->fontVariant);

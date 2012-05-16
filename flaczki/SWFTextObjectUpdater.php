@@ -87,8 +87,9 @@ abstract class SWFTextObjectUpdater {
 	}
 
 	protected function filterName($name) {	
-		$name = preg_replace('/\(.*?\)/', '', $name);
-		$name = preg_replace('/\W+/', '', $name);
+		$name = preg_replace('/\(.*?\)/', '', $name);	// remove any ext inside parentheses
+		$name = str_replace('-', '_', $name);		// replace hyphens with underscores
+		$name = preg_replace('/\W+/', '', $name);	// remove everything else
 		return ($name) ? $name : null;
 	}	
 }
