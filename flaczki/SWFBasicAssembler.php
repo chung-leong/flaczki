@@ -32,8 +32,6 @@ class SWFBasicAssembler {
 		}		
 		$this->writeUI32($fileLength);
 		
-		trace("<h3>Length: $fileLength</h3>");
-		
 		if($swfFile->compressed) {
 			fwrite($this->output, "\x78\x9C");		// zlib header
 			$filter = stream_filter_append($this->output, "zlib.deflate");
@@ -69,7 +67,6 @@ class SWFBasicAssembler {
 			// need to use long format instead
 			$tag->headerLength = 6;
 		}
-		trace("$tag->name ($tag->length)<br>");
 	}
 	
 	protected function writeTag($tag) {
@@ -99,15 +96,12 @@ class SWFBasicAssembler {
 	}
 	
 	protected function finalizeDefineSpriteTag($tag) {
-		trace("<div style='margin-Left:2em; border: 1px dotted lightgrey'>");
-		trace("<h3>Sprite #$tag->spriteId</h3>");
 		$tagLength = 4;
 		foreach($tag->tags as $child) {
 			$this->finalizeTag($child);
 			$tagLength += $child->headerLength + $child->length;
 		}
 		$tag->length = $tagLength;
-		trace("</div>");		
 	}
 	
 	protected function writeDefineSpriteTag($tag) {
@@ -122,12 +116,10 @@ class SWFBasicAssembler {
 		if(!$tag->data && $tag->swfFile) {
 			// the tag is an embedded SWF file
 			// assemble the file using a clone of $this
-			trace("<div style='margin-Left:2em; border: 1px dotted lightgrey'>");
 			$tag->data = '';
 			$assembler = clone $this;
 			$assembler->assemble($tag->data, $tag->swfFile);
 			$tag->length = 6 + strlen($tag->data);
-			trace("</div>");
 		}
 	}
 		

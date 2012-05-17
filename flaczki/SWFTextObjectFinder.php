@@ -14,7 +14,7 @@ class SWFTextObjectFinder {
 		return $textObjects;
 	}
 	
-	public function replace($swfFile, $textObjects) {
+	public function replace($textObjects) {
 		if($textObjects) {
 			// group the changes to the same tag together
 			$groups = array();
