@@ -24,6 +24,7 @@ class ODTParser {
 		$document = $this->document = new ODTDocument;
 		$zipPath = StreamZipArchive::open($input);
 		$dir = opendir($zipPath);
+		$processed = array('content.xml' => false, 'styles.xml' => false );
 		while($file = readdir($dir)) {
 			if($file == 'content.xml' || $file == 'styles.xml') {
 				$this->fileName = $file;
@@ -40,10 +41,14 @@ class ODTParser {
 				while($data = fread($stream, 1024)) {
 					xml_parse($parser, $data, strlen($data) != 1024);
 				}
+				$processed[$file] = true;
 			}
 		}		
 		$this->document = $this->paragraph = $this->span = $this->previousSpan = $this->style = $this->font = null;
-		return $document;
+		if(array_sum($processed) == count($processed)) {
+			return $document;
+		}
+		return false;
 	}
 	
 	public function processStartTag($parser, $name, $attributes) {

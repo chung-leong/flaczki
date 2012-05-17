@@ -8,7 +8,7 @@ class StreamCallback {
 	private $callback;
 	
 	public static function add($callback) {
-		$path = StreamWrapperStaticStorage::add(StreamCallback::PROTOCOL, $callback);
+		$path = StreamWrapperStaticStorage::add(self::PROTOCOL, $callback);
 		return $path; 
 	}
 	

@@ -20,16 +20,14 @@ class SWFGenerator {
 	protected $textObjects;
 	protected $fontFamilies;
 	
-	protected $availableDataModules = array('FloogleDocs');
-
 	public function __construct($config) {
-		$this->destinationFolder = preg_replace('/\/+$/', '', $config['destination']);
-		$this->sourceFilePaths = $config['swf-files'];
-		$this->updateInterval = $config['update-interval'];
-		$this->updateInBackground = $config['deferred-update'];
-		$this->maximumStaleInterval = $config['deferred-update-maximum-interval'];
-		$this->dataModuleConfigs = $config['data-modules'];
-
+		$this->destinationFolder = isset($config['destination']) ? preg_replace('/\/+$/', '', trim($config['destination'])) : '';
+		$this->sourceFilePaths = isset($config['swf-files']) ? array_map('trim', $config['swf-files']) : array();
+		$this->updateInterval = isset($config['update-interval']) ? $config['update-interval'] : 0;
+		$this->updateInBackground = isset($config['deferred-update']) ? $config['deferred-update'] : false;
+		$this->maximumStaleInterval = isset($config['maximum-stale-interval']) ? $config['maximum-stale-interval'] : 86400;
+		$this->dataModuleConfigs = isset($config['data-modules']) ? $config['data-modules'] : array();
+				
 		$this->swfParser = new SWFTextObjectParser;
 		$this->swfAssembler = new SWFTextObjectAssembler;
 		$this->textFinder = new SWFTextObjectFinder;
@@ -241,6 +239,144 @@ class SWFGenerator {
 	}
 	
 	public function validate() {
+		// turn off error reporting since some operations might fail
+		error_reporting(0);
+				
+		echo "<html><head><title>Flaczki SWF Generator</title>";
+		echo "<style> BODY { font-family: sans-serif; font-size: 1em; } .section { border: 1px solid #333333; margin: 1em 1em 1em 1em; background-color: #EEEEEE; } .section-header { border: 1px inset #999999; background-color: #333333; color: #FFFFFF; padding: 0px 4px 0px 4px; font-size: 1.5em; font-weight: bold; margin: 3px 3px 3px 3px; } .subsection-ok { border: 1px inset #CCCCCC; background-color: #DDFFDD; padding: 1px 4px 1px 4px; margin: 3px 3px 3px 3px; } .subsection-err { border: 1px inset #CCCCCC; background-color: #FFDDDD; padding: 1px 4px 1px 4px; margin: 3px 3px 3px 3px; } </style>";
+		echo "</head><body>";
+		
+		$this->createDateModules();
+		$requiredExtensions = array('PCRE', 'XML', 'Zlib');
+		foreach($this->dataModules as $dataModule) {
+			if($dataModule instanceof SWFGeneratorDataModule) {
+				$requiredExtensions = array_merge($requiredExtensions, $dataModule->getRequiredPHPExtensions());
+			}
+		}
+		$requiredExtensions = array_unique($requiredExtensions);
+		sort($requiredExtensions);
+		
+		echo "<div class='section'>";
+		echo "<div class='section-header'>PHP Extensions</div>";
+		$extensions = get_loaded_extensions();
+		foreach($requiredExtensions as $ext) {
+			if(in_array(strtolower($ext), $extensions)) {
+				echo "<div class='subsection-ok'><b>$ext:</b> active</div>";
+			} else {
+				echo "<div class='subsection-err'><b>$ext:</b> missing</div>";
+			}
+		}
+		echo "</div>";
+		echo "<div class='section'>";
+		
+		echo "<div class='section-header'>SWF Generation</div>";
+		if(file_exists($this->destinationFolder)) {
+			$folder = realpath($this->destinationFolder);
+			if(is_writable($this->destinationFolder)) {
+				echo "<div class='subsection-ok'><b>Destination folder:</b> {$folder}</div>";
+			} else {
+				$status = 'err';
+				$message = "";
+				echo "<div class='subsection-err'><b>Destination folder:</b> {$folder} <em>(is not writable)</em></div>";		
+			}
+		} else {
+			echo "<div class='subsection-err' style='align: center'><b>Destination folder:</b> \"{$this->destinationFolder}\" (does not exists)</div>";
+		}
+		$updateInterval = $this->formatSeconds($this->updateInterval);
+		echo "<div class='subsection-ok'><b>Update interval:</b> {$updateInterval}</div>";
+		$updateInBackground = ($this->updateInBackground) ? 'yes' : 'no';
+		echo "<div class='subsection-ok'><b>Deferred update:</b> {$updateInBackground}</div>";
+		$maximumStaleInterval = $this->formatSeconds($this->maximumStaleInterval);
+		echo "<div class='subsection-ok'><b>Maximum stale interval:</b> {$maximumStaleInterval}</div>";
+		echo "</div>";
+
+		foreach($this->sourceFilePaths as $sourceFilePath) {
+			$swfFileName = basename($sourceFilePath);
+			echo "<div class='section'>";
+			echo "<div class='section-header'>SWF File: $swfFileName</div>";
+			if(file_exists($sourceFilePath)) {
+				$fullPath = realpath($sourceFilePath);
+				if(is_readable($sourceFilePath)) {
+					echo "<div class='subsection-ok'><b>Full path:</b> {$fullPath}</div>";
+					$startTime = microtime(true);
+					$input = fopen($sourceFilePath, "rb");
+					$swfFile = ($input) ? $this->swfParser->parse($input) : null;
+					if($swfFile) {
+						if($swfFile->version >= 11) {
+							echo "<div class='subsection-ok'><b>Flash version:</b> {$swfFile->version}</div>";
+						} else {
+							echo "<div class='subsection-err'><b>Flash version:</b> {$swfFile->version}</div>";
+						}					
+						$width = ($swfFile->frameSize->right - $swfFile->frameSize->left) / 20;
+						$height = ($swfFile->frameSize->bottom - $swfFile->frameSize->top) / 20;						
+						echo "<div class='subsection-ok'><b>Dimension:</b> {$width}x{$height}</div>";
+						$compressed = ($swfFile->compressed) ? 'yes' : 'no';
+						echo "<div class='subsection-ok'><b>Compressed:</b> $compressed</div>";
+						
+						$textObjects = $this->textFinder->find($swfFile);
+						$textObjectCount = count($textObjects);
+						$textObjectNames = array();
+						foreach($textObjects as $textObject) {
+							$textObjectNames[] = $textObject->name;
+						}
+						natsort($textObjectNames);
+						$textObjectNames = implode(', ', $textObjectNames);
+						
+						if($textObjectCount > 0) {
+							echo "<div class='subsection-ok'><b>TLF text objects ($textObjectCount):</b> $textObjectNames</div>";
+						} else {
+							echo "<div class='subsection-err'><b>TLF text objects ($textObjectCount):</b></div>";
+						}
+						
+						$fontFamilies = $this->fontFinder->find($swfFile);
+						$fontCount = count($fontFamilies);
+						$fontDescriptions = array();
+						foreach($fontFamilies as $fontFamily) {
+							$fontDescription = $fontFamily->name;
+							$fontStyles = array();
+							if($fontFamily->normal) $fontStyles[] = 'normal';
+							if($fontFamily->bold) $fontStyles[] = 'bold';
+							if($fontFamily->italic) $fontStyles[] = 'italic';
+							if($fontFamily->boldItalic) $fontStyles[] = 'bold-italic';
+							$fontDescription .= " (" . implode('/', $fontStyles) . ")";
+							$fontDescriptions[] = $fontDescription;
+						}
+						$fontDescriptions = implode(', ', $fontDescriptions);
+						echo "<div class='subsection-ok'><b>Embedded fonts ($fontCount):</b> $fontDescriptions</div>";
+						
+						$endTime = microtime(true);
+						$duration = sprintf("%0.4f", $endTime - $startTime);
+						echo "<div class='subsection-ok'><b>Process time: </b> $duration second(s)</div>";						
+					} else {
+						echo "<div class='subsection-err' style='align: center'><em>(errors encountered reading file)</em></div>";
+					}
+				} else {
+					echo "<div class='subsection-err'><b>Full path:</b> {$fullPath} <em>(is not readable)</em></div>";
+				}
+			} else {
+					echo "<div class='subsection-err'><b>Full path:</b> \"$sourceFilePath\" <em>(does not exist)</em></div>";
+			}
+			echo "</div>";
+		}
+		
+		foreach($this->dataModules as $dataModuleName => $dataModule) {
+			echo "<div class='section'>";
+			echo "<div class='section-header'>Data Module: $dataModuleName</div>";			
+			if($dataModule) {
+				if($dataModule instanceof SWFGeneratorDataModule) {
+					flush();
+					$dataModule->validate();
+				} else {
+					echo "<div class='subsection-err' style='text-align: center'><em>(class is not inherited from SWFGeneratorDataModule)</em></div>";
+				}
+			} else {
+					echo "<div class='subsection-err' style='text-align: center'><em>(unknown or mistyped module name)</em></div>";
+					
+			}
+			echo "</div>";
+		}
+				
+		echo "</body>";
 	}
 	
 	public function export() {
@@ -289,8 +425,9 @@ class SWFGenerator {
 	protected function createDateModules() {
 		$this->dataModules = array();
 		foreach($this->dataModuleConfigs as $dataModuleName => $dataModuleConfig) {
-			$dataModule = new $dataModuleName($dataModuleConfig);
-			$this->dataModules[] = $dataModule;
+			$dataModuleName = trim($dataModuleName);
+			$dataModule = class_exists($dataModuleName, true) ? new $dataModuleName($dataModuleConfig) : null;
+			$this->dataModules[$dataModuleName] = $dataModule;
 		}
 	}
 	
@@ -350,6 +487,24 @@ class SWFGenerator {
 	
 	protected function compareTextObjectNames($a, $b) {
 		return strnatcasecmp($a->name, $b->name);
+	}
+	
+	protected function formatSeconds($s) {
+		$text = "";
+		if($s > 3600) {
+			$h = $s / 3600;
+			$s = $s % 3600;
+			$text .= "$h hour" . (($h > 1) ? 's ' : ' ');
+		}
+		if($s > 60) {
+			$m - $s / 60;
+			$s = $s % 60;
+			$text .= "$m minute" . (($m > 1) ? 's ' : ' ');
+		}
+		if($s > 0) {
+			$text .= "$s second" . (($s > 1) ? 's ' : ' ');
+		}
+		return $text;
 	}
 }
 

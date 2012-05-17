@@ -16,6 +16,10 @@ abstract class SWFGeneratorDataModule {
 	
 	public function export(&$output, $textObjects, $fontFamilies) {
 	}
+	
+	public function getRequiredPHPExtensions() {
+		return array();
+	}
 }
 
 ?>

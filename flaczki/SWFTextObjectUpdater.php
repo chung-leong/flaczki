@@ -11,7 +11,7 @@ abstract class SWFTextObjectUpdater {
 		$this->tlfAssembler = new TLFAssembler;
 	}
 	
-	abstract protected function getSections();
+	abstract public function getSections();
 	abstract protected function updateTextObject($tlfObject, $section);
 
 	public function update($textObjects, $fontFamilies) {

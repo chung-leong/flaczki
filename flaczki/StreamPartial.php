@@ -2,6 +2,8 @@
 
 class StreamPartial {
 
+	const PROTOCOL = 'partial';
+
 	private $handle;
 	private $length;
 	private $position;
@@ -15,7 +17,7 @@ class StreamPartial {
 			$record->header = $header;
 			$record->length += strlen($header);
 		}
-		$path = StreamWrapperStaticStorage::add('partial', $record);
+		$path = StreamWrapperStaticStorage::add(self::PROTOCOL, $record);
 		return $path; 
 	}
 	
@@ -73,6 +75,6 @@ class StreamPartialRecord {
 	public $header;
 }
 
-stream_wrapper_register('partial', 'StreamPartial');
+stream_wrapper_register(StreamPartial::PROTOCOL, 'StreamPartial');
 
 ?>

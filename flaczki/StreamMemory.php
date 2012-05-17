@@ -2,6 +2,8 @@
 
 class StreamMemory {
 	
+	const PROTOCOL = 'memory';
+	
 	private $bytes;
 	private $length;
 	private $position;
@@ -10,7 +12,7 @@ class StreamMemory {
 	public static function create(&$bytes) {
 		$record = new StreamMemoryRecord;
 		$record->bytes =& $bytes;
-		$path = StreamWrapperStaticStorage::add('memory', $record);
+		$path = StreamWrapperStaticStorage::add(self::PROTOCOL, $record);
 		return $path; 
 	}
 	
@@ -18,7 +20,7 @@ class StreamMemory {
 	public static function add($bytes) {
 		$record = new StreamMemoryRecord;
 		$record->bytes = $bytes;
-		$path = StreamWrapperStaticStorage::add('memory', $record);
+		$path = StreamWrapperStaticStorage::add(self::PROTOCOL, $record);
 		return $path; 
 	}
 	
@@ -72,6 +74,6 @@ class StreamMemoryRecord {
 	public $bytes;
 }
 
-stream_wrapper_register('memory', 'StreamMemory');
+stream_wrapper_register(StreamMemory::PROTOCOL, 'StreamMemory');
 
 ?>

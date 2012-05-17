@@ -1,7 +1,7 @@
 <?php
 
 function __flaczki_autoload($class_name) {
-    require "$class_name.php";
+    include "$class_name.php";
 }
 
 spl_autoload_register('__flaczki_autoload');
@@ -15,7 +15,7 @@ function dump($v) {
 }
 
 function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
-	$errorType = array (
+	static $errtype = array (
                E_ERROR            => 'ERROR',
                E_WARNING        => 'WARNING',
                E_PARSE          => 'PARSING ERROR',
@@ -31,12 +31,14 @@ function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
                E_RECOVERABLE_ERROR  => 'RECOVERABLE ERROR'
                );
         
-	echo "<b>{$errorType[$errno]}</b>: $errstr in $errfile on $errline<br>";		
-	$trace = debug_backtrace();
-	for($i = 1; $i < count($trace); $i++) {
-		$function = $trace[$i]['function'];
-		echo "$function()<br>";
-	}	
+        if($errno & error_reporting()) {
+		echo "<b>{$errtype[$errno]}</b>: $errstr in $errfile on $errline<br>";		
+		$trace = debug_backtrace();
+		for($i = 1; $i < count($trace); $i++) {
+			$function = $trace[$i]['function'];
+			echo "$function()<br>";
+		}
+	}
 }
 
 set_error_handler('backtrace_error_handler');

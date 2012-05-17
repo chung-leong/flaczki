@@ -9,7 +9,7 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		$this->document = $document;
 	}
 	
-	protected function getSections() {
+	public function getSections() {
 		$sections = array();
 		$section = null;
 		$nextParagraphStyle = null;
@@ -21,14 +21,15 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			if(!$section) {
 				// look for the name of the section in a heading
 				if($paragraph instanceof ODTHeading) {
-					$sectionName = '';
+					$headingText = '';
 					foreach($paragraph->spans as $span) {
-						$sectionName .= $span->text;
+						$headingText .= $span->text;
 					}
-					$sectionName = $this->filterName($sectionName);
+					$sectionName = $this->filterName($headingText);
 					if($sectionName) {
 						$section = new SWFTextObjectUpdaterODTSection;
 						$section->name = $sectionName;
+						$section->title = $headingText;
 					}
 				}
 			} else {
@@ -41,6 +42,10 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			}
 		}
 		return $sections;
+	}
+	
+	public function getSectionNames() {
+		
 	}
 	
 	protected function updateTextObject($tlfObject, $section) {
@@ -359,6 +364,7 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 
 class SWFTextObjectUpdaterODTSection {
 	public $name;
+	public $title;
 	public $paragraphs = array();
 	public $paragraphStyles = array();
 }
