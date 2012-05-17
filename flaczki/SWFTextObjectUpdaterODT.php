@@ -56,11 +56,25 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			$tlfParagraph = new TLFParagraph;
 			$odtParagraphStyle = $section->paragraphStyles[$index];
 			$this->translateProperties($tlfParagraph->style, $odtParagraphStyle->paragraphProperties);
+			
+			$tlfHyperlink = null;
+			$odtHyperlink = null;
 			foreach($odtParagraph->spans as $odtSpan) {
 				$tlfSpan = new TLFSpan;
 				$odtSpanStyle = $this->getApplicableStyle($odtSpan, $odtParagraphStyle);
 				$this->translateProperties($tlfSpan->style, $odtSpanStyle->textProperties);
 				$tlfSpan->text = $odtSpan->text;
+				if($odtSpan->hyperlink !== $odtHyperlink) {
+					$odtHyperlink = $odtSpan->hyperlink;
+					if($odtHyperlink) {
+						$tlfHyperlink = new TLFHyperlink;
+						$tlfHyperlink->href = $odtHyperlink->href;
+						$tlfHyperlink->target = $odtHyperlink->target;
+					} else {
+						$tlfHyperlink = null;
+					}
+				}
+				$tlfSpan->hyperlink = $tlfHyperlink;
 				$tlfParagraph->spans[] = $tlfSpan;
 			}
 			$newParagraphs[] = $tlfParagraph;

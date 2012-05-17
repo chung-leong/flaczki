@@ -6,6 +6,7 @@ class TLFParser {
 	protected $textFlow;
 	protected $paragraph;
 	protected $span;
+	protected $hyperlink;
 
 	public function parse($input) {
 		$parser = xml_parser_create();
@@ -30,10 +31,15 @@ class TLFParser {
 			case 'span':
 				$this->span = new TLFSpan;
 				$this->copyProperties($this->span->style, $attributes);
+				$this->span->hyperlink = $this->hyperlink;
 				break;
 			case 'p':
 				$this->paragraph = new TLFParagraph;
 				$this->copyProperties($this->paragraph->style, $attributes);
+				break;
+			case 'a':
+				$this->hyperlink = new TLFHyperlink;
+				$this->copyProperties($this->hyperlink, $attributes);
 				break;
 			case 'TextFlow':
 				$this->textFlow = new TLFTextFlow;
@@ -59,6 +65,9 @@ class TLFParser {
 					$this->textFlow->paragraphs[] = $this->paragraph;
 				}
 				$this->paragraph = null;
+				break;
+			case 'a':
+				$this->hyperlink = null;
 				break;
 			case 'TextFlow':
 				if($this->textObject) {
@@ -135,6 +144,12 @@ class TLFParagraph extends TLFFlowElement {
 
 class TLFSpan extends TLFFlowElement {
 	public $text;
+	public $hyperlink;
+}
+
+class TLFHyperlink {
+	public $href;
+	public $target;
 }
 
 class TLFFlowElementStyle {

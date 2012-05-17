@@ -27,10 +27,23 @@ class TLFAssembler {
 						$this->writeStartTag('tabStop', $tabStop);
 					}
 				}
+				$hyperlink = null;
 				foreach($paragraph->spans as $span) {
+					if($span->hyperlink !== $hyperlink) {
+						if($hyperlink) {
+							$this->writeEndTag('a');
+						}
+						$hyperlink = $span->hyperlink;
+						if($hyperlink) {
+							$this->writeStartTag('a', $hyperlink);
+						}
+					}
 					$this->writeStartTag('span', $span->style);
 					$this->writeText($span->text);
 					$this->writeEndTag('span');
+				}
+				if($hyperlink) {
+					$this->writeEndTag('a');
 				}
 				$this->writeEndTag('p');
 			}				

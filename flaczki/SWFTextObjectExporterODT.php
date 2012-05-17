@@ -51,6 +51,8 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 				$this->translateProperties($odtParagraphStyle, $textFlow->style);
 				$this->translateProperties($odtParagraphStyle, $tlfParagraph->style);
 
+				$tlfHyperlink = null;
+				$odtHyperlink = null;
 				foreach($tlfParagraph->spans as $tlfSpan) {
 					$odtSpan = new ODTSpan;
 					$odtSpanStyle = new ODTStyle;
@@ -68,6 +70,18 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 					}
 					$odtSpan->styleName = $this->addAutomaticStyle($odtSpanStyle);
 					$odtSpan->text = $tlfSpan->text;
+					if($tlfSpan->hyperlink !== $tlfHyperlink) {
+						$tlfHyperlink = $tlfSpan->hyperlink;
+						if($tlfHyperlink) {
+							$odtHyperlink = new ODTHyperlink;
+							$odtHyperlink->type = 'simple';
+							$odtHyperlink->href = $tlfHyperlink->href;
+							$odtHyperlink->target = $tlfHyperlink->target;
+						} else {
+							$odtHyperlink = null;
+						}
+					}
+					$odtSpan->hyperlink = $odtHyperlink;
 					$odtParagraph->spans[] = $odtSpan;
 				}
 				$odtParagraph->styleName = $this->addAutomaticStyle($odtParagraphStyle);
