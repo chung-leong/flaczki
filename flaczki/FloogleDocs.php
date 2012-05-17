@@ -69,8 +69,9 @@ class FloogleDocs extends SWFGeneratorDataModule {
 					echo "<div class='subsection-err' style='text-align: center'><em>(cannot download document)</em></div>";
 				}
 			}
+		} else {
+			echo "<div class='subsection-err'><b>Supplied URL:</b> <em>(none)</em></div>";
 		}
-		
 	}
 	
 	public function getExportType() {

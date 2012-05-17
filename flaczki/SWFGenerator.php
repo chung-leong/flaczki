@@ -298,6 +298,8 @@ class SWFGenerator {
 				$fullPath = realpath($sourceFilePath);
 				if(is_readable($sourceFilePath)) {
 					echo "<div class='subsection-ok'><b>Full path:</b> {$fullPath}</div>";
+					$filesize = sprintf("%0.1fK", filesize($sourceFilePath) / 1024.0);
+					echo "<div class='subsection-ok'><b>File size:</b> {$filesize}</div>";
 					$startTime = microtime(true);
 					$input = fopen($sourceFilePath, "rb");
 					$swfFile = ($input) ? $this->swfParser->parse($input) : null;
