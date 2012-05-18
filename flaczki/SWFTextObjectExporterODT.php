@@ -92,184 +92,241 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 	}
 	
 	protected function translateProperties($odtStyle, $tlfStyle) {
-		static $FONT_WEIGHT_TABLE = array(
-			'normal' => 'normal',
-			'bold' => 'bold'
-		);		
-		static $TEXT_DECORATION_TABLE1 = array(
-			'none' => 'none',
-			'underline' => 'single'
-		);		
-		static $TEXT_DECORATION_TABLE2 = array(
-			'none' => 'none',
-			'underline' => 'solid'
-		);		
-		static $FONT_STYLE_TABLE = array(
-			'normal' => 'normal',
-			'italic' => 'italic'
-		);
-		static $TAB_ALIGMENT_TABLE_LTR = array(
-			'start' => 'left',
-			'end' => 'right',
-			'center' => 'center'
-		);
-		static $LINE_THROUGH_TABLE = array(
-			'false' => 'none',
-			'true' => 'solid'
-		);
-		static $TEXT_ALIGN_TABLE_LTR = array(
-			'start' => 'start',
-			'end' => 'end',
-			'left' => 'left',
-			'right' => 'right',
-			'center' => 'center',
-			'justify' => 'justify'
-		);
-		static $TEXT_POSITION_TABLE = array(
-			'superscript' => 'super',
-			'subscript' => 'sub'
-		);
-		$TEXT_ALIGN_TABLE = $TEXT_ALIGN_TABLE_LTR;
-		$TAB_ALIGMENT_TABLE = $TAB_ALIGMENT_TABLE_LTR;
-									
-		foreach($tlfStyle as $name => $value) {
-			if($value !== null && $value !== 'inherited') {
-				switch($name) {
-					case 'alignmentBaseline':
-						break;
-					case 'backgroundAlpha':
-						break;
-					case 'backgroundColor':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->backgroundColor = $value;
-						break;
-					case 'baselineShift':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->textPosition = $this->lookUpValue($TEXT_POSITION_TABLE, $value);
-						break;
-					case 'blockProgression':
-						break;
-					case 'breakOpportunity':
-						break;
-					case 'cffHinting':
-						break;
-					case 'clearFloats':
-						break;
-					case 'color':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->color = $value;
-						break;
-					case 'digitCase':
-						break;
-					case 'digitWidth':
-						break;
-					case 'direction':
-						break;
-					case 'dominantBaseline':
-						break;
-					case 'firstBaselineOffset':
-						break;
-					case 'fontFamily':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->fontName = $value;
-						break;
-					case 'fontSize':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->fontSize = "{$value}pt";
-						break;
-					case 'fontStyle':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->fontStyle = $this->lookUpValue($FONT_STYLE_TABLE, $value);
-						break;
-					case 'fontWeight':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->fontWeight = $this->lookUpValue($FONT_WEIGHT_TABLE, $value);
-						break;
-					case 'justificationRule':
-						break;
-					case 'justificationStyle':
-						break;
-					case 'kerning':
-						break;
-					case 'leadingModel':
-						break;
-					case 'ligatureLevel':
-						break;
-					case 'lineBreak':
-						break;
-					case 'lineHeight':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->lineHeight = $value;
-						break;
-					case 'lineThrough':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->textLineThroughStyle = $this->lookUpValue($LINE_THROUGH_TABLE, $value);
-						break;
-					case 'locale':
-						break;
-					case 'paragraphStartIndent':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->marginRight = $this->convertToCentimeter($value);
-						break;
-					case 'paragraphSpaceAfter':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->marginBottom = $this->convertToCentimeter($value);
-						break;
-					case 'paragraphSpaceBefore':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->marginTop = $this->convertToCentimeter($value);
-						break;
-					case 'paragraphStartIndent':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->marginLeft = $this->convertToCentimeter($value);
-						break;
-					case 'tabStops':
-						break;
-					case 'textAlign':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->textAlign = $this->lookUpValue($TEXT_ALIGN_TABLE, $value);
-						break;
-					case 'textAlignLast':
-						break;
-					case 'textAlpha':
-						break;
-					case 'textDecoration':
-						if(!$odtStyle->textProperties) $odtStyle->textProperties = new ODTTextProperties;
-						$odtStyle->textProperties->textUnderlineType = $this->lookUpValue($TEXT_DECORATION_TABLE1, $value);
-						$odtStyle->textProperties->textUnderlineStyle = $this->lookUpValue($TEXT_DECORATION_TABLE2, $value);
-						break;
-					case 'textIndent':
-						if(!$odtStyle->paragraphProperties) $odtStyle->paragraphProperties = new ODTParagraphProperties;
-						$odtStyle->paragraphProperties->textIndent = $this->convertToCentimeter($value);
-						break;
-					case 'textJustify':
-						break;
-					case 'textRotation':
-						break;
-					case 'tracking':
-						break;
-					case 'trackingLeft':
-						break;
-					case 'trackingRight':
-						break;
-					case 'typographicCase':
-						break;
-					case 'verticalAlign':
-						break;
-					case 'wordSpacing':
-						break;
+		// backgroundAlpha, blockProgression, breakOpportunity, clearFloats, digitCase, digitWidth, firstBaselineOffset, justificationRule, justificationStyle
+		// leadingModel, ligatureLevel, lineBreak, textAlpha, wordSpacing
+		
+		// paragraph properties
+		if($tlfStyle->direction) {
+			$this->createParagraphProperties($odtStyle);
+			switch($tlfStyle->direction) {
+				case 'ltr': $odtStyle->paragraphProperties->writingMode = 'lr-tb'; break;
+				case 'rtl': $odtStyle->paragraphProperties->writingMode = 'rl-tb'; break;
+			}
+		}
+		
+		if($tlfStyle->dominantBaseline) {
+			$this->createParagraphProperties($odtStyle);
+			switch($tlfStyle->dominantBaseline) {
+				case 'roman': $odtStyle->paragraphProperties->verticalAlign = 'baseline'; break;
+				case 'descent': 
+				case 'ideographicBottom': $odtStyle->paragraphProperties->verticalAlign = 'bottom'; break;
+				case 'ascent': 
+				case 'ideographicTop': $odtStyle->paragraphProperties->verticalAlign = 'top'; break;
+				case 'ideographicCenter': $odtStyle->paragraphProperties->verticalAlign = 'middle'; break;
+			}
+		}
+		
+		if($tlfStyle->lineHeight) {
+			$this->createParagraphProperties($odtStyle);
+			if(preg_match('/\d+%$/', $tlfStyle->lineHeight)) {
+				$odtStyle->paragraphProperties->lineHeight = $tlfStyle->lineHeight;
+			} else if(is_numeric($tlfStyle->lineHeight)) {
+				$odtStyle->paragraphProperties->lineHeight = $this->convertToCentimeter($tlfStyle->lineHeight);
+			}
+		}
+		
+		if($tlfStyle->paragraphEndIndent) {
+			$this->createParagraphProperties($odtStyle);
+			if($tlfStyle->direction == 'rtl') {
+				$odtStyle->paragraphProperties->marginLeft = $this->convertToCentimeter($tlfStyle->paragraphEndIndent);
+			} else {
+				$odtStyle->paragraphProperties->marginRight = $this->convertToCentimeter($tlfStyle->paragraphEndIndent);
+			}
+		}
+		
+		if($tlfStyle->paragraphSpaceAfter) {
+			$this->createParagraphProperties($odtStyle);
+			$odtStyle->paragraphProperties->marginBottom = $this->convertToCentimeter($tlfStyle->paragraphSpaceAfter);
+		}
+		
+		if($tlfStyle->paragraphSpaceBefore) {
+			$this->createParagraphProperties($odtStyle);
+			$odtStyle->paragraphProperties->marginTop = $this->convertToCentimeter($tlfStyle->paragraphSpaceBefore);
+		}
+		
+		if($tlfStyle->paragraphStartIndent) {
+			$this->createParagraphProperties($odtStyle);
+			if($tlfStyle->direction == 'rtl') {
+				$odtStyle->paragraphProperties->marginRight = $this->convertToCentimeter($tlfStyle->paragraphStartIndent);
+			} else {
+				$odtStyle->paragraphProperties->marginLeft = $this->convertToCentimeter($tlfStyle->paragraphStartIndent);
+			}
+		}
+		
+		if($tlfStyle->tabStops) {
+			$this->createParagraphProperties($odtStyle);
+			$odtStyle->paragraphProperties->odtTabStops = array();
+			$tlfTabStops = explode(' ', $tlfStyle->tabStops);
+			foreach($tlfTabStops as $tlfTabStop) {
+				// see http://help.adobe.com/en_US/FlashPlatform/reference/actionscript/3/flashx/textLayout/elements/FlowElement.html#tabStops
+				if(preg_match('/([sced])([0-9\.]+)(?:\|(.))?/', $tlfTabStop, $m)) {
+					$odtTabStop = new ODTTabStop;
+					$alignment = $m[1];
+					$position = doubleval($m[2]);
+					$decimalAlignmentToken = $m[3];	
+												
+					if($tlfStyle->direction == 'rtl') {								
+						switch($alignment) {
+							case 's': $odtTabStop->type = 'right'; break;
+							case 'e': $odtTabStop->type = 'left'; break;
+							case 'c': $odtTabStop->type = 'center'; break;
+							case 'd': $odtTabStop->type = 'char'; $odtTabStop->char = $decimalAlignmentToken; break;
+						} 
+					} else {
+						switch($alignment) {
+							case 's': $odtTabStop->type = 'left'; break;
+							case 'e': $odtTabStop->type = 'right'; break;
+							case 'c': $odtTabStop->type = 'center'; break;
+							case 'd': $odtTabStop->type = 'char'; $odtTabStop->char = $decimalAlignmentToken; break;
+						} 
+					}
+					$odtTabStop->position = $this->convertToCentimeter($position);
+					$odtStyle->paragraphProperties->tabStops[] = $odtTabStop;
 				}
 			}
 		}
+		
+		if($tlfStyle->textAlign) {
+			$this->createParagraphProperties($odtStyle);
+			switch($tlfStyle->textAlign) {
+				case 'start':
+				case 'end':
+				case 'left':
+				case 'right':
+				case 'center':
+				case 'justify': $odtStyle->paragraphProperties->textAlign = $tlfStyle->textAlign; break;
+			}
+		}
+		
+		if($tlfStyle->textAlignLast) {
+			$this->createParagraphProperties($odtStyle);
+			switch($tlfStyle->textAlign) {
+				case 'start':
+				case 'end':
+				case 'left':
+				case 'right':
+				case 'center':
+				case 'justify': $odtStyle->paragraphProperties->textAlignLast = $tlfStyle->textAlignLast; break;
+			}
+		}
+		
+		if($tlfStyle->textIndent) {
+			$this->createParagraphProperties($odtStyle);
+			$odtStyle->paragraphProperties->textIndent = $this->convertToCentimeter($value);
+		}
+		
+		// text properties
+		if($tlfStyle->baselineShift) {
+			$this->createTextProperties($odtStyle);
+			switch($tlfStyle->baselineShift) {
+				case 'superscript': $odtStyle->textProperties->textPosition = 'super'; break;
+				case 'subscript': $odtStyle->textProperties->textPosition = 'sub'; break;
+			}
+		}
+
+		if($tlfStyle->backgroundColor) {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->backgroundColor = $tlfStyle->backgroundColor;
+		}
+									
+		if($tlfStyle->color) {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->color = $tlfStyle->color;
+		}
+		
+		if($tlfStyle->fontFamily) {
+			$this->createTextProperties($odtStyle);
+			// assume font is going to be named after its family
+			$odtStyle->textProperties->fontName = $tlfStyle->fontFamily;
+		}
+		
+		if($tlfStyle->fontSize) {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->fontSize = "{$tlfStyle->fontSize}pt";
+		}
+		
+		if($tlfStyle->fontStyle) {
+			$this->createTextProperties($odtStyle);
+			switch($tlfStyle->fontStyle) {
+				case 'normal': $odtStyle->textProperties->fontStyle = 'normal'; break;
+				case 'italic': $odtStyle->textProperties->fontStyle = 'italic'; break;
+			}
+		}
+		
+		if($tlfStyle->fontWeight) {
+			$this->createTextProperties($odtStyle);
+			switch($tlfStyle->fontWeight) {
+				case 'normal': $odtStyle->textProperties->fontWeight = 'normal'; break;
+				case 'bold': $odtStyle->textProperties->fontWeight = 'bold'; break;
+			}
+		}
+		
+		if($tlfStyle->kerning) {
+			$this->createTextProperties($odtStyle);
+			switch($tlfStyle->kerning) {
+				case 'on': $odtStyle->textProperties->letterKerning = 'true'; break;
+				case 'off': $odtStyle->textProperties->letterKerning = 'false'; break;
+			}
+		}
+		
+		if($tlfStyle->lineThrough) {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->textLineThroughStyle = 'solid';
+		}
+		
+		if($tlfStyle->locale) {
+			// TODO
+		}
+		
+		if($tlfStyle->textDecoration) {
+			$this->createTextProperties($odtStyle);
+			switch($tlfStyle->textDecoration) {
+				case 'underline': 
+					$odtStyle->textProperties->textUnderlineType = 'single';
+					$odtStyle->textProperties->textUnderlineStyle = 'solid';
+					break;
+			}
+		}
+		
+		if($tlfStyle->textRotation) {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->textRotationAngle = $tlfStyle->textRotation;
+		}
+		
+		if($tlfStyle->trackingLeft && $tlfStyle->direction == 'rtl') {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->letterSpacing = $this->convertToCentimeter($tlfStyle->trackingLeft);
+		}
+		
+		if($tlfStyle->trackingRight && $tlfStyle->direction != 'rtl') {
+			$this->createTextProperties($odtStyle);
+			$odtStyle->textProperties->letterSpacing = $this->convertToCentimeter($tlfStyle->trackingRight);
+		}
+		
+		if($tlfStyle->typographicCase) {
+			switch($tlfStyle->typographicCase) {
+				case 'lower': $odtStyle->textProperties->textTransform = 'lowercase'; break;
+				case 'upper': $odtStyle->textProperties->textTransform = 'uppercase'; break;
+				case 'capsToSmallCaps': 
+				case 'lowercaseToSmallCaps': $odtStyle->textProperties->fontVariant = 'small-caps'; break;
+			}
+		}
+		
 	}
 	
 	protected function convertToCentimeter($point) {
-		return sprintf("%.4dcm", $point * 0.0352777778);
+		return sprintf("%.4fcm", $point * 0.0352777778);
 	}
 	
-	protected function lookUpValue($table, $key) {
-		if(isset($table[$key])) {
-			return $table[$key];
+	protected function createTextProperties($odtStyle) {	
+		if(!$odtStyle->textProperties) {
+			$odtStyle->textProperties = new ODTTextProperties;
+		}
+	}
+
+	protected function createParagraphProperties($odtStyle) {	
+		if(!$odtStyle->paragraphProperties) {
+			$odtStyle->paragraphProperties = new ODTParagraphProperties;
 		}
 	}
 
@@ -557,7 +614,7 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 			} else {
 				$odtFont->fontPitch = 'variable';
 			}
-		} else if($panose[1] == 3) {
+		} else if($panose[1] == 3 || $panose[1] == 5) {
 			if($panose[4] == 3) {
 				$odtFont->fontPitch = 'fixed';
 			} else {

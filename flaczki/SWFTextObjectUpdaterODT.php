@@ -44,25 +44,20 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		return $sections;
 	}
 	
-	public function getSectionNames() {
-		
-	}
-	
 	protected function updateTextObject($tlfObject, $section) {
-		$styleUsage = $this->getStyleUsage($tlfObject, 'fontFamily');
-		
+		// create paragraphs 
 		$newParagraphs = array();
 		foreach($section->paragraphs as $index => $odtParagraph) {
 			$tlfParagraph = new TLFParagraph;
 			$odtParagraphStyle = $section->paragraphStyles[$index];
-			$this->translateProperties($tlfParagraph->style, $odtParagraphStyle->paragraphProperties);
+			$this->translateProperties($tlfParagraph->style, $odtParagraphStyle);
 			
 			$tlfHyperlink = null;
 			$odtHyperlink = null;
 			foreach($odtParagraph->spans as $odtSpan) {
 				$tlfSpan = new TLFSpan;
 				$odtSpanStyle = $this->getApplicableStyle($odtSpan, $odtParagraphStyle);
-				$this->translateProperties($tlfSpan->style, $odtSpanStyle->textProperties);
+				$this->translateProperties($tlfSpan->style, $odtSpanStyle);
 				$tlfSpan->text = $odtSpan->text;
 				if($odtSpan->hyperlink !== $odtHyperlink) {
 					$odtHyperlink = $odtSpan->hyperlink;
@@ -79,246 +74,295 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			}
 			$newParagraphs[] = $tlfParagraph;
 		}
-		$tlfObject->textFlow->paragraphs = $newParagraphs;
+		
+		// the ODT format doesn't contain information for these properties
+		// insertParagraphs() will see if it's possible to transfer them from the original text object
+		$unmappedProperties = array('backgroundAlpha', 'digitCase', 'digitWidth', 'justificationRule', 'justificationStyle', 'ligatureLevel', 'textAlpha', 'wordSpacing');
+		$this->insertParagraphs($tlfObject, $newParagraphs, $unmappedProperties);
 	}
 	
-	protected function translateProperties($tlfStyle, $odtProperties) {	
-		static $FONT_WEIGHT_TABLE = array(
-			'normal' => 'normal',
-			'bold' => 'bold',
-			'100' => 'normal',
-			'200' => 'normal',
-			'300' => 'normal',
-			'400' => 'normal',
-			'500' => 'normal',
-			'600' => 'bold',
-			'700' => 'bold',
-			'800' => 'bold',
-			'900' => 'bold'
-		);		
-		static $TEXT_DECORATION_TABLE1 = array(
-			'none' => 'none',
-			'single' => 'underline',
-			'double' => 'underline'
-		);		
-		static $TEXT_DECORATION_TABLE2 = array(
-			'none' => 'none',
-			'solid' => 'underline',
-			'dotted' => 'underline',
-			'dash' => 'underline',
-			'long-dash' => 'underline',
-			'dot-dash' => 'underline',
-			'dot-dot-dash' => 'underline',
-			'wave' => 'underline'
-		);		
-		static $FONT_STYLE_TABLE = array(
-			'normal' => 'normal',
-			'italic' => 'italic',
-			'oblique' => 'italic'
-		);
-		static $TAB_ALIGMENT_TABLE_LTR = array(
-			'left' => 'start',
-			'right' => 'end',
-			'center' => 'center'
-		);
-		static $LINE_THROUGH_TABLE = array(
-			'none' => 'false',
-			'solid' => 'true'
-		);
-		static $TEXT_ALIGN_TABLE_LTR = array(
-			'start' => 'start',
-			'end' => 'end',
-			'left' => 'left',
-			'right' => 'right',
-			'center' => 'center',
-			'justify' => 'justify'
-		);
-	
-		$TAB_ALIGMENT_TABLE = $TAB_ALIGMENT_TABLE_LTR;
-		$TEXT_ALIGN_TABLE = $TEXT_ALIGN_TABLE_LTR;
-		
-		$tlfStyle->fontFamily = 'Calibri';
-		$tlfStyle->fontLookup = 'device';
-						
-		foreach($odtProperties as $name => $value) {
-			if($value !== null) {
-				switch($name) {
-					//case '?':
-					//	$tlfStyle->alignmentBaseline = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->backgroundAlpha = ''; 
-					//	break;
-					case 'backgroundColor':
-						$tlfStyle->backgroundColor = $this->parseColor($value);
-						break;
-					case 'textPosition':
-						if(substr_compare($value, 'sub', 0, 3) == 0) {
-							$tlfStyle->baselineShift = 'subscript';
-						} else if(substr_compare($value, 'super', 0, 5) == 0) {
-							$tlfStyle->baselineShift = 'superscript';
-						}
-						break;
-					//case '?':
-					//	$tlfStyle->blockProgression = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->breakOpportunity = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->cffHinting = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->clearFloats = '';
-					//	break;
-					case 'color':
-						$tlfStyle->color = $this->parseColor($value);
-						break;
-					//case '?':
-					//	$tlfStyle->digitCase = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->digitWidth = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->direction = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->dominantBaseline = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->firstBaselineOffset = '';
-					//	break;
-					case 'fontFamily':
-						$tlfStyle->fontFamily = $value;
-						$tlfStyle->fontLookup = FontLookup.DEVICE;
-						break;
-					case 'fontSize':
-						$tlfStyle->fontSize = $this->parseLength($value);
-						break;
-					case 'fontStyle':
-						$tlfStyle->fontStyle = $FONT_STYLE_TABLE[$value];
-						break;
-					case 'fontWeight':
-						$tlfStyle->fontWeight = $FONT_WEIGHT_TABLE[$value];
-						break;
-					//case '?':
-					//	$tlfStyle->justificationRule = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->justificationStyle = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->kerning = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->leadingModel = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->ligatureLevel = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->lineBreak = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->lineHeight = '';
-					//	break;
-					case 'textLineThroughStyle':
-						$tlfStyle->lineThrough = $LINE_THROUGH_TABLE[$value];
-						break;
-					//case '?':
-					//	$tlfStyle->locale = '';
-					//	break;
-					case 'marginRight':
-						$tlfStyle->paragraphStartIndent = $this->parseLength($value);
-						break;
-					case 'marginBottom':
-						$tlfStyle->paragraphSpaceAfter = $this->parseLength($value);
-						break;
-					case 'marginTop':
-						$tlfStyle->paragraphSpaceBefore =  $this->parseLength($value);
-						break;
-					case 'marginLeft':
-						$tlfStyle->paragraphStartIndent = $this->parseLength($value);
-						break;
-					case 'tabStops':
-						$tlfTabStops = array();
-						foreach($value as $odtTabStop) {
-							$tlfTabStop = new TLFTabStopFormat;
-							$tlfTabStop->alignment = $TAB_ALIGMENT_TABLE[$odtTabStop->type];
-							if($odtTabStop->char) {
-		 						$tlfTabStop->decimalAlignmentToken = $odtTabStop->char;
-		 					}
-							$tlfTabStop->position = $this->parseLength($odtTabStop->position);						
-							$tlfTabStops[] = $tlfTabStop;
-						}
-						$tlfStyle->tabStops = $tlfTabStops;
-						break;
-					case 'textAlign':
-						$tlfStyle->textAlign = $TEXT_ALIGN_TABLE[$value];
-						break;
-					//case '?':
-					//	$tlfStyle->textAlignLast = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->textAlpha = '';
-					//	break;
-					case 'textUnderlineType':
-						$tlfStyle->textDecoration = $TEXT_DECORATION_TABLE1[$value];
-						break;
-					case 'textUnderlineStyle':
-						$tlfStyle->textDecoration = $TEXT_DECORATION_TABLE2[$value];
-						break;
-					case 'textIndent':
-						$tlfStyle->textIndent = $this->parseLength($value);
-						break;
-					//case '?':
-					//	$tlfStyle->textJustify = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->textRotation = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->tracking = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->trackingLeft = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->trackingRight = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->typographicCase = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->verticalAlign = '';
-					//	break;
-					//case '?':
-					//	$tlfStyle->wordSpacing = '';
-					//	break;
+	protected function translateProperties($tlfStyle, $odtStyle) {
+		// paragraph properties
+		if($paragraphProperties = $odtStyle->paragraphProperties) {
+			if($paragraphProperties->writingMode) {
+				switch($paragraphProperties->writingMode) {
+					case 'lr':
+					case 'lr-tb':
+					case 'lr-bt': $tlfStyle->direction = 'ltr'; break;
+					case 'rl':
+					case 'rl-tb':
+					case 'rl-bt': $tlfStyle->direction = 'rtr'; break;
 				}
 			}
+			
+			if($paragraphProperties->verticalAlign) {
+				switch($paragraphProperties->verticalAlign) {
+					case 'baseline': $tlfStyle->dominantBaseline = $tlfStyle->alignmentBaseline = 'roman'; break;
+					case 'bottom': $tlfStyle->dominantBaseline = $tlfStyle->alignmentBaseline = 'descent'; break;
+					case 'top': $tlfStyle->dominantBaseline = $tlfStyle->alignmentBaseline = 'ascent'; break;
+					case 'middle': $tlfStyle->dominantBaseline = $tlfStyle->alignmentBaseline ='ideographicCenter'; break;
+				}
+			}
+			
+			if($paragraphProperties->lineHeight) {
+				if(($percentage = $this->parsePercentage($paragraphProperties->lineHeight, -1000, 1000)) !== null) {
+					$tlfStyle->lineHeight = "$percentage%";
+				} else if(($length = $this->parseLength($paragraphProperties->lineHeight, -720, 720)) !== null) {
+					$tlfStyle->lineHeight = $length;
+				}
+			}
+			
+			if($paragraphProperties->marginLeft) {
+				if($tlfStyle->direction == 'rtl') {
+					$tlfStyle->paragraphEndIndent = $this->parseLength($paragraphProperties->marginLeft, 0, 8000);
+				} else {
+					$tlfStyle->paragraphStartIndent = $this->parseLength($paragraphProperties->marginLeft, 0, 8000);
+				}
+			}
+			
+			if($paragraphProperties->marginRight) {
+				if($tlfStyle->direction == 'rtl') {
+					$tlfStyle->paragraphStartIndent = $this->parseLength($paragraphProperties->marginRight, 0, 8000);
+				} else {
+					$tlfStyle->paragraphEndIndent = $this->parseLength($paragraphProperties->marginRight, 0, 8000);
+				}
+			}
+			
+			if($paragraphProperties->marginBottom) {
+				$tlfStyle->paragraphSpaceAfter = $this->parseLength($paragraphProperties->marginBottom, 0, 8000);
+			}
+			
+			if($paragraphProperties->marginTop) {
+				$tlfStyle->paragraphSpaceBefore = $this->parseLength($paragraphProperties->marginTop, 0, 8000);
+			}
+			
+			if($paragraphProperties->tabStops) {
+				$tlfTabStops = array();
+				foreach($paragraphProperties->tabStops as $odtTabStop) {
+					$position = $this->parseLength($odtTabStop->position, 0, 10000);						
+					$tlfTabStop = '';
+					if($tlfStyle->direction == 'rtl') {								
+						switch($odtTabStop->type) {
+							case 'left': $tlfTabStop = "e$position"; break;
+							case 'right': $tlfTabStop = "s$position"; break;
+							case 'center': $tlfTabStop = "c$position"; break;
+							case 'char': $tlfTabStop = "d$position|$odtTabStop->char"; break;
+						}
+					} else {
+						switch($odtTabStop->type) {
+							case 'left': $tlfTabStop = "e$position"; break;
+							case 'right': $tlfTabStop = "s$position"; break;
+							case 'center': $tlfTabStop = "c$position"; break;
+							case 'char': $tlfTabStop = "d$position|$odtTabStop->char"; break;
+						}
+					}
+					if($tlfTabStop) {
+						$tlfTabStops[] = $tlfTabStop;
+					}
+				}
+				$tlfStyle->tabStops = implode(' ', $tlfTabStops);
+			}
+			
+			if($paragraphProperties->textAlign) {
+				switch($paragraphProperties->textAlign) {
+					case 'start':
+					case 'end':
+					case 'left':
+					case 'right':
+					case 'center':
+					case 'justify': $tlfStyle->textAlign = $paragraphProperties->textAlign; break;
+				}
+			}
+			
+			if($paragraphProperties->textAlignLast) {
+				switch($paragraphProperties->textAlignLast) {
+					case 'start':
+					case 'end':
+					case 'left':
+					case 'right':
+					case 'center':
+					case 'justify': $tlfStyle->textAlignLast = $paragraphProperties->textAlignLast; break;
+				}
+			}
+			
+			if($paragraphProperties->textIndent) {
+				$tlfStyle->textIndent = $this->parseLength($paragraphProperties->textIndent, -8000, 8000);
+			}
+		}
+		
+		// text properties
+		if($textProperties = $odtStyle->textProperties) {
+			if($textProperties->backgroundColor) {
+				$tlfStyle->backgroundColor = $textProperties->backgroundColor;
+			}
+										
+			if($textProperties->color) {
+				$tlfStyle->color = $textProperties->color;
+			}
+			
+			if($textProperties->fontFamily) {
+				$tlfStyle->fontFamily = $font->fontFamily;
+			} else if($textProperties->fontName) {
+				if(isset($this->document->fonts[$textProperties->fontName])) {
+					$font = $this->document->fonts[$textProperties->fontName];
+					$tlfStyle->fontFamily = $font->fontFamily;
+				}
+			}
+			
+			if($textProperties->fontSize) {
+				$tlfStyle->fontSize = floatval($textProperties->fontSize);
+			}
+			
+			if($textProperties->fontStyle) {
+				switch($textProperties->fontStyle) {
+					case 'normal': $tlfStyle->fontStyle = 'normal'; break;
+					case 'italic': $tlfStyle->fontStyle = 'italic'; break;
+				}
+			}
+
+			if($textProperties->fontVariant) {
+				if(!$textProperties->textTransform || $textProperties->textTransform == 'none') {
+					switch($textProperties->fontVariant) {
+						case 'normal': $tlfStyle->typographicCase = 'default'; break;
+						case 'small-caps': $tlfStyle->typographicCase = 'lowercaseToSmallCaps'; break;
+					}
+				}
+			}
+			
+			if($textProperties->fontWeight) {
+				switch($textProperties->fontWeight) {
+					case 'normal': $tlfStyle->fontWeight = 'normal'; break;
+					case 'bold': $tlfStyle->fontWeight = 'bold'; break;
+					default:
+						if(intval($textProperties->fontWeight) > 400) {
+							$tlfStyle->fontWeight = 'bold';
+						} else {
+							$tlfStyle->fontWeight = 'normal';
+						}
+				}
+			}
+			
+			if($textProperties->language) {
+				// TODO
+				if($textProperties->country) {
+					// TODO
+				}
+			}
+			
+			if($textProperties->letterKerning) {
+				switch($textProperties->letterKerning) {
+					case 'true': $tlfStyle->kerning = 'true'; break;
+					case 'false': $tlfStyle->kerning = 'false'; break;
+				}
+			}
+			
+			if($textProperties->letterSpacing) {
+				if($tlfStyle->direction == 'rtl') {
+					$tlfStyle->trackingLeft = $this->parseLength($value, -1000, 1000);
+				} else {
+					$tlfStyle->trackingRight = $this->parseLength($value, -1000, 1000);
+				}
+			}
+			
+			if($textProperties->textLineThroughStyle) {
+				switch($textProperties->textLineThroughStyle) {
+					case 'none': $tlfStyle->lineThrough = 'false'; break;
+					case 'solid':
+					case 'dotted':
+					case 'dash':
+					case 'long-dash':
+					case 'dot-dash':
+					case 'dot-dot-dash':
+					case 'wave': $tlfStyle->lineThrough = 'true'; break;
+				}
+			}
+			
+			if($textProperties->textLineThroughType) {
+				switch($textProperties->textLineThroughStyle) {
+					case 'none': $tlfStyle->lineThrough = 'false'; break;
+					case 'single':
+					case 'double': $tlfStyle->lineThrough = 'true'; break;
+				}
+			}
+						
+			if($textProperties->textPosition) {
+				if(preg_match('/sub/', $textProperties->textPosition)) {
+					$tlfStyle->baselineShift = 'subscript';
+				} else if(preg_match('/super/', $textProperties->textPosition)) {
+					$tlfStyle->baselineShift = 'superscript';
+				}
+			}
+			
+			if($textProperties->textRotationAngle) {
+				// make sure it's a multiple of 90
+				$tlfStyle->textRotation = intval($textProperties->textRotationAngle) / 90 * 90;
+			}
+			
+			if($textProperties->textTransform) {
+				switch($textProperties->textTransform) {
+					case 'none': $tlfStyle->typographicCase = 'default'; break;
+					case 'lowercase': $tlfStyle->typographicCase = 'lower'; break;
+					case 'uppercase': $tlfStyle->typographicCase = 'upper'; break;
+				}
+			}
+			
+			if($textProperties->textUnderlineStyle) {
+				switch($textProperties->textUnderlineStyle) {
+					case 'none': $tlfStyle->textDecoration = 'none'; break;
+					case 'solid':
+					case 'dotted':
+					case 'dash':
+					case 'long-dash':
+					case 'dot-dash':
+					case 'dot-dot-dash':
+					case 'wave': $tlfStyle->textDecoration = 'underline'; break;
+				}
+			}
+			
+			if($textProperties->textUnderlineType) {
+				switch($textProperties->textUnderlineType) {
+					case 'none': $tlfStyle->textDecoration = 'none'; break;
+					case 'single':
+					case 'double': $tlfStyle->textDecoration = 'underline'; break;
+				}
+			}			
 		}
 	}
 	
-	protected function parseLength($s) {
-		static $CM_TO_POINT_RATIO = 28.3464567;
-		static $IN_TO_POINT_RATIO = 72;
-		static $PT_TO_PIXEL_RATIO = 1.333333333333333;
-		
+	protected function parseLength($s, $min, $max) {		
 		if(preg_match('/cm$/', $s)) {
-			return round(doubleval($s) * $CM_TO_POINT_RATIO);
+			$value = round(doubleval($s) * 28.3464567);
 		} else if(preg_match('/in$/', $s)) {
-			return round(doubleval($s) * $IN_TO_POINT_RATIO);
+			$value = round(doubleval($s) * 72);
+		} else if(preg_match('/pt$/', $s)) {
+			$value = doubleval($s);
 		} else {
-			return doubleval($s);
+			return null;
 		}
+		if($value < $min) {
+			$value = $min;
+		}
+		if($value > $max) {
+			$value = $max;
+		}
+		return $value;
+	}
+
+	protected function parsePercentage($s, $min, $max) {
+		if(preg_match('/%$/', $s)) {
+			$value = doubleval($s);
+		} else {
+			return null;
+		}
+		if($value < $min) {
+			$value = $min;
+		}
+		if($value > $max) {
+			$value = $max;
+		}
+		return $value;
 	}
 	
-	protected function parseColor($s) {
-		return $s;
-	}
-		
 	protected function getApplicableStyle($object, $containerStyle = null) {
 		$style = new ODTStyle;
 		
@@ -374,6 +418,64 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			}
 		}
 	}
+	
+	protected function getFontPanose($fontFamilyName) {
+		// use the information in the document if available
+		foreach($this->document->fonts as $font) {
+			if($font->fontFamily == $fontFamilyName) {
+				if($font->panose1) {
+					
+				} else {
+					// see if the parent class can look it up
+					if($panose = parent::getFontPanose($fontFamily)) {
+						return $panose;
+					}
+					// create one based on what limited info we have
+					return $this->generatePanoseFromFontProperties($odtFont);
+				}
+				break;
+			}
+		}
+		return parent::getFontPanose($fontFamily);
+	}
+	
+	protected function generatePanoseFromFontProperties($odtFont) {
+		$panose = array_fill(1, 10, 0);
+		switch($odtFont->fontFamilyGeneric) {
+			case 'script': $panose[1] = 3; break;
+			case 'decorative': $panose[1] = 4; break;
+			case 'system': $panose[1] = 5; break;
+			case 'swiss': $panose[1] = 2; $panose[2] = 11; break;
+			case 'roman': $panose[1] = 2; $panose[2] = 2; break;
+		}
+		if($panose[1] == 2 && $odtFont->fontStyle == 'oblique') {
+			$panose[8] = 9;
+		}
+		if($odtFont->fontWeight == 'bold') {
+			$panose[3] = 8;
+		} else if(is_numeric($odtFont->fontWeight)) {
+			$value = floatval($odtFont->fontWeight);			
+			// convert range 100-900 to 2-11
+			$panose[3] = (int) round(2 + (($value - 100) / 900) * 10);
+		}
+		switch($odtFont->fontPitch) {
+			case 'fixed':
+				if($panose[1] == 2) {
+					$panose[4] = 9;
+				} else if($panose[1] == 3 || $panose[1] == 5) {
+					$panose[4] = 3;
+				}
+				break;
+			case 'variable':
+				if($panose[1] == 2) {
+					$panose[4] = 3;
+				} else if($panose[1] == 3 || $panose[1] == 5) {
+					$panose[4] = 2;
+				}
+				break;
+		}
+	}
+		
 }
 
 class SWFTextObjectUpdaterODTSection {

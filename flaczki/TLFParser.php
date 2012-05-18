@@ -28,6 +28,12 @@ class TLFParser {
 
 	public function processStartTag($parser, $name, $attributes) {
 		switch($name) {
+			case 'tab':
+				$this->processCharacterData($parser, "\t");
+				break;
+			case 'br':
+				$this->processCharacterData($parser, "\n");
+				break;
 			case 'span':
 				$this->span = new TLFSpan;
 				$this->copyProperties($this->span->style, $attributes);
@@ -88,7 +94,9 @@ class TLFParser {
 	
 	protected function copyProperties($object, $attributes) {
 		foreach($attributes as $name => $value) {
-			$object->$name = $value;
+			if($value != 'inherited') {
+				$object->$name = $value;
+			}
 		}
 	}
 }
@@ -204,12 +212,6 @@ class TLFFlowElementStyle {
 	public $typographicCase;
 	public $verticalAlign;
 	public $wordSpacing;	
-}
-
-class TLFTabStopFormat {
-	public $alignment;
- 	public $decimalAlignmentToken;
- 	public $position;
 }
 
 ?>

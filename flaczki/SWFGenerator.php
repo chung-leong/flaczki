@@ -172,9 +172,11 @@ class SWFGenerator {
 			$this->textFinder->replace($changes);
 				
 			// remove the ones that's been changed from the list
-			foreach($this->textObjects as $index => $textObject) {
-				if(in_array($textObject, $changes)) {
-					unset($this->textObjects[$index]);
+			if($changes) {
+				foreach($this->textObjects as $index => $textObject) {
+					if(in_array($textObject, $changes)) {
+						unset($this->textObjects[$index]);
+					}
 				}
 			}
 		}

@@ -261,7 +261,7 @@ class ODTAssembler {
 						$this->addAttribute($attributes, 'style:char', $tabStop->char);
 						$this->addAttribute($attributes, 'style:position', $tabStop->position);
 						$this->addAttribute($attributes, 'style:type', $tabStop->type);
-						$this->writeTag('style:tab-stops', $attributes);
+						$this->writeTag('style:tab-stop', $attributes);
 					}
 					$this->writeEndTag('style:tab-stops');
 					$this->writeEndTag('style:paragraph-properties');

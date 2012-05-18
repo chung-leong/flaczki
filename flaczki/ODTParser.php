@@ -267,6 +267,7 @@ class ODTParagraphProperties {
 	public $textIndent;
 	public $textAlign;
 	public $textAlignLast;
+	public $verticalAlign;
 	public $writingMode;
 }
 
@@ -288,7 +289,7 @@ class ODTTextProperties {
 	public $textLineThroughType;
 	public $textPosition;
 	public $textRotationAngle;
-	public $textTransformations;
+	public $textTransform;
 	public $textUnderlineStyle;	
 	public $textUnderlineType;
 }

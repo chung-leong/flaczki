@@ -14,7 +14,7 @@ abstract class SWFTextObjectExporter {
 			$section = new SWFTextObjectExportSection;
 			$section->name = $textObject->name;
 			$section->tlfObject = $this->tlfParser->parse($textObject->xml);
-			$sections[] = $section;
+			$sections[] = $section;				
 		}
 		return $this->exportSections($sections, $fontFamilies);
 	}
