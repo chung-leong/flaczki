@@ -72,10 +72,12 @@ abstract class SWFTextObjectUpdater {
 		
 		// see if font sizes need to be adjusted
 		$fontSizeScaleFactor = 1;
-		if($this->maintainOriginalFontSize) {
-			$originalMostFrequentSize = key($originalStyleUsage['fontSize']);
-			$newMostFrequentSize = key($newStyleUsage['fontSize']);
-			if($originalMostFrequentSize != $newMostFrequentSize) {
+		if($this->fontPolicy->maintainOriginalFontSize) {
+			$originalFontSizeUsage  = $originalStyleUsage['fontSize'];
+			$newFontSizeUsage = $newStyleUsage['fontSize'];
+			$originalMostFrequentSize = key($originalFontSizeUsage);
+			$newMostFrequentSize = key($newFontSizeUsage);
+			if($originalMostFrequentSize != $newMostFrequentSize && $newMostFrequentSize > 0) {
 				$fontSizeScaleFactor = (double) $originalMostFrequentSize / $newMostFrequentSize;
 			}
 		}

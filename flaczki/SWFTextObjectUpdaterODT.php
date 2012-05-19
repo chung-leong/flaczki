@@ -72,7 +72,9 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 				$tlfSpan->hyperlink = $tlfHyperlink;
 				$tlfParagraph->spans[] = $tlfSpan;
 			}
-			$newParagraphs[] = $tlfParagraph;
+			if(count($tlfParagraph->spans) > 0) {
+				$newParagraphs[] = $tlfParagraph;
+			}
 		}
 		
 		// the ODT format doesn't contain information for these properties
