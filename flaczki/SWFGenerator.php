@@ -142,13 +142,13 @@ class SWFGenerator {
 		$mostRecentFileName = ($destinationFileList) ? current($destinationFileList) : null;
 		$mostRecentVersion = ($destinationFileList) ? key($destinationFileList) : 0;
 		$scriptRoot = dirname($_SERVER["SCRIPT_NAME"]);
-		if($scriptRoot == '\\') {
-			$scriptRoot = '/';
+		if(strlen($scriptRoot) == 1) {
+			$scriptRoot = '';
 		}
 		if($mostRecentFileName && $mostRecentVersion > 0) {
-			$swfFileUrl = "{$scriptRoot}{$this->destinationFolder}/{$mostRecentFileName}";
+			$swfFileUrl = "{$scriptRoot}/{$this->destinationFolder}/{$mostRecentFileName}";
 		} else {
-			$swfFileUrl = "{$scriptRoot}{$targetSWFFilePath}";
+			$swfFileUrl = "{$scriptRoot}/{$targetSWFFilePath}";
 		}
 		$this->redirect($swfFileUrl);
 		
