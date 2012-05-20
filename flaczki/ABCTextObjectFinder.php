@@ -33,8 +33,20 @@ class ABCTextObjectFinder {
 			}
 		}
 		
-		// eliminate duplicates (e.g. when a text object is in a button)
-		return array_unique($textObjects);
+		$nameIndexAndTextIndexHash = array();
+		foreach($textObjects as $index => $textObject) {
+			$key = $textObject->nameIndex . '=' . $textObject->textIndex;
+			if(isset($nameIndexAndTextIndexHash[$key])) {
+				// eliminate duplicates (e.g. when a text object is in a button)
+				unset($textObjects[$index]);
+			} else if(preg_match('/^__id\d+_$/', $textObject->name)) {
+				// remove objects with auto-assigned names
+				unset($textObjects[$index]);
+			} else {
+				$nameIndexAndTextIndexHash[$key] = true;
+			}
+		}
+		return $textObjects;
 	}
 	
 	public function replace($abcFile, $textObjects) {
@@ -233,11 +245,6 @@ class ABCTextObjectInfo {
 	public $nameIndex;
 	public $xml;
 	public $xmlIndex;
-	
-	// for comparing objects mainly
-	public function __toString() {
-		return "{$this->nameIndex}/{$this->xmlIndex}";
-	}
 }
 
 ?>

@@ -54,11 +54,12 @@ class FloogleDocs extends SWFGeneratorDataModule {
 						}
 						$descriptions = implode(', ', $descriptions);
 						echo "<div class='subsection-ok'><b>Text sections ($sectionCount): </b> $descriptions</div>";
-						$endTime = microtime(true);
-						$duration = sprintf("%0.4f", $endTime - $startTime);
-						echo "<div class='subsection-ok'><b>Process time: </b> $duration second(s)</div>";
 					} else {
+						echo "<div class='subsection-err'><b>Text sections ($sectionCount): </b></div>";
 					}
+					$endTime = microtime(true);
+					$duration = sprintf("%0.4f", $endTime - $startTime);
+					echo "<div class='subsection-ok'><b>Process time: </b> $duration second(s)</div>";
 				} else {
 					echo "<div class='subsection-err' style='text-align: center'><em>(errors encountered reading document)</em></div>";
 				}				
@@ -95,6 +96,24 @@ class FloogleDocs extends SWFGeneratorDataModule {
 	public function getRequiredPHPExtensions() {
 		return array('OpenSSL', 'PCRE', 'XML', 'Zlib');
 	}
+	
+	public function runModuleSpecificOperation($parameters) {
+		if(isset($parameters['googledocs'])) {
+			$format = $parameters['googledocs'];
+			if($format) {
+				$url = preg_match('/(.*?)edit$/', $this->suppliedUrl, $m) ? "{$m[1]}export?format={$format}" : $this->suppliedUrl;
+			} else {
+				$url = $this->suppliedUrl;
+			}
+			$this->redirect($url);
+			return true;
+		}
+		return false;
+	}
+	
+	protected function redirect($url) {
+		header("Location: $url");
+	}	
 }
 
 ?>

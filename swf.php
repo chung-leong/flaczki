@@ -9,8 +9,9 @@ $config = array(
 	'deferred-update' => false,
 	'deferred-update-maximum-interval' => 60 * 60 * 24,
 	'data-modules'	=> array(
-		"FloogleDocs" => array(
-			'url' => "https://docs.google.com/document/d/144Kj1VfsPi60slwW58Qw7R3QRc02MXqBVr-L5Jqq0bg/edit"
+		array(
+			'name' => "FloogleDocs",
+			'url' => "https://docs.google.com/document/d/144Kj1VfsPi60slwW58Qw7R3QRc02MXqBVr-L5Jqq0bg/edit",
 		),
 	)
 );

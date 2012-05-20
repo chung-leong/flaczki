@@ -21,13 +21,13 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		// add heading style for the first section--not starting with a page break
 		$firstSectionHeadingStyle =  new ODTStyle;
 		$firstSectionHeadingStyle->family = 'paragraph';
-		$firstSectionHeadingStyle->parentStyleName = 'Heading_20_2';
+		$firstSectionHeadingStyle->parentStyleName = 'Heading_20_1';
 		$this->addAutomaticStyle($firstSectionHeadingStyle);
 		
 		// add heading style of subsequent sections--start with a page break 
 		$sectionHeadingStyle =  new ODTStyle;
 		$sectionHeadingStyle->family = 'paragraph';
-		$sectionHeadingStyle->parentStyleName = 'Heading_20_2';
+		$sectionHeadingStyle->parentStyleName = 'Heading_20_1';
 		$sectionHeadingStyle->paragraphProperties = new ODTParagraphProperties;
 		$sectionHeadingStyle->paragraphProperties->breakBefore = "page";
 		$this->addAutomaticStyle($sectionHeadingStyle);
@@ -271,7 +271,12 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		
 		if($tlfStyle->lineThrough) {
 			$this->createTextProperties($odtStyle);
-			$odtStyle->textProperties->textLineThroughStyle = 'solid';
+			switch($tlfStyle->lineThrough) {
+				case 'true':
+					$odtStyle->textProperties->textLineThroughStyle = 'solid';
+					$odtStyle->textProperties->textLineThroughType = 'single';
+					break;
+			}
 		}
 		
 		if($tlfStyle->locale) {
@@ -282,15 +287,17 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 			$this->createTextProperties($odtStyle);
 			switch($tlfStyle->textDecoration) {
 				case 'underline': 
-					$odtStyle->textProperties->textUnderlineType = 'single';
 					$odtStyle->textProperties->textUnderlineStyle = 'solid';
+					$odtStyle->textProperties->textUnderlineType = 'single';
 					break;
 			}
 		}
 		
 		if($tlfStyle->textRotation) {
-			$this->createTextProperties($odtStyle);
-			$odtStyle->textProperties->textRotationAngle = $tlfStyle->textRotation;
+			if(is_numeric($tlfStyle->textRotation)) {
+				$this->createTextProperties($odtStyle);
+				$odtStyle->textProperties->textRotationAngle = $tlfStyle->textRotation;
+			}
 		}
 		
 		if($tlfStyle->trackingLeft && $tlfStyle->direction == 'rtl') {
@@ -547,7 +554,7 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 					$isItalic = true;
 				}
 				if($embeddedFont->panose) {
-					$this->addFontProperties($odtFont, $embeddedFont->panose, $isBold, $isItalic);
+					$this->setFontPropertiesFromPanose($odtFont, $embeddedFont->panose, $isBold, $isItalic);
 				}
 				$this->document->fonts[$fontFamily->name] = $odtFont;
 			}
@@ -563,14 +570,14 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 				// see if we know this font's appearance
 				$panose = PanoseDatabase::find($fontFamilyName);
 				if($panose) {
-					$this->addFontProperties($odtFont, $panose);
+					$this->setFontPropertiesFromPanose($odtFont, $panose);
 				}
 				$this->document->fonts[$fontFamilyName] = $odtFont;
 			}
 		}
 	}	
 	
-	protected function addFontProperties($odtFont, $panose, $isBold = false, $isItalic = false) {
+	protected function setFontPropertiesFromPanose($odtFont, $panose, $isBold = false, $isItalic = false) {
 		// set generic font-family based on panose values
 		if($panose[1] == 3) {
 			$odtFont->fontFamilyGeneric = 'script';

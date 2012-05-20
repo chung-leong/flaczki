@@ -19,18 +19,16 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			$nextParagraphStyle = ($nextParagraph) ? $this->getApplicableStyle($nextParagraph) : null;
 			
 			if(!$section) {
-				// look for the name of the section in a heading
-				if($paragraph instanceof ODTHeading) {
-					$headingText = '';
-					foreach($paragraph->spans as $span) {
-						$headingText .= $span->text;
-					}
-					$sectionName = $this->filterName($headingText);
-					if($sectionName) {
-						$section = new SWFTextObjectUpdaterODTSection;
-						$section->name = $sectionName;
-						$section->title = $headingText;
-					}
+				// look for the name of the section 
+				$headingText = '';
+				foreach($paragraph->spans as $span) {
+					$headingText .= $span->text;
+				}
+				$sectionName = $this->filterName($headingText);
+				if($sectionName) {
+					$section = new SWFTextObjectUpdaterODTSection;
+					$section->name = $sectionName;
+					$section->title = $headingText;
 				}
 			} else {
 				$section->paragraphs[] = $paragraph;
@@ -477,7 +475,6 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 				break;
 		}
 	}
-		
 }
 
 class SWFTextObjectUpdaterODTSection {

@@ -20,6 +20,10 @@ abstract class SWFGeneratorDataModule {
 	public function getRequiredPHPExtensions() {
 		return array();
 	}
+	
+	public function runModuleSpecificOperation($parameters) {
+		return false;
+	}
 }
 
 ?>

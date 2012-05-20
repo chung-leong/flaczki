@@ -52,6 +52,9 @@ class SWFGenerator {
 				case 'update':
 					$operation = 'update';
 					break;
+				default:
+					$operation = 'runModuleSpecific';
+					$parameters[$name] = $value;
 			}
 		}
 		
@@ -66,6 +69,9 @@ class SWFGenerator {
 				break;
 			case 'export':
 				$instance->export();
+				break;
+			case 'runModuleSpecific':
+				$instance->runModuleSpecificOperation($parameters);
 				break;
 			default:
 				$instance->validate();
@@ -86,8 +92,9 @@ class SWFGenerator {
 		$canUpdateInBackground = $this->updateInBackground;
 		$maxInterval = 0;
 		foreach($this->sourceFilePaths as $swfFilePath) {
-			if(isset($this->destinationFileLists[$swfFilePath])) {
-				$list = $this->destinationFileLists[$swfFilePath];
+			$swfFileName = basename($swfFilePath);
+			if(isset($this->destinationFileLists[$swfFileName])) {
+				$list = $this->destinationFileLists[$swfFileName];
 				$mostRecentFileName = current($list);
 				$creationDate = filectime("{$this->destinationFolder}/{$mostRecentFileName}");
 				$interval = $now - $creationDate;
@@ -99,6 +106,7 @@ class SWFGenerator {
 				}
 			} else {
 				$needUpdate = true;
+				$canUpdateInBackground = false;
 			}
 		}
 		if(!$needUpdate) {
@@ -108,11 +116,9 @@ class SWFGenerator {
 			}
 			
 		}
-		if($needUpdate) {
-			if($maxInterval > $this->maximumStaleInterval) {
-				// we don't want to make a visitor wait normally, but the files are just too old
-				$canUpdateInBackground = false;
-			}
+		if($maxInterval > $this->maximumStaleInterval) {
+			// we don't want to make a visitor wait normally, but the files are just too old
+			$canUpdateInBackground = false;
 		}
 		
 		if($needUpdate) {
@@ -188,7 +194,8 @@ class SWFGenerator {
 			if($this->destinationFileLists == null) {
 				$this->scanDestinationfolder();
 			}
-			$destinationFileList =& $this->destinationFileLists[$swfFilePath];
+			$swfFileName = basename($swfFilePath);
+			$destinationFileList =& $this->destinationFileLists[$swfFileName];
 			if($destinationFileList) {
 				$swfFileKept = 0;
 				foreach($destinationFileList as $version => $existingSWFName) {
@@ -203,11 +210,10 @@ class SWFGenerator {
 				}
 			} else {
 				$destinationFileList = array();
-				$this->destinationFileLists[$swfFilePath] =& $destinationFileList;
+				$this->destinationFileLists[$swfFileName] =& $destinationFileList;
 			}
 
 			// save contents into temporary location first
-			$swfFileName = basename($swfFilePath);
 			$swfFileExt = strrchr($swfFileName, '.');
 			$swfFileExtLen = strlen($swfFileExt);
 			$swfFileNamePart = substr($swfFileName, 0, strlen($swfFileName) - $swfFileExtLen);
@@ -363,7 +369,9 @@ class SWFGenerator {
 			echo "</div>";
 		}
 		
-		foreach($this->dataModules as $dataModuleName => $dataModule) {
+		foreach($this->dataModules as $index => $dataModule) {
+			$dataModuleConfig = $this->dataModuleConfigs[$index];
+			$dataModuleName = $dataModuleConfig['name'];
 			echo "<div class='section'>";
 			echo "<div class='section-header'>Data Module: $dataModuleName</div>";			
 			if($dataModule) {
@@ -390,9 +398,15 @@ class SWFGenerator {
 		// see which modules has exportable contents
 		$this->createDateModules();
 		$exportingModules = array();
+		$exportingModuleHash = array();
 		foreach($this->dataModules as $dataModule) {
-			if($dataModule->getExportType()) {
-				$exportingModules[] = $dataModule;
+			$className = get_class($dataModule);
+			// if a module is used multiple times, export from only the first instance
+			if(!isset($exportingModuleHash[$className])) {
+				if($dataModule->getExportType()) {
+					$exportingModules[] = $dataModule;
+				}
+				$exportingModuleHash[$className] = true;
 			}
 		}
 				
@@ -426,12 +440,21 @@ class SWFGenerator {
 		}
 	}
 	
+	public function runModuleSpecificOperation($parameters) {
+		$this->createDateModules();
+		foreach($this->dataModules as $dataModule) {
+			if($dataModule->runModuleSpecificOperation($parameters)) {
+				break;
+			}
+		}
+	}
+	
 	protected function createDateModules() {
 		$this->dataModules = array();
-		foreach($this->dataModuleConfigs as $dataModuleName => $dataModuleConfig) {
-			$dataModuleName = trim($dataModuleName);
+		foreach($this->dataModuleConfigs as $index => $dataModuleConfig) {
+			$dataModuleName = isset($dataModuleConfig['name']) ? trim($dataModuleConfig['name']) : null;
 			$dataModule = class_exists($dataModuleName, true) ? new $dataModuleName($dataModuleConfig) : null;
-			$this->dataModules[$dataModuleName] = $dataModule;
+			$this->dataModules[$index] = $dataModule;
 		}
 	}
 	
@@ -472,7 +495,7 @@ class SWFGenerator {
 						// filename should be [filename].#####.swf
 						$number = intval(substr($existingFile, $swfFileNamePartLen + 1, -$swfFileExtLen));
 						if($number > 0) {
-							$destinationFileList =& $this->destinationFileLists[$swfFilePath];
+							$destinationFileList =& $this->destinationFileLists[$swfFileName];
 							$destinationFileList[$number] = $existingFile;
 						}
 					}
