@@ -3,7 +3,7 @@
 require '../../flaczki/classes.php';
 
 $config = array(
-	'destination' => "",
+	'destination' => "./",
 	'swf-files' => array("../Cities of Poland.swf"),
 	'update-interval' => 60 * 60,
 	'deferred-update' => true,

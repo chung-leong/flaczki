@@ -11,7 +11,7 @@ function trace($s) {
 }
 
 function dump($v) {
-	echo str_replace("=>","&#8658;",str_replace("Array","<font color=\"red\"><b>Array</b></font>",nl2br(str_replace(" "," &nbsp; ",htmlspecialchars(print_r($v,true))))));
+	echo str_replace("=>","&#8658;",str_replace("Array","<font color=\"red\"><b>Array</b></font>",nl2br(str_replace(" ","&nbsp;",htmlspecialchars(print_r($v,true))))));
 }
 
 function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
@@ -36,7 +36,8 @@ function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
 		$trace = debug_backtrace();
 		for($i = 1; $i < count($trace); $i++) {
 			$function = $trace[$i]['function'];
-			echo "$function()<br>";
+			$line = $trace[$i]['line'];
+			echo "$function() at line $line<br>";
 		}
 	}
 }
