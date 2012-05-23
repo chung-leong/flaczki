@@ -401,7 +401,6 @@ class DOCXParagraphProperties {
 	public $spacingLineRule;
 	public $tabStops;
 	public $textAlignmentVal;
-	public $wordWrapVal;
 	
 	public $textProperties;
 }
@@ -432,6 +431,7 @@ class DOCXTextProperties {
 	public $rFontsEastAsiaTheme;
 	public $rStyleVal;
 	public $rtl;
+	public $spacingVal;
 	public $strike;
 	public $shdFill;
 	public $shdThemeColor;
@@ -452,6 +452,7 @@ class DOCXTabStop {
 class DOCXStyle {
 	public $basedOnVal;
 	public $default;
+	public $linkVal;
 	public $nameVal;
 	public $semiHidden;
 	public $styleId;

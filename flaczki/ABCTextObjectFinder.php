@@ -35,7 +35,7 @@ class ABCTextObjectFinder {
 		
 		$nameIndexAndTextIndexHash = array();
 		foreach($textObjects as $index => $textObject) {
-			$key = $textObject->nameIndex . '=' . $textObject->textIndex;
+			$key = $textObject->nameIndex . '=' . $textObject->xmlIndex;
 			if(isset($nameIndexAndTextIndexHash[$key])) {
 				// eliminate duplicates (e.g. when a text object is in a button)
 				unset($textObjects[$index]);

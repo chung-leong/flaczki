@@ -172,6 +172,7 @@ class DOCXAssembler {
 		$this->addAttribute($attributes, 'w:styleId', $style->styleId);
 		$this->writeStartTag('w:style', $attributes);
 		$this->writeValueTag('w:name', $style->nameVal);
+		$this->writeValueTag('w:link', $style->linkVal);
 		$this->writeValueTag('w:uiPriorityVal', $style->uiPriorityVal);		
 		$this->writeValueTag('w:qFormat', $style->qFormat);
 		$this->writeValueTag('w:semiHidden', $style->semiHidden);
@@ -248,7 +249,6 @@ class DOCXAssembler {
 			$this->writeEndTag('w:tabs');
 		}
 		$this->writeValueTag('w:textAlignment', $properties->textAlignmentVal);
-		$this->writeValueTag('w:wordWrap', $properties->wordWrapVal);
 		$this->writeEndTag('w:pPr');
 	}
 	
@@ -317,6 +317,7 @@ class DOCXAssembler {
 		$this->writeValueTag('w:rtl', $properties->rtl);
 		$this->writeValueTag('w:strike', $properties->strike);
 		$this->writeValueTag('w:smallCaps', $properties->smallCaps);
+		$this->writeValueTag('w:spacing', $properties->spacingVal);
 		$this->writeValueTag('w:sz', $properties->szVal);
 		$this->writeValueTag('w:szCs', $properties->szCsVal);
 		$this->writeValueTag('w:u', $properties->u);

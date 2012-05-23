@@ -11,7 +11,8 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 
 	protected function exportSections($sections, $fontFamilies) {
 		// add font references
-		$fontUsage = $this->getFontUsage($sections);
+		$styleUsage = $this->getStyleUsage($sections, array('fontFamily'));
+		$fontUsage = $styleUsage['fontFamily'];
 		$this->addFonts($fontFamilies, $fontUsage);
 		
 		// add default style, using the most frequently used font as the standard font

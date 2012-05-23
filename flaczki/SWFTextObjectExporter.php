@@ -46,6 +46,45 @@ abstract class SWFTextObjectExporter {
 		arsort($hash);
 		return $hash;
 	}
+	
+	protected function getStyleUsage($sections, $properties) {
+		$table = array();		
+		foreach($properties as $name) {
+			$table[$name] = array();
+		}
+			
+		// count the number of characters a particular property value is applicable to
+		$textLength = 0;
+		foreach($sections as $section) {
+			$tlfObject = $section->tlfObject;
+			$tStyle = $tlfObject->textFlow->style;
+			foreach($tlfObject->textFlow->paragraphs as $paragraph) {
+				$pStyle = $paragraph->style;
+				foreach($paragraph->spans as $span) {
+					$sStyle = $span->style;
+					$sLength = strlen($span->text);
+					foreach($properties as $name) {
+						if(($value = $sStyle->$name) !== null || ($value = $pStyle->$name) !== null || ($value = $tStyle->$name) !== null) {
+							$row =& $table[$name];
+							$count =& $row[$value]; 
+							$count += $sLength;
+						}
+					}
+					$textLength += $sLength;
+				}
+			}
+		}
+		
+		// divide the count by the total length
+		foreach($table as $name => &$row) {
+			// more frequently used item comes first
+			arsort($row);
+			foreach($row as &$value) {
+				$value = (double) $value / $textLength;
+			}
+		}
+		return $table;
+	}	
 			
 	protected function beautifySectionName($name) {
 		if(strpos($name, '_') === false) {	// don't change the name if underscores are used
