@@ -146,7 +146,9 @@ class DOCXAssembler {
 			$attributes = array();
 			$this->addAttribute($attributes, 'Id', $relationship->id);
 			$this->addAttribute($attributes, 'Type', "http://schemas.openxmlformats.org/officeDocument/2006/relationships/{$relationship->type}");
-			$this->addAttribute($attributes, 'Target', $this->getRelativePath($referrerPath, $relationship->target));
+			$targetPath = ($relationship->targetMode == 'External') ? $relationship->target : $this->getRelativePath($referrerPath, $relationship->target);
+			$this->addAttribute($attributes, 'Target', $targetPath);
+			$this->addAttribute($attributes, 'TargetMode', $relationship->targetMode);
 			$this->writeTag('Relationship', $attributes);
 		}
 		$this->writeEndTag('Relationships', $relationshipsAttributes);
@@ -193,21 +195,20 @@ class DOCXAssembler {
 		foreach($paragraph->spans as $span) {
 			if($span->hyperlink !== $hyperlink) {
 				if($hyperlink) {
-					//$this->writeEndTag('text:a');
+					$this->writeEndTag('w:hyperlink');
 				}
 				$hyperlink = $span->hyperlink;
 				if($hyperlink) {
 					$attributes = array();
-					$this->addAttribute($attributes, 'xlink:href', $hyperlink->href);
-					$this->addAttribute($attributes, 'xlink:type', $hyperlink->type);
-					$this->addAttribute($attributes, 'xlink:target-frame-name', $hyperlink->targetFrameName);
-					$this->writeStartTag('text:a', $attributes);
+					$id = $this->addRelationship($hyperlink->href, 'word/document.xml', 'hyperlink', 'External');
+					$this->addAttribute($attributes, 'r:id', $id);
+					$this->writeStartTag('w:hyperlink', $attributes);
 				}
 			}
 			$this->writeSpanTag($span);
 		}
 		if($hyperlink) {
-			//$this->writeEndTag('text:a');
+			$this->writeEndTag('w:hyperlink');
 		}
 		$this->writeEndTag('w:p');
 	}
@@ -391,16 +392,24 @@ class DOCXAssembler {
 		$this->contentTypeOverrides[$path] = $type;
 	}
 	
-	protected function addRelationship($targetPath, $referrerPath, $relationshipType) {
+	protected function addRelationship($targetPath, $referrerPath, $relationshipType, $targetMode = null) {
 		if(!isset($this->relationships[$referrerPath])) {
 			$this->relationships[$referrerPath] = array();
 		}
 		$fileRelationships =& $this->relationships[$referrerPath];
+		// see if there's one already
+		foreach($fileRelationships as $relationship) {
+			if($relationship->type == $relationshipType && $relationship->target == $targetPath && $relationship->targetMode == $targetMode) {
+				return $relationship->id;
+			}
+		}
 		$relationship = new DOCXRelationship;
 		$relationship->id = "rId" . (count($fileRelationships) + 1);
 		$relationship->type = $relationshipType;
 		$relationship->target = $targetPath;
+		$relationship->targetMode = $targetMode;
 		$fileRelationships[] = $relationship;
+		return $relationship->id;
 	}
 	
 	protected function getRelativePath($from, $to) {
@@ -432,6 +441,7 @@ class DOCXRelationship {
 	public $id;
 	public $type;
 	public $target;
+	public $targetMode;
 }
 
 ?>

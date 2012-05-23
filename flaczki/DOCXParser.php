@@ -7,6 +7,7 @@ class DOCXParser {
 	protected $span;
 	protected $previousSpan;
 	protected $hyperlink;
+	protected $hyperlinks;
 	protected $style;
 	protected $font;
 	protected $textProperties;
@@ -18,8 +19,8 @@ class DOCXParser {
 
 	protected $currentDirectory;
 	protected $currentFileName;
-	protected $fileReferences = array();
-	protected $embeddedFiles = array();
+	protected $fileReferences;
+	protected $embeddedFiles;
 
 	public function parse($input) {
 		if(gettype($input) == 'string') {
@@ -31,6 +32,8 @@ class DOCXParser {
 		}
 		
 		$document = $this->document = new DOCXDocument;
+		$this->fileReferences = array();
+		$this->embeddedFiles = array();
 		$zipPath = StreamZipArchive::open($input);
 		$processed = array('document.xml' => false, 'styles.xml' => false);
 		$rootDir = opendir($zipPath);
@@ -60,7 +63,7 @@ class DOCXParser {
 					} else if(preg_match('/^theme\d*\.xml$/', $file)) {
 						$functions = array('processThemeStartTag', 'processThemeEndTag', 'ignoreCharacterData');
 					} else if(preg_match('/\.rels$/', $file)) {
-						$functions = array('processRelStartTag', 'processRelEndTag', 'ignoreCharacterData');
+						$functions = array('processRelsStartTag', 'processRelsEndTag', 'ignoreCharacterData');
 					} else {
 						$functions = null;
 					}
@@ -99,13 +102,17 @@ class DOCXParser {
 			$file = array_pop($pathStack);
 		} while(count($dirStack) > 0);
 		
-		// attach embedded files to the document
 		foreach($this->fileReferences as $reference => $path) {
 			if(isset($this->embeddedFiles[$path])) {
+				// attach embedded files to the document
 				list($referrer, $id) = explode(':', $reference);
 				if($referrer == 'word/document.xml') {
 					$this->document->embeddedFiles[$id] = $this->embeddedFiles[$path];
 				}
+			} else if(isset($this->hyperlinks[$reference])) {
+				// set the href of hyperlinks
+				$hyperlink = $this->hyperlinks[$reference];
+				$hyperlink->href = $path;
 			}
 		}
 		if(array_sum($processed) == count($processed)) {
@@ -114,7 +121,7 @@ class DOCXParser {
 		return false;
 	}
 	
-	public function processRelStartTag($parser, $name, $attributes) {
+	public function processRelsStartTag($parser, $name, $attributes) {
 		$name = $this->stripPrefix($name);
 		switch($name) {
 			case 'Relationship':
@@ -122,19 +129,18 @@ class DOCXParser {
 				$target = $attributes['Target'];
 				$referrerFileName = preg_replace('/\.\w+$/', '', $this->currentFileName);
 				$referrerDirectory = dirname($this->currentDirectory);
-				if($referrerDirectory == '.') {
-					$referrerPath = $referrerFileName;
-					$targetPath = $target;
+				$referrerPath = ($referrerDirectory == '.') ? $referrerFileName : "$referrerDirectory/$referrerFileName";
+				if(isset($attributes['TargetMode']) && $attributes['TargetMode'] == 'External') {
+					$targetPath = $target;					
 				} else {
-					$referrerPath = "$referrerDirectory/$referrerFileName";
-					$targetPath = "$referrerDirectory/$target";
+					$targetPath = ($referrerDirectory == '.') ? "$referrerDirectory/$target" : $target;
 				}
 				$this->fileReferences["$referrerPath:$id"] = $targetPath;
 				break;
 		}
 	}
 	
-	public function processRelEndTag($parser, $name) {
+	public function processRelsEndTag($parser, $name) {
 	}
 	
 	public function processDocumentStartTag($parser, $name, $attributes) {
@@ -162,9 +168,10 @@ class DOCXParser {
 			case 'rPr':
 				$this->textProperties = new DOCXTextProperties;
 				break;
-			case 'a':
-				$this->hyperlink = new DOCXHyperlink;
-				$this->copyProperties($this->hyperlink, $attributes);
+			case 'hyperlink':
+				// the URL is stored in document.xml.rels 
+				$this->hyperlink = new DOCXHyperlink;				
+				$this->hyperlinks["{$this->currentDirectory}/{$this->currentFileName}:{$attributes['r:id']}"] = $this->hyperlink;
 				break;
 			case 'p':
 				$this->paragraph = new DOCXParagraph;
@@ -224,7 +231,7 @@ class DOCXParser {
 				}
 				$this->textProperties = null;
 				break;
-			case 'a':
+			case 'hyperlink':
 				$this->hyperlink = null;
 				break;
 			case 'p':
@@ -378,8 +385,6 @@ class DOCXSpan {
 
 class DOCXHyperlink {
 	public $href;
-	public $targetFrameName;
-	public $type;
 }
 
 class DOCXParagraphProperties {
