@@ -1,10 +1,21 @@
 <?php
 
-abstract class SWFGeneratorDataModule {
+class SWFGeneratorDataModule {
 
-	abstract public function startTransfer();
-	abstract public function updateText($textObjects, $fontFamilies);
-	abstract public function validate();
+	public function checkChanges() {
+		return true;
+	}
+	
+	public function startTransfer() {
+		return true;
+	}
+	
+	public function updateText($textObjects, $fontFamilies) {
+		return array();
+	}
+	
+	public function validate() {
+	}
 
 	public function getExportType() {
 		return null;

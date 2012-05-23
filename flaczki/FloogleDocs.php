@@ -15,6 +15,7 @@ class FloogleDocs extends SWFGeneratorDataModule {
 
 	public function startTransfer() {
 		$this->input = fopen($this->sourceUrl, "rb");
+		return ($this->input) ? true : false;
 	}
 
 	public function updateText($textObjects, $fontFamilies) {
@@ -29,6 +30,7 @@ class FloogleDocs extends SWFGeneratorDataModule {
 			$changes = $updater->update($textObjects, $fontFamilies);
 			return $changes;
 		}
+		return array();
 	}
 	
 	public function validate() {

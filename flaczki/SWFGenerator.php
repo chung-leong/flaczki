@@ -2,9 +2,7 @@
 
 class SWFGenerator {
 
-	protected $destinationFolder;
-	protected $destinationFileLists;
-	protected $sourceFilePaths;
+	protected $swfFileMappings;
 	protected $updateInterval;
 	protected $updateInBackground;
 	protected $maximumStaleInterval;
@@ -21,10 +19,9 @@ class SWFGenerator {
 	protected $fontFamilies;
 	
 	public function __construct($config) {
-		$this->destinationFolder = isset($config['destination']) ? preg_replace('/\/+$/', '', trim($config['destination'])) : '';
-		$this->sourceFilePaths = isset($config['swf-files']) ? array_map('trim', $config['swf-files']) : array();
+		$this->swfFileMappings = isset($config['swf-files']) ? $config['swf-files'] : array();
 		$this->updateInterval = isset($config['update-interval']) ? $config['update-interval'] : 0;
-		$this->updateInBackground = isset($config['deferred-update']) ? $config['deferred-update'] : false;
+		$this->updateInBackground = isset($config['background-update']) ? $config['deferred-update'] : false;
 		$this->maximumStaleInterval = isset($config['maximum-stale-interval']) ? $config['maximum-stale-interval'] : 86400;
 		$this->dataModuleConfigs = isset($config['data-modules']) ? $config['data-modules'] : array();
 				
@@ -42,15 +39,12 @@ class SWFGenerator {
 		$operation = null;
 		foreach($_GET as $name => $value) {
 			switch($name) {
-				case 'f': 
-					$targetSWFFile = $value;
-					$operation = 'retrieve';
-					break;
 				case 'export':
 					$operation = 'export';
 					break;
 				case 'update':
 					$operation = 'update';
+					$parameter = $value;
 					break;
 				default:
 					$operation = 'runModuleSpecific';
@@ -59,13 +53,8 @@ class SWFGenerator {
 		}
 		
 		switch($operation) {
-			case 'retrieve':
-				$instance->retrieve($targetSWFFile);
-				break;
 			case 'update':
-				// send HTTP response headers to allow fopen() to complete
-				flush();
-				$instance->update();
+				$instance->update($parameter == 'force');
 				break;
 			case 'export':
 				$instance->export();
@@ -79,53 +68,54 @@ class SWFGenerator {
 		}
 	}
 	
-	public function retrieve($targetSWFFilePath) {
-		// turn off error reporting to ensure error messages don't interfere with redirection
+	public function update($forceUpdate) {
+		// turn off error reporting since the output should be Javascript
 		error_reporting(0);
-	
-		// see what files there are in the destination folder
-		$this->scanDestinationfolder();
 		
+		// send HTTP response headers to allow fopen() to complete
+		flush();
+	
 		// see if any file is out-of-date (or missing)
 		$now = time();
-		$needUpdate = false;
-		$canUpdateInBackground = $this->updateInBackground;
-		$maxInterval = 0;
-		foreach($this->sourceFilePaths as $swfFilePath) {
-			$swfFileName = basename($swfFilePath);
-			if(isset($this->destinationFileLists[$swfFileName])) {
-				$list = $this->destinationFileLists[$swfFileName];
-				$mostRecentFileName = current($list);
-				$creationDate = filectime("{$this->destinationFolder}/{$mostRecentFileName}");
-				$interval = $now - $creationDate;
-				$maxInterval = max($maxInterval, $interval);
-				
-				if(filectime($targetSWFFilePath) > $creationDate) {				
-					// the source file is newer--update everything
+		if($forceUpdate) {
+			$needUpdate = true;
+			$mustUpdate = false;
+			$canShowOlderVersion = false;
+		} else {
+			$needUpdate = false;
+			$mustUpdate = false;
+			$canShowOlderVersion = $this->updateInBackground;
+			foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+				if(file_exists($swfDestinationFilePath)) {
+					$sourceCreationDate = filemtime($swfSourceFilePath);
+					$destinationCreationDate = filemtime($swfDestinationFilePath);
+					if($destinationCreationDate < $sourceCreationDate) {
+						// the source file is newer--update
+						$needUpdate = true;
+						$mustUpdate = true;
+						$canShowOlderVersion = false;
+					}
+					if($destinationCreationDate + $this->updateInterval < $now) {
+						// file is older than update interval--might need to check if upda
+						$needUpdate = true;
+						if($destinationCreationDate + $this->maximumStaleInterval < $now) {
+							$canShowOlderVersion = false;
+						}
+					}
+				} else {
+					// a destination file is missing--must update
 					$needUpdate = true;
+					$mustUpdate = true;
+					$canShowOlderVersion = false;
 				}
-			} else {
-				$needUpdate = true;
-				$canUpdateInBackground = false;
 			}
-		}
-		if(!$needUpdate) {
-			if($maxInterval > $this->updateInterval) {
-				// at least one file is too old--update everything
-				$needUpdate = true;
-			}
-			
-		}
-		if($maxInterval > $this->maximumStaleInterval) {
-			// we don't want to make a visitor wait normally, but the files are just too old
-			$canUpdateInBackground = false;
 		}
 		
 		if($needUpdate) {
-			$updatingInBackground = false;
-			if($canUpdateInBackground) {
+			if($canShowOlderVersion) {
 				// spawn a server thread to do the update
-				$internalUrl = "http://{$_SERVER['HTTP_HOST']}:{$_SERVER['SERVER_PORT']}{$_SERVER['SCRIPT_NAME']}?update";
+				// the visitor will see an older version in the mean time
+				$internalUrl = "http://{$_SERVER['HTTP_HOST']}:{$_SERVER['SERVER_PORT']}{$_SERVER['SCRIPT_NAME']}?update=force";
 				$streamContextOptions = array (
 					'http' => array (
 						'method' => 'GET',
@@ -135,48 +125,108 @@ class SWFGenerator {
 				$context = stream_context_create($streamContextOptions);
 				if($f = fopen($internalUrl, "rb", 0, $context)) {
 					fclose($f);
-					$updatingInBackground = true;
+					$needUpdate = false;
 				}
-			} 
-			if(!$updatingInBackground) {
-				// update now
-				$this->update();
+			}
+			
+			if($needUpdate) {
+				$this->createDateModules();
+						
+				// see if remote data source(s) have changed		
+				if($mustUpdate || $this->checkChanges()) {
+					// initial the data transfer first 
+					// continue the update process even when an error occurs if there're files missing
+					if($this->startTransfer() || $mustUpdate) {
+						// check paths where files will be saved temporarily
+						if($this->checkTemporaryFiles()) {
+							// parse the SWF files and find the text objects within them
+							$this->parseSWFFiles();
+
+							// ask the data modules to apply changes
+							$this->applyChanges();
+						
+							// assemble the files
+							$this->assembleSWFFiles();
+						}
+					}
+				}
 			}
 		}
-		
-		$destinationFileList = $this->destinationFileLists[$targetSWFFilePath];
-		$mostRecentFileName = ($destinationFileList) ? current($destinationFileList) : null;
-		$mostRecentVersion = ($destinationFileList) ? key($destinationFileList) : 0;
-		$scriptRoot = dirname($_SERVER["SCRIPT_NAME"]);
-		if(strlen($scriptRoot) == 1) {
-			$scriptRoot = '';
-		}
-		if($mostRecentFileName && $mostRecentVersion > 0) {
-			$swfFileUrl = "{$scriptRoot}/{$this->destinationFolder}/{$mostRecentFileName}";
-		} else {
-			$swfFileUrl = "{$scriptRoot}/{$targetSWFFilePath}";
-		}
-		$this->redirect($swfFileUrl);
-		
-		ob_end_clean();
 	}
 	
-	public function update() {
-		$this->createDateModules();
-		
-		// initial the data transfer first
-		foreach($this->dataModules as $dataModule) {
-			$dataModule->startTransfer();
+	protected function createDateModules() {
+		$this->dataModules = array();
+		foreach($this->dataModuleConfigs as $index => $dataModuleConfig) {
+			$dataModuleName = isset($dataModuleConfig['name']) ? trim($dataModuleConfig['name']) : null;
+			$dataModule = class_exists($dataModuleName, true) ? new $dataModuleName($dataModuleConfig) : null;
+			$this->dataModules[$index] = $dataModule;
 		}
-		
-		// parse the SWF files and find the text objects within them
-		$this->parseSWFFiles();
-
-		// ask the data modules to apply changes
+	}
+	
+	protected function checkChanges() {
+		foreach($this->dataModules as $dataModule) {
+			if($dataModule->checkChanges()) {
+				return true;
+			}
+		}
+		return false;
+	}
+	
+	protected function startTransfer() {
+		$successful = true;
+		foreach($this->dataModules as $dataModule) {
+			if(!$dataModule->startTransfer()) {
+				$successful = false;
+			}
+		}
+		return $successful;
+	}
+	
+	protected function parseSWFFiles() {
+		$textObjectLists = array();
+		$fontFamilyLists = array();
+		$this->swfFiles = array();
+		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+			$input = fopen($swfSourceFilePath, "rb");			
+			if($input) {
+				$this->swfFiles[$swfSourceFilePath] = $swfFile = $this->swfParser->parse($input);
+				$textObjectLists[] = $this->textFinder->find($swfFile);
+				$fontFamilyLists[] = $this->fontFinder->find($swfFile);
+				fclose($input);
+			}
+		}
+		$this->textObjects = call_user_func_array('array_merge', $textObjectLists);
+		$this->fontFamilies = call_user_func_array('array_merge', $fontFamilyLists);
+		uasort($this->textObjects, array($this, 'compareTextObjectNames'));
+	}
+	
+	protected function checkTemporaryFiles() {
+		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+			$swfTempFilePath = "$swfDestinationFilePath.new";
+			if(file_exists($swfTempFilePath)) {
+				$modificationTime = filemtime($swfTempFilePath);
+				if($modificationTime + 60 < $now) {
+					// file is older than a minute--probably garbage
+					unlink($swfTempFilePath);
+				} else {
+					return false;
+				}
+			}
+			
+			// delete old files
+			$swfOldFilePath = "$swfDestinationFilePath.old";
+			if(file_exists($swfOldFilePath)) {
+				unlink($swfOldFilePath);
+			}
+		}				
+		return true;
+	}
+	
+	protected function applyChanges() {
 		foreach($this->dataModules as $dataModule) {
 			$changes = $dataModule->updateText($this->textObjects, $this->fontFamilies);
 			$this->textFinder->replace($changes);
-				
+			
 			// remove the ones that's been changed from the list
 			if($changes) {
 				foreach($this->textObjects as $index => $textObject) {
@@ -186,64 +236,38 @@ class SWFGenerator {
 				}
 			}
 		}
-		
-		// reassemble the swf files 
-		foreach($this->sourceFilePaths as $swfFilePath) {
-			/// delete older files
-			$lastVersion = 0;
-			if($this->destinationFileLists == null) {
-				$this->scanDestinationfolder();
-			}
-			$swfFileName = basename($swfFilePath);
-			$destinationFileList =& $this->destinationFileLists[$swfFileName];
-			if($destinationFileList) {
-				$swfFileKept = 0;
-				foreach($destinationFileList as $version => $existingSWFName) {
-					if($swfFileKept == 0) {
-						// keep one older file around so visitors aren't redirected to a missing file
-						// the mostly recent one is the first in the list
-						$swfFileKept++;
-						$lastVersion = $version;
-					} else {
-						unlink("{$this->destinationFolder}/{$existingSWFName}");
-					}
-				}
-			} else {
-				$destinationFileList = array();
-				$this->destinationFileLists[$swfFileName] =& $destinationFileList;
-			}
-
-			// save contents into temporary location first
-			$swfFileExt = strrchr($swfFileName, '.');
-			$swfFileExtLen = strlen($swfFileExt);
-			$swfFileNamePart = substr($swfFileName, 0, strlen($swfFileName) - $swfFileExtLen);
-			$swfFileNamePartLen = strlen($swfFileNamePart);
-			$temporaryPath = "{$this->destinationFolder}/{$swfFileNamePart}.00000{$swfFileExt}";
-			$output = fopen($temporaryPath, "wb");
-			if($output) {
-				$swfFile = $this->swfFiles[$swfFilePath];
+	}
+	
+	protected function assembleSWFFiles() {
+		$temporaryFiles = array();
+		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+			$swfTempFilePath = "$swfDestinationFilePath.new";
+			
+			// open the file in append mode, just in case of the race condition where 
+			// where temporary files are created right after the call to checkTemporaryFiles()
+			$output = fopen($swfTempFilePath, "a");
+			if($output && ftell($output) == 0) {
+				$swfFile = $this->swfFiles[$swfSourceFilePath];
 				$this->swfAssembler->assemble($output, $swfFile);
 				fclose($output);
-				
-				// move the temporary file into final location
-				do {
-					$lastVersion++;
-					$number = sprintf("%0d", $lastVersion);
-					$finalSWFFileName = "{$swfFileNamePart}.{$number}{$swfFileExt}";
-					$finalPath = "{$this->destinationFolder}/{$finalSWFFileName}";
-					$nameConflict = false;
-					if(rename($temporaryPath, $finalPath)) {
-						$destinationFileList[$lastVersion] = $finalSWFFileName;
-						krsort($destinationFileList);
-					} else {
-						if(file_exists($finalPath)) {
-							// race condition--try again
-							$nameConflict = true;
-						}
-					}
-				} while($nameConflict);
+				$temporaryFiles[$swfDestinationFilePath] = $swfTempFilePath;
 			}
 		}
+
+		// move the temporary files into the final location		
+		foreach($temporaryFiles as $swfDestinationFilePath => $swfTempFilePath) {
+			// try to delete the old file
+			if(!file_exists($swfDestinationFilePath) || unlink($swfDestinationFilePath)) {
+				rename($swfTempFilePath, $swfDestinationFilePath);
+			} else {
+				// doesn't work--perhaps it's being accessed by the web-server (memory-mapped on Win32?)
+				// try renaming it instead
+				$swfOldFilePath = "$swfDestinationFilePath.old";
+				if(rename($swfDestinationFilePath, $swfOldFilePath)) {
+					rename($swfTempFilePath, $swfDestinationFilePath);
+				}
+			}
+		}		
 	}
 	
 	public function validate() {
@@ -277,39 +301,28 @@ class SWFGenerator {
 		echo "</div>";
 		echo "<div class='section'>";
 		
-		echo "<div class='section-header'>SWF Generation</div>";
-		if(file_exists($this->destinationFolder)) {
-			$folder = realpath($this->destinationFolder);
-			if(is_writable($this->destinationFolder)) {
-				echo "<div class='subsection-ok'><b>Destination folder:</b> {$folder}</div>";
-			} else {
-				$status = 'err';
-				$message = "";
-				echo "<div class='subsection-err'><b>Destination folder:</b> {$folder} <em>(is not writable)</em></div>";		
-			}
-		} else {
-			echo "<div class='subsection-err' style='align: center'><b>Destination folder:</b> \"{$this->destinationFolder}\" (does not exists)</div>";
-		}
+		echo "<div class='section-header'>Update Options</div>";
 		$updateInterval = $this->formatSeconds($this->updateInterval);
 		echo "<div class='subsection-ok'><b>Update interval:</b> {$updateInterval}</div>";
 		$updateInBackground = ($this->updateInBackground) ? 'yes' : 'no';
-		echo "<div class='subsection-ok'><b>Deferred update:</b> {$updateInBackground}</div>";
+		echo "<div class='subsection-ok'><b>Background update:</b> {$updateInBackground}</div>";
 		$maximumStaleInterval = $this->formatSeconds($this->maximumStaleInterval);
 		echo "<div class='subsection-ok'><b>Maximum stale interval:</b> {$maximumStaleInterval}</div>";
 		echo "</div>";
 
-		foreach($this->sourceFilePaths as $sourceFilePath) {
-			$swfFileName = basename($sourceFilePath);
+		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+			$swfSourceFileName = basename($swfSourceFilePath);
+			$swfDestinationFileName = basename($swfDestinationFilePath);
 			echo "<div class='section'>";
-			echo "<div class='section-header'>SWF File: $swfFileName</div>";
-			if(file_exists($sourceFilePath)) {
-				$fullPath = realpath($sourceFilePath);
-				if(is_readable($sourceFilePath)) {
-					echo "<div class='subsection-ok'><b>Full path:</b> {$fullPath}</div>";
-					$filesize = sprintf("%0.1fK", filesize($sourceFilePath) / 1024.0);
+			echo "<div class='section-header'>SWF Generation: $swfSourceFileName &rarr; $swfDestinationFileName </div>";
+			if(file_exists($swfSourceFilePath)) {
+				$fullPath = realpath($swfSourceFilePath);
+				if(is_readable($swfSourceFilePath)) {
+					echo "<div class='subsection-ok'><b>Source file:</b> {$fullPath}</div>";
+					$filesize = sprintf("%0.1fK", filesize($swfSourceFilePath) / 1024.0);
 					echo "<div class='subsection-ok'><b>File size:</b> {$filesize}</div>";
 					$startTime = microtime(true);
-					$input = fopen($sourceFilePath, "rb");
+					$input = fopen($swfSourceFilePath, "rb");
 					$swfFile = ($input) ? $this->swfParser->parse($input) : null;
 					if($swfFile) {
 						if($swfFile->version >= 11) {
@@ -361,10 +374,31 @@ class SWFGenerator {
 						echo "<div class='subsection-err' style='align: center'><em>(errors encountered reading file)</em></div>";
 					}
 				} else {
-					echo "<div class='subsection-err'><b>Full path:</b> {$fullPath} <em>(is not readable)</em></div>";
+					echo "<div class='subsection-err'><b>Source file:</b> {$fullPath} <em>(is not readable)</em></div>";
 				}
 			} else {
-					echo "<div class='subsection-err'><b>Full path:</b> \"$sourceFilePath\" <em>(does not exist)</em></div>";
+					echo "<div class='subsection-err'><b>Source file:</b> \"{$swfSourceFilePath}\" <em>(does not exists)</em></div>";
+			}
+			if(file_exists($swfDestinationFilePath)) {
+				$fullPath = realpath($swfDestinationFilePath);
+				if(is_writable($swfDestinationFilePath)) {
+				
+					echo "<div class='subsection-ok'><b>Destination file:</b> {$fullPath}</div>";
+				} else {
+					echo "<div class='subsection-err'><b>Destination file:</b> {$fullPath} <em>(is not writable)</em></div>";
+				}
+			} else {
+				$swfDestinationFolderPath = dirname($swfDestinationFilePath);
+				if(file_exists($swfDestinationFolderPath)) {
+					$fullPath = realpath($swfDestinationFolderPath) . DIRECTORY_SEPARATOR . basename($swfDestinationFilePath);
+					if(is_writable($swfDestinationFolderPath)) {
+						echo "<div class='subsection-ok'><b>Destination file:</b> {$fullPath}</div>";
+					} else {
+						echo "<div class='subsection-err'><b>Destination file:</b> {$fullPath} <em>(directory is not writable)</em></div>";
+					}
+				} else {
+					echo "<div class='subsection-err'><b>Destination file:</b> \"{$swfDestinationFilePath}\" <em>(directory does not exists)</em></div>";
+				}
 			}
 			echo "</div>";
 		}
@@ -383,7 +417,6 @@ class SWFGenerator {
 				}
 			} else {
 					echo "<div class='subsection-err' style='text-align: center'><em>(unknown or mistyped module name)</em></div>";
-					
 			}
 			echo "</div>";
 		}
@@ -447,71 +480,8 @@ class SWFGenerator {
 				break;
 			}
 		}
-	}
-	
-	protected function createDateModules() {
-		$this->dataModules = array();
-		foreach($this->dataModuleConfigs as $index => $dataModuleConfig) {
-			$dataModuleName = isset($dataModuleConfig['name']) ? trim($dataModuleConfig['name']) : null;
-			$dataModule = class_exists($dataModuleName, true) ? new $dataModuleName($dataModuleConfig) : null;
-			$this->dataModules[$index] = $dataModule;
-		}
-	}
-	
-	protected function parseSWFFiles() {
-		$textObjectLists = array();
-		$fontFamilyLists = array();
-		$this->swfFiles = array();
-		foreach($this->sourceFilePaths as $swfFilePath) {			
-			$input = fopen($swfFilePath, "rb");			
-			if($input) {
-				$this->swfFiles[$swfFilePath] = $swfFile = $this->swfParser->parse($input);
-				$textObjectLists[] = $this->textFinder->find($swfFile);
-				$fontFamilyLists[] = $this->fontFinder->find($swfFile);
-				fclose($input);
-			}
-		}
-		$this->textObjects = call_user_func_array('array_merge', $textObjectLists);
-		$this->fontFamilies = call_user_func_array('array_merge', $fontFamilyLists);
-		uasort($this->textObjects, array($this, 'compareTextObjectNames'));
-	}
-	
-	protected function scanDestinationFolder() {
-		$this->destinationFileLists = array();
-		$existingFiles = scandir($this->destinationFolder);
+	}	
 		
-		// associate files in the destination folder with source files from which there're created
-		foreach($this->sourceFilePaths as $swfFilePath) {
-			$swfFileName = basename($swfFilePath);
-			$swfFileExt = strrchr($swfFileName, '.');
-			$swfFileExtLen = strlen($swfFileExt);
-			$swfFileNamePart = substr($swfFileName, 0, strlen($swfFileName) - $swfFileExtLen);
-			$swfFileNamePartLen = strlen($swfFileNamePart);
-			
-			foreach($existingFiles as $existingFile) {
-				// see if the beginning and end match
-				if(substr($existingFile, 0, $swfFileNamePartLen) == $swfFileNamePart && substr($existingFile, -$swfFileExtLen) == $swfFileExt) {
-					if($swfFileName[$swfFileNamePartLen] == '.') {
-						// filename should be [filename].#####.swf
-						$number = intval(substr($existingFile, $swfFileNamePartLen + 1, -$swfFileExtLen));
-						if($number > 0) {
-							$destinationFileList =& $this->destinationFileLists[$swfFileName];
-							$destinationFileList[$number] = $existingFile;
-						}
-					}
-				}
-			}
-		}		
-		foreach($this->destinationFileLists as &$destinationFileList) {
-			// make the more recent one come first
-			krsort($destinationFileList);
-		}
-	}
-	
-	protected function redirect($url) {
-		header("Location: $url");
-	}
-	
 	protected function compareTextObjectNames($a, $b) {
 		return strnatcasecmp($a->name, $b->name);
 	}

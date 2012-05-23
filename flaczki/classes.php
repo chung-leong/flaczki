@@ -36,12 +36,11 @@ function backtrace_error_handler($errno, $errstr, $errfile, $errline) {
 		$trace = debug_backtrace();
 		for($i = 1; $i < count($trace); $i++) {
 			$function = $trace[$i]['function'];
-			$line = $trace[$i]['line'];
-			echo "$function() at line $line<br>";
+			echo "$function()<br>";
 		}
 	}
 }
 
-set_error_handler('backtrace_error_handler');
+//set_error_handler('backtrace_error_handler');
 
 ?>
