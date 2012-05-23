@@ -170,8 +170,8 @@ class DOCXAssembler {
 		$this->addAttribute($attributes, 'w:styleId', $style->styleId);
 		$this->writeStartTag('w:style', $attributes);
 		$this->writeValueTag('w:name', $style->nameVal);
-		$this->writeValueTag('w:rsid', $style->rsidVal);
 		$this->writeValueTag('w:uiPriorityVal', $style->uiPriorityVal);		
+		$this->writeValueTag('w:qFormat', $style->qFormat);
 		$this->writeValueTag('w:semiHidden', $style->semiHidden);
 		$this->writeValueTag('w:unhideWhenUsed', $style->unhideWhenUsed);
 		if($style->textProperties) {
@@ -185,8 +185,6 @@ class DOCXAssembler {
 	
 	protected function writeParagraphTag($paragraph) {
 		$attributes = array();
-		$this->addAttribute($attributes, 'w:rsidR', $paragraph->rsidR);
-		$this->addAttribute($attributes, 'w:rsidRDefault', $paragraph->rsidRDefault);
 		$this->writeStartTag('w:p', $attributes);
 		if($paragraph->paragraphProperties) {
 			$this->writeParagraphPropertiesTag($paragraph->paragraphProperties);
@@ -256,7 +254,6 @@ class DOCXAssembler {
 	protected function writeSpanTag($span) {
 		if($span->text) {
 			$attributes = array();
-			$this->addAttribute($attributes, 'w:rsidR', $span->rsidR);
 			$this->writeStartTag('w:r', $attributes);
 			if($span->textProperties) {
 				$this->writeTextPropertiesTag($span->textProperties);

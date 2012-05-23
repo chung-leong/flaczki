@@ -32,7 +32,7 @@ class DOCXParser {
 		
 		$document = $this->document = new DOCXDocument;
 		$zipPath = StreamZipArchive::open($input);
-		$processed = array('document.xml' => false);
+		$processed = array('document.xml' => false, 'styles.xml' => false);
 		$rootDir = opendir($zipPath);
 		$dirStack = array($rootDir);
 		$pathStack = array();
@@ -199,7 +199,7 @@ class DOCXParser {
 			case 'r':
 				if($this->span) {
 					// see if the new span has the same properties as the previous one
-					if($this->previousSpan && ($this->previousSpan->rsidR == $this->span->rsidR && $this->previousSpan->textProperties == $this->span->textProperties && $this->previousSpan->hyperlink == $this->span->hyperlink)) {
+					if($this->previousSpan && ($this->previousSpan->textProperties == $this->span->textProperties && $this->previousSpan->hyperlink == $this->span->hyperlink)) {
 						// add the text to the previous span
 						$this->previousSpan->text .= $this->span->text;
 					} else {
@@ -364,15 +364,12 @@ class DOCXDocument {
 }
 
 class DOCXParagraph {
-	public $rsidR;
-	public $rsidRDefault;
 	public $paragraphProperties;
 	
 	public $spans = array();
 }
 
 class DOCXSpan {
-	public $rsidR;
 	public $textProperties;
 	
 	public $text;
@@ -451,12 +448,12 @@ class DOCXStyle {
 	public $basedOnVal;
 	public $default;
 	public $nameVal;
-	public $rsidVal;
 	public $semiHidden;
 	public $styleId;
 	public $type;
 	public $uiPriorityVal;
 	public $unhideWhenUsed;
+	public $qFormat;
 	
 	public $textProperties;
 	public $paragraphProperties;
