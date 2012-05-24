@@ -241,9 +241,7 @@ class SWFBasicParser {
 		$read = strlen($bytes);
 		
 		while($read < $count) {
-			// sometimes fread() doesn't read the requested number of bytes
-			// keep calling it til enough bytes are read or eof is encountered
-			$chunk = fread($this->input, $count - $read);
+			$chunk = fread($this->input, min($count - $read, 32768));
 			if($chunk != '') {
 				$bytes .= $chunk;
 				$read += strlen($chunk);

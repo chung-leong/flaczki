@@ -354,7 +354,17 @@ class ABCParser {
 	}
 	
 	protected function readBytes($count) {
-		$bytes = fread($this->input, $count);
+		$bytes = '';
+		$read = 0;
+		while($read < $count) {
+			$chunk = fread($this->input, min($count - $read, 32768));
+			if($chunk != '') {
+				$bytes .= $chunk;
+				$read += strlen($chunk);
+			} else {
+				break;
+			}			
+		}
 		return ($bytes != '') ? $bytes : null;
 	}	
 }

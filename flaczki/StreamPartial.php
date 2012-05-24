@@ -65,7 +65,7 @@ class StreamPartial {
 		}
 		$read = strlen($data);
 		$this->position += $read;
-		return $extra . $data;
+		return ($extra) ? $extra . $data : $data;
 	}
 }
 
