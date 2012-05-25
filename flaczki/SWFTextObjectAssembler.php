@@ -2,13 +2,16 @@
 
 class SWFTextObjectAssembler extends SWFBasicAssembler {
 
-	protected function finalizeDoABCTag($tag) {
+	protected function finalizeDoABCTag($tag, $tearDown) {
 		if(!$tag->byteCodes) {
 			// assemble the ABC file using ABCAssembler
 			$tag->byteCodes = '';
 			$assembler = new ABCAssembler;
 			$assembler->assemble($tag->byteCodes, $tag->abcFile);
 			$tag->length = 4 + strlen($tag->byteCodeName) + 1 + strlen($tag->byteCodes);
+			if($tearDown) {
+				$tag->abcFile = null;
+			} 
 		}
 	}
 		

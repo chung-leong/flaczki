@@ -39,9 +39,6 @@ class ABCTextObjectFinder {
 			if(isset($nameIndexAndTextIndexHash[$key])) {
 				// eliminate duplicates (e.g. when a text object is in a button)
 				unset($textObjects[$index]);
-			} else if(preg_match('/^__id\d+_$/', $textObject->name)) {
-				// remove objects with auto-assigned names
-				unset($textObjects[$index]);
 			} else {
 				$nameIndexAndTextIndexHash[$key] = true;
 			}

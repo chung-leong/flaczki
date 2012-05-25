@@ -7,16 +7,10 @@ class SWFGenerator {
 	protected $updateInBackground;
 	protected $maximumStaleInterval;
 	protected $dataModuleConfigs;
-	protected $dataModules;
-
-	protected $swfParser;
-	protected $swfAssembler;
-	protected $textFinder;
-	protected $fontFinder;
-
-	protected $swfFiles;
-	protected $textObjects;
-	protected $fontFamilies;
+	
+	protected $persistentDataPath;
+	protected $persistentData;
+	protected $persistentDataString;
 	
 	public function __construct($config) {
 		$this->swfFileMappings = isset($config['swf-files']) ? $config['swf-files'] : array();
@@ -24,11 +18,6 @@ class SWFGenerator {
 		$this->updateInBackground = isset($config['background-update']) ? $config['deferred-update'] : false;
 		$this->maximumStaleInterval = isset($config['maximum-stale-interval']) ? $config['maximum-stale-interval'] : 86400;
 		$this->dataModuleConfigs = isset($config['data-modules']) ? $config['data-modules'] : array();
-				
-		$this->swfParser = new SWFTextObjectParser;
-		$this->swfAssembler = new SWFTextObjectAssembler;
-		$this->textFinder = new SWFTextObjectFinder;
-		$this->fontFinder = new SWFFontFinder;
 	}
 	
 	public static function run($config) {
@@ -37,19 +26,12 @@ class SWFGenerator {
 
 		// determine what should happen
 		$operation = null;
-		foreach($_GET as $name => $value) {
-			switch($name) {
-				case 'export':
-					$operation = 'export';
-					break;
-				case 'update':
-					$operation = 'update';
-					$parameter = $value;
-					break;
-				default:
-					$operation = 'runModuleSpecific';
-					$parameters[$name] = $value;
-			}
+		if(isset($_GET['update'])) {
+			$operation = 'update';
+		} else if(isset($_GET['test'])) {
+			$operation = 'validate';
+		} else if(isset($_GET['export'])) {
+			$operation = 'export';
 		}
 		
 		switch($operation) {
@@ -59,12 +41,16 @@ class SWFGenerator {
 			case 'export':
 				$instance->export();
 				break;
-			case 'runModuleSpecific':
-				$instance->runModuleSpecificOperation($parameters);
-				break;
-			default:
+			case 'validate':
 				$instance->validate();
 				break;
+			default:
+				$instance->runModuleSpecificOperation($_GET);
+				break;
+		}
+		
+		if($instance->persistentData !== null) {
+			$instance->savePersistentData();
 		}
 	}
 	
@@ -72,11 +58,17 @@ class SWFGenerator {
 		// turn off error reporting since the output should be Javascript
 		error_reporting(0);
 		
-		// send HTTP response headers to allow fopen() to complete
+		// set expiration date
+		$now = time();
+		$expirationDate = date("r", $now + $this->updateInterval);
+		header("Pragma: public");
+		header("Cache-Control: maxage=$this->updateInterval");
+		header("Expires: $expirationDate");
+		
+		// send HTTP response headers to allow fopen() to complete		
 		flush();
 	
 		// see if any file is out-of-date (or missing)
-		$now = time();
 		if($forceUpdate) {
 			$needUpdate = true;
 			$mustUpdate = false;
@@ -111,149 +103,128 @@ class SWFGenerator {
 			}
 		}
 		
-		if($needUpdate) {
-			if($canShowOlderVersion) {
-				// spawn a server thread to do the update
-				// the visitor will see an older version in the mean time
-				$internalUrl = "http://{$_SERVER['HTTP_HOST']}:{$_SERVER['SERVER_PORT']}{$_SERVER['SCRIPT_NAME']}?update=force";
-				$streamContextOptions = array (
-					'http' => array (
-						'method' => 'GET',
-						'timeout' => 1
-					)
-				);
-				$context = stream_context_create($streamContextOptions);
-				if($f = fopen($internalUrl, "rb", 0, $context)) {
-					fclose($f);
-					$needUpdate = false;
-				}
-			}
-			
-			if($needUpdate) {
-				$this->createDateModules();
-						
-				// see if remote data source(s) have changed		
-				if($mustUpdate || $this->checkChanges()) {
-					// initial the data transfer first 
-					// continue the update process even when an error occurs if there're files missing
-					if($this->startTransfer() || $mustUpdate) {
-						// check paths where files will be saved temporarily
-						if($this->checkTemporaryFiles()) {
-							// parse the SWF files and find the text objects within them
-							$this->parseSWFFiles();
-
-							// ask the data modules to apply changes
-							$this->applyChanges();
-						
-							// assemble the files
-							$this->assembleSWFFiles();
-						}
-					}
-				}
-			}
+		if(!$needUpdate) {
+			return true;
 		}
-	}
-	
-	protected function createDateModules() {
-		$this->dataModules = array();
-		foreach($this->dataModuleConfigs as $index => $dataModuleConfig) {
-			$dataModuleName = isset($dataModuleConfig['name']) ? trim($dataModuleConfig['name']) : null;
-			$dataModule = class_exists($dataModuleName, true) ? new $dataModuleName($dataModuleConfig) : null;
-			$this->dataModules[$index] = $dataModule;
-		}
-	}
-	
-	protected function checkChanges() {
-		foreach($this->dataModules as $dataModule) {
-			if($dataModule->checkChanges()) {
+		
+		if($canShowOlderVersion) {
+			// spawn a server thread to do the update
+			// the visitor will see an older version in the mean time
+			$internalUrl = "http://{$_SERVER['HTTP_HOST']}:{$_SERVER['SERVER_PORT']}{$_SERVER['SCRIPT_NAME']}?update=force";
+			$streamContextOptions = array (
+				'http' => array (
+					'method' => 'GET',
+					'timeout' => 1
+				)
+			);
+			$context = stream_context_create($streamContextOptions);
+			if($f = fopen($internalUrl, "rb", 0, $context)) {
+				fclose($f);
 				return true;
 			}
 		}
-		return false;
-	}
-	
-	protected function startTransfer() {
-		$successful = true;
-		foreach($this->dataModules as $dataModule) {
+		
+		$dataModules = $this->createDateModules();
+				
+		if(!$mustUpdate) {
+			// update only if remote data source(s) has changed		
+			$sourcesChanged  = false;
+			foreach($dataModules as $dataModule) {
+				if($dataModule->checkChanges()) {
+					$sourcesChanged = true;
+					break;
+				}
+			}
+			if(!$sourcesChanged) {
+				// just touch the files and get out of here
+				foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+					touch($swfDestinationFilePath);
+				}
+				return true;
+			}			
+		}
+		
+				
+		// initial the data transfer first 
+		foreach($dataModules as $dataModule) {
 			if(!$dataModule->startTransfer()) {
-				$successful = false;
+				return false;
 			}
 		}
-		return $successful;
-	}
-	
-	protected function parseSWFFiles() {
-		$textObjectLists = array();
-		$fontFamilyLists = array();
-		$this->swfFiles = array();
+
+		$temporaryFiles = array();
 		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
-			$input = fopen($swfSourceFilePath, "rb");			
-			if($input) {
-				$this->swfFiles[$swfSourceFilePath] = $swfFile = $this->swfParser->parse($input);
-				$textObjectLists[] = $this->textFinder->find($swfFile);
-				$fontFamilyLists[] = $this->fontFinder->find($swfFile);
-				fclose($input);
-			}
-		}
-		$this->textObjects = call_user_func_array('array_merge', $textObjectLists);
-		$this->fontFamilies = call_user_func_array('array_merge', $fontFamilyLists);
-		uasort($this->textObjects, array($this, 'compareTextObjectNames'));
-	}
-	
-	protected function checkTemporaryFiles() {
-		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+			// see if a temporary file exists already 
 			$swfTempFilePath = "$swfDestinationFilePath.new";
-			if(file_exists($swfTempFilePath)) {
+			$fileConflict = file_exists($swfTempFilePath);
+			if($fileConflict) {
 				$modificationTime = filemtime($swfTempFilePath);
 				if($modificationTime + 60 < $now) {
 					// file is older than a minute--probably garbage
-					unlink($swfTempFilePath);
-				} else {
-					return false;
+					if(unlink($swfTempFilePath)) {
+						$fileConflict = false;
+					}
 				}
 			}
-			
-			// delete old files
+
+			// delete old if there's one
 			$swfOldFilePath = "$swfDestinationFilePath.old";
 			if(file_exists($swfOldFilePath)) {
 				unlink($swfOldFilePath);
 			}
-		}				
-		return true;
-	}
-	
-	protected function applyChanges() {
-		foreach($this->dataModules as $dataModule) {
-			$changes = $dataModule->updateText($this->textObjects, $this->fontFamilies);
-			$this->textFinder->replace($changes);
-			
-			// remove the ones that's been changed from the list
-			if($changes) {
-				foreach($this->textObjects as $index => $textObject) {
-					if(in_array($textObject, $changes)) {
-						unset($this->textObjects[$index]);
+		
+			if(!$fileConflict) {
+				// parse the SWF file and find the text objects within it
+				$input = fopen($swfSourceFilePath, "rb");			
+				if($input) {
+					$swfParser = new SWFTextObjectParser;
+					$swfFile = $swfParser->parse($input);
+					$textFinder = new SWFTextObjectFinder;
+					$textObjects = $textFinder->find($swfFile);
+					$fontFinder = new SWFFontFinder;
+					$fontFamilies = $fontFinder->find($swfFile);
+					fclose($input);
+				
+					// ask the data modules to apply changes
+					$fileChanged = false;
+					foreach($dataModules as $dataModule) {
+						$changes = $dataModule->updateText($textObjects, $fontFamilies);
+						if($changes) {
+							$fileChanged = true;
+							$textFinder->replace($changes);
+							
+							// remove the ones that's been changed from the list
+							foreach($textObjects as $index => $textObject) {
+								if(in_array($textObject, $changes, true)) {
+									unset($textObjects[$index]);
+								}
+							}
+							$change = null;
+						}
+					}
+					$textObjects = null;
+					$fontFamilies = null;
+					
+					if($fileChanged || !file_exists($swfDestinationFilePath)) {
+						// assemble the files
+						$swfTempFilePath = "$swfDestinationFilePath.new";
+						
+						// open the file in append mode, just in case of the race condition where 
+						// where temporary files are created right after the call to checkTemporaryFiles()
+						$output = fopen($swfTempFilePath, "a");
+						if($output && ftell($output) == 0) {
+							$swfAssembler = new SWFTextObjectAssembler;
+							$swfAssembler->assemble($output, $swfFile, true);
+							fclose($output);
+							$temporaryFiles[$swfDestinationFilePath] = $swfTempFilePath;
+						}
+					} else {
+						touch($swfDestinationFilePath);
 					}
 				}
 			}
 		}
-	}
-	
-	protected function assembleSWFFiles() {
-		$temporaryFiles = array();
-		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
-			$swfTempFilePath = "$swfDestinationFilePath.new";
-			
-			// open the file in append mode, just in case of the race condition where 
-			// where temporary files are created right after the call to checkTemporaryFiles()
-			$output = fopen($swfTempFilePath, "a");
-			if($output && ftell($output) == 0) {
-				$swfFile = $this->swfFiles[$swfSourceFilePath];
-				$this->swfAssembler->assemble($output, $swfFile);
-				fclose($output);
-				$temporaryFiles[$swfDestinationFilePath] = $swfTempFilePath;
-			}
-		}
-
+		
 		// move the temporary files into the final location		
 		foreach($temporaryFiles as $swfDestinationFilePath => $swfTempFilePath) {
 			// try to delete the old file
@@ -267,7 +238,43 @@ class SWFGenerator {
 					rename($swfTempFilePath, $swfDestinationFilePath);
 				}
 			}
-		}		
+		}
+		return true;
+	}
+	
+	protected function createDateModules() {
+		if($this->persistentData === null) {
+			$this->loadPersistentData();
+		}
+		$dataModules = array();				
+		foreach($this->dataModuleConfigs as $dataModuleConfig) {
+			$dataModuleName = isset($dataModuleConfig['name']) ? trim($dataModuleConfig['name']) : null;
+			$dataModule = class_exists($dataModuleName, true) ? new $dataModuleName($dataModuleConfig, $this->persistentData) : null;
+			$dataModules[] = $dataModule;
+		}
+		return $dataModules;
+	}
+	
+	protected function loadPersistentData() {
+		$dir = session_save_path();
+		if(!$dir) {
+			$dir = sys_get_temp_dir();
+		}
+		$this->persistentDataPath = preg_replace('/\/$/', '', str_replace('\\', '/', $dir)) . '/flaczki';
+		if(file_exists($this->persistentDataPath)) {
+			$this->persistentDataString = file_get_contents($this->persistentDataPath);
+			$this->persistentData = unserialize($this->persistentDataString);
+		} else {
+			$this->persistentDataString = 'a:0:{}';
+			$this->persistentData = array();
+		}
+	}
+	
+	protected function savePersistentData() {
+		$newPersistentDataString = serialize($this->persistentData);
+		if($this->persistentDataString != $newPersistentDataString) {
+			file_put_contents($this->persistentDataPath, $newPersistentDataString);
+		}
 	}
 	
 	public function validate() {
@@ -278,9 +285,9 @@ class SWFGenerator {
 		echo "<style> BODY { font-family: sans-serif; font-size: 1em; } .section { border: 1px solid #333333; margin: 1em 1em 1em 1em; background-color: #EEEEEE; } .section-header { border: 1px inset #999999; background-color: #333333; color: #FFFFFF; padding: 0px 4px 0px 4px; font-size: 1.5em; font-weight: bold; margin: 3px 3px 3px 3px; } .subsection-ok { border: 1px inset #CCCCCC; background-color: #DDFFDD; padding: 1px 4px 1px 4px; margin: 3px 3px 3px 3px; } .subsection-err { border: 1px inset #CCCCCC; background-color: #FFDDDD; padding: 1px 4px 1px 4px; margin: 3px 3px 3px 3px; } </style>";
 		echo "</head><body>";
 		
-		$this->createDateModules();
+		$dataModules = $this->createDateModules();
 		$requiredExtensions = array('PCRE', 'XML', 'Zlib');
-		foreach($this->dataModules as $dataModule) {
+		foreach($dataModules as $dataModule) {
 			if($dataModule instanceof SWFGeneratorDataModule) {
 				$requiredExtensions = array_merge($requiredExtensions, $dataModule->getRequiredPHPExtensions());
 			}
@@ -322,8 +329,9 @@ class SWFGenerator {
 					$filesize = sprintf("%0.1fK", filesize($swfSourceFilePath) / 1024.0);
 					echo "<div class='subsection-ok'><b>File size:</b> {$filesize}</div>";
 					$startTime = microtime(true);
+					$swfParser = new SWFTextObjectParser;
 					$input = fopen($swfSourceFilePath, "rb");
-					$swfFile = ($input) ? $this->swfParser->parse($input) : null;
+					$swfFile = ($input) ? $swfParser->parse($input) : null;
 					if($swfFile) {
 						if($swfFile->version >= 11) {
 							echo "<div class='subsection-ok'><b>Flash version:</b> {$swfFile->version}</div>";
@@ -336,7 +344,8 @@ class SWFGenerator {
 						$compressed = ($swfFile->compressed) ? 'yes' : 'no';
 						echo "<div class='subsection-ok'><b>Compressed:</b> $compressed</div>";
 						
-						$textObjects = $this->textFinder->find($swfFile);
+						$textFinder = new SWFTextObjectFinder;
+						$textObjects = $textFinder->find($swfFile);
 						$textObjectCount = count($textObjects);
 						$textObjectNames = array();
 						foreach($textObjects as $textObject) {
@@ -351,7 +360,8 @@ class SWFGenerator {
 							echo "<div class='subsection-err'><b>TLF text objects ($textObjectCount):</b></div>";
 						}
 						
-						$fontFamilies = $this->fontFinder->find($swfFile);
+						$fontFinder = new SWFFontFinder;
+						$fontFamilies = $fontFinder->find($swfFile);
 						$fontCount = count($fontFamilies);
 						$fontDescriptions = array();
 						foreach($fontFamilies as $fontFamily) {
@@ -403,7 +413,7 @@ class SWFGenerator {
 			echo "</div>";
 		}
 		
-		foreach($this->dataModules as $index => $dataModule) {
+		foreach($dataModules as $index => $dataModule) {
 			$dataModuleConfig = $this->dataModuleConfigs[$index];
 			$dataModuleName = $dataModuleConfig['name'];
 			echo "<div class='section'>";
@@ -429,10 +439,10 @@ class SWFGenerator {
 		error_reporting(0);
 		
 		// see which modules has exportable contents
-		$this->createDateModules();
+		$dataModules = $this->createDateModules();
 		$exportingModules = array();
 		$exportingModuleHash = array();
-		foreach($this->dataModules as $dataModule) {
+		foreach($dataModules as $dataModule) {
 			$className = get_class($dataModule);
 			// if a module is used multiple times, export from only the first instance
 			if(!isset($exportingModuleHash[$className])) {
@@ -446,7 +456,21 @@ class SWFGenerator {
 		if(count($exportingModules) == 0) {
 			echo "<p>Not exportable contents available</p>";
 		} else {
-			$this->parseSWFFiles();
+			$textObjects = array();
+			$fontFamilies = array();
+			foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
+				$input = fopen($swfSourceFilePath, "rb");
+				if($input) {
+					$swfParser = new SWFTextObjectParser;
+					$swfFile = $swfParser->parse($input);
+					$textFinder = new SWFTextObjectFinder;
+					$textObjects = array_merge($textObjects, $textFinder->find($swfFile));
+					$fontFinder = new SWFFontFinder;
+					$fontFamilies = array_merge($fontFamilies, $fontFinder->find($swfFile));
+					fclose($input);
+				}
+			}
+			
 			$output = fopen("php://output", "wb");
 			if(count($exportingModules) == 1) {
 				// just send the single file
@@ -455,7 +479,7 @@ class SWFGenerator {
 				$fileName = $exportingModule->getExportFileName();
 				header("Content-type: $mimeType");
 				header("Content-Disposition: attachment; filename=\"$fileName\"");
-				$exportingModule->export($output, $this->textObjects, $this->fontFamilies);
+				$exportingModule->export($output, $textObjects, $fontFamilies);
 			} else {
 				// put the files into a zip archive
 				$mimeType = "application/zip";
@@ -466,7 +490,7 @@ class SWFGenerator {
 				foreach($exportingModules as $exportingModule) {
 					$name = $exportingModule->getExportFileName();
 					$stream = fopen("$zipPath/$name", "wb");
-					$exportingModule->export($stream, $this->textObjects, $this->fontFamilies);
+					$exportingModule->export($stream, $textObjects, $fontFamilies);
 				}
 				StreamZipArchive::close($zipPath);
 			}
@@ -474,18 +498,30 @@ class SWFGenerator {
 	}
 	
 	public function runModuleSpecificOperation($parameters) {
-		$this->createDateModules();
-		foreach($this->dataModules as $dataModule) {
+		$dataModules = $this->createDateModules();
+		$handled = false;
+		foreach($dataModules as $dataModule) {
 			if($dataModule->runModuleSpecificOperation($parameters)) {
+				$handled = true;
 				break;
+			}
+		}
+		if(!$handled) {
+			echo "<h1>Unknown Operation</h1>";
+			echo "<p>URL should contain one of the following GET variables:</p>";
+			echo "<p><i><a href=\"?update\">update</a></i> - Perform an update</p>";
+			echo "<p><i><a href=\"?test\">test</a></i> - Test to see if configuration is correct</p>";
+			echo "<p><i><a href=\"?export\">export</a></i> - Export text in SWF file(s)</p>";
+			
+			foreach($dataModules as $dataModule) {
+				$parameters = $dataModule->getModuleSpecificParameters();
+				foreach($parameters as $name => $description) {
+					echo "<p><i><a href=\"?$name\">$name</a></i> - $description</p>";
+				}
 			}
 		}
 	}	
 		
-	protected function compareTextObjectNames($a, $b) {
-		return strnatcasecmp($a->name, $b->name);
-	}
-	
 	protected function formatSeconds($s) {
 		$text = "";
 		if($s > 3600) {

@@ -5,7 +5,7 @@ class SWFBasicAssembler {
 	protected $output;
 	protected $written;
 	
-	public function assemble(&$output, $swfFile) {
+	public function assemble(&$output, $swfFile, $tearDown = false) {
 		if(gettype($output) == 'string') {
 			$path = StreamMemory::create($output);
 			$this->output = fopen($path, "wb");
@@ -18,7 +18,7 @@ class SWFBasicAssembler {
 
 		// prepare the tags for writing (making sure the tag lengths are correct, etc.)
 		foreach($swfFile->tags as $tag) {
-			$this->finalizeTag($tag);
+			$this->finalizeTag($tag, $tearDown);
 		}
 
 		// signature
@@ -44,8 +44,12 @@ class SWFBasicAssembler {
 		$this->writeUI16($swfFile->frameRate);
 		$this->writeUI16($swfFile->frameCount);
 		
-		foreach($swfFile->tags as $tag) {
+		foreach($swfFile->tags as $index => $tag) {
 			$this->writeTag($tag);
+			if($tearDown) {
+				// free the tag to conserve memory
+				unset($swfFile->tags[$index]);
+			}
 		}
 		
 		if($swfFile->compressed) {
@@ -58,10 +62,10 @@ class SWFBasicAssembler {
 		return $written;
 	}
 	
-	protected function finalizeTag($tag) {
+	protected function finalizeTag($tag, $tearDown) {
 		$methodName = "finalize{$tag->name}Tag";
 		if(method_exists($this, $methodName)) {
-			$this->$methodName($tag);
+			$this->$methodName($tag, $tearDown);
 		}
 		if($tag->length > 63 && $tag->headerLength == 2) {
 			// need to use long format instead
@@ -95,7 +99,7 @@ class SWFBasicAssembler {
 		$this->writeBytes($tag->data);
 	}
 	
-	protected function finalizeDefineSpriteTag($tag) {
+	protected function finalizeDefineSpriteTag($tag, $tearDown) {
 		$tagLength = 4;
 		foreach($tag->tags as $child) {
 			$this->finalizeTag($child);
@@ -112,7 +116,7 @@ class SWFBasicAssembler {
 		}
 	}
 	
-	protected function finalizeDefineBinaryDataTag($tag) {
+	protected function finalizeDefineBinaryDataTag($tag, $tearDown) {
 		if(!$tag->data && $tag->swfFile) {
 			// the tag is an embedded SWF file
 			// assemble the file using a clone of $this
@@ -120,6 +124,9 @@ class SWFBasicAssembler {
 			$assembler = clone $this;
 			$assembler->assemble($tag->data, $tag->swfFile);
 			$tag->length = 6 + strlen($tag->data);
+			if($tearDown) {
+				$tag->swfFile = null;
+			}
 		}
 	}
 		

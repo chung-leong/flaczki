@@ -213,7 +213,7 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		
 		if($tlfStyle->textIndent) {
 			$this->createParagraphProperties($odtStyle);
-			$odtStyle->paragraphProperties->textIndent = $this->convertToCentimeter($value);
+			$odtStyle->paragraphProperties->textIndent = $this->convertToCentimeter($tlfStyle->textIndent);
 		}
 		
 		// text properties
@@ -323,7 +323,8 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 	}
 	
 	protected function convertToCentimeter($point) {
-		return sprintf("%.4fcm", $point * 0.0352777778);
+		$value = $point * 0.0352777778;		
+		return sprintf((round($value) == $value) ? "%fcm" : "%.4fcm", $value);
 	}
 	
 	protected function createTextProperties($odtStyle) {	

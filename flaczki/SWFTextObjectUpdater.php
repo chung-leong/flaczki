@@ -2,16 +2,21 @@
 
 abstract class SWFTextObjectUpdater {
 
-	public $fontPolicy;
+	const ALLOWED_DEVICE_FONTS = 1;
+	const MAINTAIN_ORIGINAL_FONT_SIZE = 2;
+	const ALLOW_ANY_EMBEDDED_FONT = 3;
 
 	protected $tlfParser;
 	protected $tlfAssembler;
 	protected $fontFamilies;
 
+	protected $allowedDeviceFonts = array();
+	protected $maintainOriginalFontSize = true;
+	protected $allowAnyEmbeddedFont = true;
+	
 	public function __construct() {
 		$this->tlfParser = new TLFParser;
 		$this->tlfAssembler = new TLFAssembler;
-		$this->fontPolicy = new SWFTextObjectUpdaterFontPolicy;
 	}
 	
 	abstract public function getSections();
@@ -48,6 +53,14 @@ abstract class SWFTextObjectUpdater {
 		return $changes;
 	}
 	
+	public function setPolicy($policy, $value) {
+		switch($policy) {
+			case ALLOWED_DEVICE_FONTS: $this->allowedDeviceFonts = $value; break;
+			case MAINTAIN_ORIGINAL_FONT_SIZE: $this->maintainOriginalFontSize = $value; break;
+			case ALLOW_ANY_EMBEDDED_FONT: $this->allowAnyEmbeddedFont = $value; break;
+		}
+	}
+	
 	protected function insertParagraphs($tlfObject, $paragraphs, $unmappedProperties) {
 		// learn something about how often certain styles are used in the original text object
 		$originalStyleUsage = $this->getStyleUsage($tlfObject, array_merge(array('fontFamily', 'fontLookup', 'fontSize'), $unmappedProperties));
@@ -72,7 +85,7 @@ abstract class SWFTextObjectUpdater {
 		
 		// see if font sizes need to be adjusted
 		$fontSizeScaleFactor = 1;
-		if($this->fontPolicy->maintainOriginalFontSize) {
+		if($this->maintainOriginalFontSize) {
 			$originalFontSizeUsage  = $originalStyleUsage['fontSize'];
 			$newFontSizeUsage = $newStyleUsage['fontSize'];
 			$originalMostFrequentSize = key($originalFontSizeUsage);
@@ -86,7 +99,7 @@ abstract class SWFTextObjectUpdater {
 		$fontFamilyMap = array();
 		$fontLookupMap = array();
 		$embeddedFonts = $this->fontFamilies;
-		$allowedDeviceFonts = array_flip($this->fontPolicy->allowedDeviceFonts);
+		$allowedDeviceFonts = array_flip($this->allowedDeviceFonts);
 		$originalFontUsage = $originalStyleUsage['fontFamily'];
 		$newFontUsage = $newStyleUsage['fontFamily'];		
 		foreach($newFontUsage as $fontFamilyName => $frequency) {
@@ -94,7 +107,7 @@ abstract class SWFTextObjectUpdater {
 				// font was used in this text object before--no change needed
 				$fontFamilyMap[$fontFamilyName] = $fontFamilyName;
 			} else {
-				if($this->fontPolicy->allowAnyEmbeddedFont && isset($embeddedFonts[$fontFamilyName])) {
+				if($this->allowAnyEmbeddedFont && isset($embeddedFonts[$fontFamilyName])) {
 					// font is embedded--no change needed
 					$fontFamilyMap[$fontFamilyName] = $fontFamilyName;
 				} else if(isset($allowedDeviceFonts[$fontFamilyName])) {
@@ -110,10 +123,10 @@ abstract class SWFTextObjectUpdater {
 						if(!isset($availableFonts)) {
 							// any font that was referenced by the text object originally is available
 							$availableFonts = array_keys($originalFontUsage);	
-							if($this->fontPolicy->allowAnyEmbeddedFont) {
+							if($this->allowAnyEmbeddedFont) {
 								$availableFonts = array_merge($availableFonts, array_key($embeddedFonts));
 							}
-							if($this->fontPolicy->allowedDeviceFonts) {
+							if($this->allowedDeviceFonts) {
 								$availableFonts = array_merge($availableFonts, array_key($allowedDeviceFonts));
 							}
 							$availableFonts = array_unique($availableFonts);
@@ -225,12 +238,6 @@ abstract class SWFTextObjectUpdater {
 		}
 		return $difference;
 	}
-}
-
-class SWFTextObjectUpdaterFontPolicy {
-	public $allowedDeviceFonts = array();
-	public $maintainOriginalFontSize = true;
-	public $allowAnyEmbeddedFont = true;
 }
 
 ?>

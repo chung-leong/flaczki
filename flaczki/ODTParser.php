@@ -43,7 +43,8 @@ class ODTParser {
 				}
 				$processed[$file] = true;
 			}
-		}		
+		}
+		StreamZipArchive::close($zipPath);
 		$this->document = $this->paragraph = $this->span = $this->previousSpan = $this->style = $this->font = null;
 		if(array_sum($processed) == count($processed)) {
 			return $document;

@@ -31,13 +31,15 @@ class StreamZipArchive {
 	public static function close($path, $comments = '') {
 		$archive = StreamWrapperStaticStorage::get($path);
 		if($archive) {
-			$archive->comments = $comments;
-			if($archive->activeStream) {
-				$archive->activeStream->stream_close();
+			if($archive->writable) {
+				$archive->comments = $comments;
+				if($archive->activeStream) {
+					$archive->activeStream->stream_close();
+				}
+				
+				// write the central directory
+				self::writeCentralDirectory($archive);
 			}
-			
-			// write the central directory
-			self::writeCentralDirectory($archive);
 			StreamWrapperStaticStorage::remove($path);
 		}
 	}
