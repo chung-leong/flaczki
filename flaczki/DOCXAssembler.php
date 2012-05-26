@@ -172,6 +172,7 @@ class DOCXAssembler {
 		$this->addAttribute($attributes, 'w:styleId', $style->styleId);
 		$this->writeStartTag('w:style', $attributes);
 		$this->writeValueTag('w:name', $style->nameVal);
+		$this->writeValueTag('w:basedOnVal', $style->basedOnVal);
 		$this->writeValueTag('w:link', $style->linkVal);
 		$this->writeValueTag('w:uiPriorityVal', $style->uiPriorityVal);		
 		$this->writeValueTag('w:qFormat', $style->qFormat);
@@ -226,10 +227,8 @@ class DOCXAssembler {
 			$this->writeTag('w:ind', $attributes);
 		}
 		$this->writeValueTag('w:jc', $properties->jcVal);
+		$this->writeValueTag('w:outlineLvl', $properties->outlineLvlVal);
 		$this->writeValueTag('w:pageBreakBefore', $properties->pageBreakBefore);
-		if($properties->textProperties) {
-			$this->writeTextPropertiesTag($properties->textProperties);
-		}
 		$attributes = array();
 		$this->addAttribute($attributes, 'w:after', $properties->spacingAfter);
 		$this->addAttribute($attributes, 'w:before', $properties->spacingBefore);

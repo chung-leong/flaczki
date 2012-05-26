@@ -17,7 +17,7 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		foreach($this->document->paragraphs as $paragraph) {
 			$this->resolveParagraphProperties($paragraph->paragraphProperties);
 			foreach($paragraph->spans as $span) {
-				$this->resolveTextProperties($span->textProperties, $paragraph->paragraphProperties);
+				$this->resolveTextProperties($span->textProperties);
 			}
 		}
 		
@@ -81,7 +81,7 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		
 		// the DOCX format doesn't contain information for these properties
 		// insertParagraphs() will see if it's possible to transfer them from the original text object
-		$unmappedProperties = array('backgroundAlpha', 'digitCase', 'digitWidth', 'justificationRule', 'justificationStyle', 'ligatureLevel', 'textAlpha', 'wordSpacing');
+		$unmappedProperties = array('backgroundAlpha', 'digitCase', 'digitWidth', 'justificationRule', 'justificationStyle', 'textJustify', 'ligatureLevel', 'textAlpha', 'wordSpacing');
 		$this->insertParagraphs($tlfObject, $newParagraphs, $unmappedProperties);
 	}
 	
@@ -169,7 +169,6 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 					case 'center': $tlfStyle->textAlign = 'center'; break;
 					case 'both': 
 						$tlfStyle->textAlign = 'justify';
-						$tlfStyle->textJustify = 'interWord';
 						break;
 					case 'distribute':
 						$tlfStyle->textAlign = 'justify';
@@ -287,7 +286,7 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		return $value;
 	}
 
-	protected function resolveTextProperties(&$textProperties, $paragraphProperties) {
+	protected function resolveTextProperties(&$textProperties) {
 		if(!$textProperties) {
 			$textProperties = new DOCXTextProperties;
 		}
@@ -296,11 +295,6 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		if($textProperties->rStyleVal) {
 			$style = $this->document->styles[$textProperties->rStyleVal];
 			$this->copyMissingProperties($textProperties, $style->textProperties);
-		}
-		
-		// copy default text properties for paragraph
-		if($paragraphProperties && $paragraphProperties->textProperties) {
-			$this->copyMissingProperties($textProperties, $paragraphProperties->textProperties);
 		}
 		
 		// copy default text properties of document
@@ -326,27 +320,8 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 				}
 				$this->copyMissingProperties($paragraphProperties->textProperties, $style->textProperties);
 			}
+		}
 			
-			// style is linked to another--apply those as well
-			if($style->linkVal) {
-				$stlye = $this->document->styles[$style->linkVal];
-				if($style->paragraphProperties) {
-					$this->copyMissingProperties($paragraphProperties, $style->paragraphProperties);
-				}
-				if($style->textProperties) {
-					if(!$paragraphProperties->textProperties) {
-						$paragraphProperties->textProperties = new DOCXTextProperties;
-					}
-					$this->copyMissingProperties($paragraphProperties->textProperties, $style->textProperties);
-				}				
-			}
-		}
-		
-		// resolve default text properties
-		if($paragraphProperties->textProperties) {
-			$this->resolveTextProperties($paragraphProperties->textProperties, null);
-		}
-		
 		// copy default paragraph properties of document
 		if($this->document->defaultParagraphProperties) {
 			$this->copyMissingProperties($paragraphProperties, $this->document->defaultParagraphProperties);
@@ -375,7 +350,6 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 						for($i = 0; $i < 10; $i++) {
 							$panose[$i + 1] = hexdec($chunks[$i]);
 						}
-						print_r($panose);
 						return $panose;
 					}
 				} else {

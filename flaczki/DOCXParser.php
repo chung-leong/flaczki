@@ -223,7 +223,7 @@ class DOCXParser {
 					if($this->span) {
 						$this->span->textProperties = $this->textProperties;
 					} else if($this->paragraphProperties) {
-						$this->paragraphProperties->textProperties = $this->textProperties;
+						// text properties for paragraph mark--ignore it
 					} else if($this->style) {
 						$this->style->textProperties = $this->textProperties;
 					} else {
@@ -395,6 +395,7 @@ class DOCXParagraphProperties {
 	public $indLeft;
 	public $indRight;
 	public $jcVal;
+	public $outlineLvlVal;
 	public $pageBreakBefore;
 	public $pStyleVal;
 	public $spacingAfter;
@@ -403,8 +404,6 @@ class DOCXParagraphProperties {
 	public $spacingLineRule;
 	public $tabStops;
 	public $textAlignmentVal;
-	
-	public $textProperties;
 }
 
 class DOCXTextProperties {

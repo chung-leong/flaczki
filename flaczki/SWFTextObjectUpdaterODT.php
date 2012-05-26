@@ -77,7 +77,7 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		
 		// the ODT format doesn't contain information for these properties
 		// insertParagraphs() will see if it's possible to transfer them from the original text object
-		$unmappedProperties = array('backgroundAlpha', 'digitCase', 'digitWidth', 'justificationRule', 'justificationStyle', 'ligatureLevel', 'textAlpha', 'wordSpacing');
+		$unmappedProperties = array('backgroundAlpha', 'digitCase', 'digitWidth', 'justificationRule', 'justificationStyle', 'textJustify', 'ligatureLevel', 'textAlpha', 'wordSpacing');
 		$this->insertParagraphs($tlfObject, $newParagraphs, $unmappedProperties);
 	}
 	
@@ -424,6 +424,14 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		foreach($this->document->fonts as $font) {
 			if($font->fontFamily == $fontFamilyName) {
 				if($font->panose1) {
+					$chunks = explode(' ', $font->panose1);
+					if(count($chunks) == 10) {
+						$panose = array();
+						for($i = 0; $i < 10; $i++) {
+							$panose[$i + 1] = hexdec($chunks[$i]);
+						}
+						return $panose;
+					}
 					
 				} else {
 					// see if the parent class can look it up

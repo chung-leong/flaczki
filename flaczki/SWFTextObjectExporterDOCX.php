@@ -21,10 +21,13 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		foreach($sections as $section) {
 			// add section name 
 			$heading = new DOCXParagraph;
-			$heading->pStyleVal = 'Heading1';
 			$heading->paragraphProperties = new DOCXParagraphProperties;
+			$heading->paragraphProperties->pStyleVal = 'Heading1';
 			$heading->paragraphProperties->pageBreakBefore = count($this->document->paragraphs) > 0;
+			
 			$span = new DOCXSpan;
+			$span->textProperties = new DOCXTextProperties;
+			$span->textProperties->rStyleVal = 'Heading1Char';
 			$span->text = $this->beautifySectionName($section->name);
 			$heading->spans[] = $span;
 			$this->document->paragraphs[] = $heading;
@@ -99,7 +102,7 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		if($tlfStyle->lineHeight) {
 			if(preg_match('/\d+%$/', $tlfStyle->lineHeight)) {
 				// when lineRule is "auto", line means 240th of the height of a line
-				$percentage = floatval($tlfStyle->lineHeight);
+				$percentage = (float) $tlfStyle->lineHeight;
 				$docxParagraphProperties->spacingLine = round($percentage * 240 / 100);
 				$docxParagraphProperties->spacingLineRule = "auto";
 			} else if(is_numeric($tlfStyle->lineHeight)) {
@@ -171,12 +174,12 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 				case 'left': $docxParagraphProperties->jcVal = 'left'; break;
 				case 'right': $docxParagraphProperties->jcVal = 'right';	break;
 				case 'center': $docxParagraphProperties->jcVal = 'center'; break;
-				case 'justify': $docxParagraphProperties->jcVal = ($tlfStyle->textJustify == 'distribute') ? 'distribute' : 'both'; break;
+				case 'justify': $docxParagraphProperties->jcVal = 'both'; break;
 			}
 		}
 		
 		if($tlfStyle->textIndent) {
-			$docxParagraphProperties->indFirstLine = $this->convertToTwip($value);
+			$docxParagraphProperties->indFirstLine = $this->convertToTwip($tlfStyle->textIndent);
 		}
 		
 		// text properties
@@ -186,11 +189,11 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 				case 'subscript': $docxTextProperties->vertAlignVal = 'subscript'; break;
 				default:
 					if(preg_match('/\d+%$/', $tlfStyle->baselineShift)) {
-						$percentage = floatval($tlfStyle->baselineShift);
+						$percentage = (float) $tlfStyle->baselineShift;
 						$fontSize = ($tlfStyle->fontSize) ? $tlfStyle->fontSize : 12;
 						$docxTextProperties->vertAlignVal = round($fontSize * 2 * $percentage / 100);
 					} else if(is_numeric($tlfStyle->baselineShift)) {
-						$points = floatval($tlfStyle->baselineShift);
+						$points = (float) $tlfStyle->baselineShift;
 						$docxTextProperties->vertAlignVal = round($points * 2);
 					}
 			}
@@ -278,7 +281,7 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 	}
 	
 	protected function convertToTwip($point) {
-		return round($point * 20);
+		return round((float) $point * 20);
 	}
 		
 	protected function addDefaultStyles($styleUsage) {
@@ -299,7 +302,7 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		if(!isset($this->document->styles[$normalStyleId = 'Normal'])) {
 			$normalStyle = new DOCXStyle;
 			$normalStyle->styleId = $normalStyleId;
-			$normalStyle->name = "Normal";
+			$normalStyle->nameVal = "Normal";
 			$normalStyle->type = "paragraph";
 			$normalStyle->default = 1;
 			$normalStyle->qFormat = true;
@@ -309,12 +312,46 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		if(!isset($this->document->styles[$defaultParagraphFontStyleId = 'DefaultParagraphFont'])) {
 			$defaultParagraphFontStyle = new DOCXStyle;
 			$defaultParagraphFontStyle->styleId = $defaultParagraphFontStyleId;
-			$defaultParagraphFontStyle->name = "Default Paragraph Font";
+			$defaultParagraphFontStyle->nameVal = "Default Paragraph Font";
 			$defaultParagraphFontStyle->type = "character";
 			$defaultParagraphFontStyle->semiHidden = true;
 			$defaultParagraphFontStyle->unhideWhenUsed = true;
 			$this->document->styles[$defaultParagraphFontStyleId] = $defaultParagraphFontStyle;
 		}
+		
+		if(!isset($this->document->styles[$headingStyleId = 'Heading1'])) {
+			$headingStyle = new DOCXStyle;
+			$headingStyle->styleId = $headingStyleId;
+			$headingStyle->nameVal = "heading 1";
+			$headingStyle->baseOnVal = "Normal";
+			$headingStyle->linkVal = "Heading1Char";
+			$headingStyle->uiPriorityVal = 9;
+			$headingStyle->type = "paragraph";
+			$headingStyle->qFormat = true;
+			$headingStyle->paragraphProperties = new DOCXParagraphProperties;
+			$headingStyle->paragraphProperties->spacingBefore = 480;
+			$headingStyle->paragraphProperties->spacingAfter = 0;
+			$headingStyle->paragraphProperties->outlineLvlVal = 0;
+			$this->document->styles[$headingStyleId] = $headingStyle;
+		}
+
+		if(!isset($this->document->styles[$headingStyleId = 'Heading1Char'])) {
+			$headingStyle = new DOCXStyle;
+			$headingStyle->styleId = $headingStyleId;
+			$headingStyle->nameVal = "Heading 1 Char";
+			$headingStyle->baseOnVal = "DefaultParagraphFont";
+			$headingStyle->linkVal = "Heading1";
+			$headingStyle->uiPriorityVal = 9;
+			$headingStyle->type = "character";
+			$headingStyle->textProperties = new DOCXTextProperties;
+			$headingStyle->textProperties->b = true;
+			$headingStyle->textProperties->bCs = true;
+			$headingStyle->textProperties->szVal = 28;
+			$headingStyle->textProperties->szCsVal = 28;
+			$headingStyle->textProperties->colorVal = "365F91";
+			$this->document->styles[$headingStyleId] = $headingStyle;
+		}
+		
 	}
 	
 	protected function addFonts($fontFamilies, $fontUsage) {
