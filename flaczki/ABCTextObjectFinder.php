@@ -83,8 +83,8 @@ class ABCTextObjectFinder {
 			"\x87" => 0,	/* astypelate */	"\xd2" => 0,	/* getlocal_3 */	"\x57" => 0,	/* newactivation */	"\x03" => 0,	/* throw */
 			"\xa8" => 0,	/* bitand */		"\xd3" => 0,	/* getlocal_4 */	"\x56" => 1,	/* newarray */		"\x95" => 0,	/* typeof */
 			"\x97" => 0,	/* bitnot */		"\x66" => 1,	/* getproperty */	"\x5a" => 1,	/* newcatch */		"\xa7" => 0,	/* urshift */
-			"\xa9" => 0,	/* bitor */		"\x65" => 0x10,	/* getscopeobject */	"\x58" => 1,	/* newclass */
-			"\xaa" => 0,	/* bitxor */		"\x6c" => 1,	/* getslot */		"\x40" => 1,	/* newfunction */
+			"\xa9" => 0,	/* bitor */		"\x65" => 0x10,	/* getscopeobject */	"\x58" => 1,	/* newclass */		"\x01" => 0,	/* bkpt */
+			"\xaa" => 0,	/* bitxor */		"\x6c" => 1,	/* getslot */		"\x40" => 1,	/* newfunction */	"\xF2" => 1,	/* bkptline */
 			"\x41" => 1,	/* call */		"\x04" => 1,	/* getsuper */		"\x55" => 1,	/* newobject */
 			"\x43" => 2,	/* callmethod */	"\xb0" => 0,	/* greaterequals */	"\x1e" => 0,	/* nextname */
 			"\x46" => 2,	/* callproperty */	"\xaf" => 0,	/* greaterthan */	"\x23" => 0,	/* nextvalue */

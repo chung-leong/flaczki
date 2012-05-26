@@ -278,7 +278,7 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 	}
 	
 	protected function convertToTwip($point) {
-		return round($point * 15);
+		return round($point * 20);
 	}
 		
 	protected function addDefaultStyles($styleUsage) {

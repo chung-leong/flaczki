@@ -150,8 +150,8 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 						}
 					} else {
 						switch($odtTabStop->type) {
-							case 'left': $tlfTabStop = "e$position"; break;
-							case 'right': $tlfTabStop = "s$position"; break;
+							case 'left': $tlfTabStop = "s$position"; break;
+							case 'right': $tlfTabStop = "e$position"; break;
 							case 'center': $tlfTabStop = "c$position"; break;
 							case 'char': $tlfTabStop = "d$position|$odtTabStop->char"; break;
 						}

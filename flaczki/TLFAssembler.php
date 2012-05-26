@@ -22,11 +22,6 @@ class TLFAssembler {
 			$this->writeStartTag('TextFlow', $textFlow->style);
 			foreach($textFlow->paragraphs as $paragraph) {
 				$this->writeStartTag('p', $paragraph->style);
-				if($paragraph->style->tabStops) {
-					foreach($tabStops as $tabStop) {
-						$this->writeStartTag('tabStop', $tabStop);
-					}
-				}
 				$hyperlink = null;
 				foreach($paragraph->spans as $span) {
 					if($span->hyperlink !== $hyperlink) {

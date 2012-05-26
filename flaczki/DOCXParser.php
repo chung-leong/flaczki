@@ -171,6 +171,7 @@ class DOCXParser {
 			case 'hyperlink':
 				// the URL is stored in document.xml.rels 
 				$this->hyperlink = new DOCXHyperlink;				
+				$this->copyProperties($this->hyperlink, $attributes);
 				$this->hyperlinks["{$this->currentDirectory}/{$this->currentFileName}:{$attributes['r:id']}"] = $this->hyperlink;
 				break;
 			case 'p':
@@ -385,6 +386,7 @@ class DOCXSpan {
 
 class DOCXHyperlink {
 	public $href;
+	public $tgtFrame;
 }
 
 class DOCXParagraphProperties {

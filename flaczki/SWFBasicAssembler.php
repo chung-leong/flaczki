@@ -102,7 +102,7 @@ class SWFBasicAssembler {
 	protected function finalizeDefineSpriteTag($tag, $tearDown) {
 		$tagLength = 4;
 		foreach($tag->tags as $child) {
-			$this->finalizeTag($child);
+			$this->finalizeTag($child, $tearDown);
 			$tagLength += $child->headerLength + $child->length;
 		}
 		$tag->length = $tagLength;

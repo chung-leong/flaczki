@@ -185,6 +185,7 @@ class TLFFlowElementStyle {
 	public $justificationRule;
 	public $justificationStyle;
 	public $kerning;
+	public $ligatureLevel;
 	public $lineBreak;
 	public $lineHeight;
 	public $lineThrough;
