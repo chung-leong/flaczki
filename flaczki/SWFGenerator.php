@@ -104,6 +104,7 @@ class SWFGenerator {
 		}
 		
 		if(!$needUpdate) {
+			$this->stopAdditionalOutput();
 			return true;
 		}
 		
@@ -120,6 +121,7 @@ class SWFGenerator {
 			$context = stream_context_create($streamContextOptions);
 			if($f = fopen($internalUrl, "rb", 0, $context)) {
 				fclose($f);
+				$this->stopAdditionalOutput();
 				return true;
 			}
 		}
@@ -140,6 +142,7 @@ class SWFGenerator {
 				foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
 					touch($swfDestinationFilePath);
 				}
+				$this->stopAdditionalOutput();
 				return true;
 			}			
 		}
@@ -148,6 +151,7 @@ class SWFGenerator {
 		// initial the data transfer first 
 		foreach($dataModules as $dataModule) {
 			if(!$dataModule->startTransfer()) {
+				$this->stopAdditionalOutput();
 				return false;
 			}
 		}
@@ -239,6 +243,7 @@ class SWFGenerator {
 				}
 			}
 		}
+		$this->stopAdditionalOutput();
 		return true;
 	}
 	
@@ -494,6 +499,7 @@ class SWFGenerator {
 				}
 				StreamZipArchive::close($zipPath);
 			}
+			$this->stopAdditionalOutput();
 		}
 	}
 	
@@ -503,6 +509,7 @@ class SWFGenerator {
 		foreach($dataModules as $dataModule) {
 			if($dataModule->runModuleSpecificOperation($parameters)) {
 				$handled = true;
+				$this->stopAdditionalOutput();
 				break;
 			}
 		}
@@ -521,6 +528,11 @@ class SWFGenerator {
 			}
 		}
 	}	
+	
+	protected function stopAdditionalOutput() {
+		ob_start();
+		register_shutdown_function('ob_end_clean');
+	}
 		
 	protected function formatSeconds($s) {
 		$text = "";
