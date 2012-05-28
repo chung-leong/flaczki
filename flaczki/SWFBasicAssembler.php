@@ -109,7 +109,7 @@ class SWFBasicAssembler {
 	}
 	
 	protected function writeDefineSpriteTag($tag) {
-		$this->writeUI16($tag->spriteId);
+		$this->writeUI16($tag->characterId);
 		$this->writeUI16($tag->frameCount);
 		foreach($tag->tags as $child) {
 			$this->writeTag($child);
@@ -131,7 +131,7 @@ class SWFBasicAssembler {
 	}
 		
 	protected function writeDefineBinaryDataTag($tag) {
-		$this->writeUI16($tag->objectId);
+		$this->writeUI16($tag->characterId);
 		$this->writeUI32($tag->reserved);
 		$this->writeBytes($tag->data);
 	}

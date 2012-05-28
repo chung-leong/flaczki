@@ -2,7 +2,7 @@
 
 class ABCTextObjectFinder {
 
-	public function find($abcFile) {	
+	public function find($abcFile) {
 		$textObjects = array();
 	
 		// get the multiname index of flash.display.MovieClip and flash.display.SimpleButton
@@ -69,9 +69,9 @@ class ABCTextObjectFinder {
 				if($instance->superNameIndex == $movieClipNameIndex || $instance->superNameIndex == $simpleButtonNameIndex) {
 					// look up the initializer for the clip
 					$method = $abcFile->methodTable[$instance->initializerIndex];
-					
+
 					// scan the AS3 bytecodes
-					if($method->body && preg_match_all("/$pattern/", $method->body->byteCodes, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+					if($method->body && preg_match_all("/$pattern/s", $method->body->byteCodes, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
 						foreach($matches as $match) {
 							list($instanceNameOp, $instanceNameOpOffset) = $match[1];
 							list($xmlOp, $xmlOpOffset) = $match[3];
@@ -123,19 +123,30 @@ class ABCTextObjectFinder {
 			$abcFile->stringTable[$textObject->xmlIndex] = $textObject->xml;
 			
 			// see if there are images
-			if($textObject->imageClasses) {
+			if($textObject->referencedImageClasses) {
 				// create the extraInfo object linking source names in the XML to AS3 classes
 				$patch = "";
 				$count = 0;
-				foreach($textObject->imageClasses as $imageClass) {
-					if(!$imageClass->classIndex) {
-						// create a class for the image
-					}
+				foreach($textObject->referencedImageClasses as $sourceName => $imageClass) {
 					if(!$imageClass->nameIndex) {
 						// create a name for the class
+						$imageClass->nameIndex = $this->findMultinameIndex($abcFile, $imageClass->name, $imageClass->namespace);
+						if(!$imageClass->nameIndex) {
+							$imageClass->nameIndex = $this->createMultiname($abcFile, $imageClass->name, $imageClass->namespace);
+						}
+					}
+					if(!$imageClass->classIndex) {
+						// create a class for the image
+						$imageClass->classIndex = $this->createEmptyClass($abcFile, $imageClass->nameIndex);
 					}
 					if(!$imageClass->sourceNameIndex) {
 						// allocate a string in the constant pool
+						$imageClass->sourceNameIndex = array_search($sourceName, $abcFile->stringTable, true);
+						if(!$imageClass->sourceNameIndex) {
+							$imageClass->sourceNameIndex = count($abcFile->stringTable);
+							$abcFile->stringTable[] = $sourceName;
+						}
+						$imageClass->sourceName = $sourceName;
 					}
 					
 					$patch .= "\x2c" . $this->packU32($imageClass->sourceNameIndex) // pushstring
@@ -188,6 +199,133 @@ class ABCTextObjectFinder {
 		return false;
 	}
 	
+	protected function findNamespaceIndex($abcFile, $namespace) {
+		foreach($abcFile->namespaceTable as $namespaceIndex => $namespaceRec) {
+			if($namespaceRec->stringIndex && $abcFile->stringTable[$namespaceRec->stringIndex] == $namespace) {
+				return $namespaceIndex;
+			}
+		}
+		return false;
+	}
+	
+	protected function createMultiname($abcFile, $name, $namespace = null) {
+		$stringIndex = array_search($name, $abcFile->stringTable, true);
+		if(!$stringIndex) {
+			$stringIndex = count($abcFile->stringTable);
+			$abcFile->stringTable[] = $name;
+		}
+		if($namespace) {
+			$namespaceIndex = $this->findNamespaceIndex($abcFile, $namespace);
+			if(!$namespaceIndex) {
+				$namespaceRec = new ABCNamespace;
+				$namespaceRec->kind = 0x08;
+				$namespaceRec->stringIndex = count($abcFile->stringTable);
+				$abcFile->stringTable[] = $namespace;
+				$namespaceIndex = count($abcFile->namespaceTable);
+				$abcFile->namespaceTable[] = $namespaceRec;
+			}
+		} else {
+			$namespaceIndex = 0;
+		}
+		$multiname = new ABCMultiname;
+		$multiname->type = 0x07;
+		$multiname->stringIndex = $stringIndex;
+		$multiname->namespaceIndex = $namespaceIndex;
+		$multinameIndex = count($abcFile->multinameTable);
+		$abcFile->multinameTable[] = $multiname;
+		return $multinameIndex;
+	}
+	
+	protected function createEmptyClass($abcFile, $nameIndex) {
+		$classIndex = count($abcFile->classTable);
+
+		$objectNameIndex = $this->findMultinameIndex($abcFile, 'Object');
+ 		$eventDispatcherNameIndex = $this->findMultinameIndex($abcFile, 'EventDispatcher', 'flash.events');
+ 		$displayObjectNameIndex = $this->findMultinameIndex($abcFile, 'DisplayObject', 'flash.display');
+ 		$interactiveObjectNameIndex = $this->findMultinameIndex($abcFile, 'InteractiveObject', 'flash.display');
+ 		$displayObjectContainerNameIndex = $this->findMultinameIndex($abcFile, 'DisplayObjectContainer', 'flash.display');
+ 		$spriteNameIndex = $this->findMultinameIndex($abcFile, 'Sprite', 'flash.display');
+ 		$movieClipNameIndex = $this->findMultinameIndex($abcFile, 'MovieClip', 'flash.display');
+ 		$bitmapDataNameIndex = $this->findMultinameIndex($abcFile, 'BitmapData', 'flash.display');
+
+ 		// create the instance initializer
+		$methodBody = new ABCMethodBody;
+		$methodBody->maxStack = 3;
+		$methodBody->localCount = 3;
+		$methodBody->initScopeDepth = 5;
+		$methodBody->maxScopeDepth = 6;
+		$methodBody->byteCodes = "\xd0\x30\xd0\xd1\xd2\x49\x02\x47"; 	// empty function that calls parent constructor
+		$methodBody->methodIndex = count($abcFile->methodTable);
+		$abcFile->methodBodyTable[] = $methodBody;	
+		$method = new ABCMethod;
+		$method->body = $methodBody;
+		$abcFile->methodTable[] = $method;
+		
+		// create the instance
+		$instance = new ABCInstance;
+		$instance->nameIndex = $nameIndex;
+		//$instance->superNameIndex = $movieClipNameIndex;
+		$instance->superNameIndex = $bitmapDataNameIndex;
+		$instance->flags = 0x8;
+		$instance->protectedNamespaceIndex = $objectNameIndex;
+		$instance->initializerIndex = $methodBody->methodIndex;
+		$abcFile->instanceTable[] = $instance;
+
+		// create script initializer
+		$methodBody = new ABCMethodBody;
+		$methodBody->maxStack = 2;
+		$methodBody->localCount = 1;
+		$methodBody->initScopeDepth = 1;
+		$methodBody->maxScopeDepth = 4;
+		$methodBody->byteCodes = "\xd0\x30\x65\x00";
+		//$ancestry = array($objectNameIndex, $eventDispatcherNameIndex, $displayObjectNameIndex, $interactiveObjectNameIndex, $displayObjectContainerNameIndex, $spriteNameIndex, $movieClipNameIndex);
+		$ancestry = array($objectNameIndex, $bitmapDataNameIndex);
+		foreach($ancestry as $ancestorNameIndex) {
+			$methodBody->byteCodes .= "\x60" . $this->packU32($ancestorNameIndex) . "\x30";
+		}
+		//$methodBody->byteCodes .= "\x60" . $this->packU32($movieClipNameIndex) . "\x58" . $this->packU32($classIndex);
+		$methodBody->byteCodes .= "\x60" . $this->packU32($bitmapDataNameIndex) . "\x58" . $this->packU32($classIndex);
+		$methodBody->byteCodes .= str_repeat("\x1d", count($ancestry));
+		$methodBody->byteCodes .= "\x68" . $this->packU32($nameIndex) . "\x47";
+		$methodBody->methodIndex = count($abcFile->methodTable);
+		$abcFile->methodBodyTable[] = $methodBody;
+		$method = new ABCMethod;
+		$method->body = $methodBody;
+		$abcFile->methodTable[] = $method;
+		
+		// create a script object
+		$script = new ABCScript;
+		$script->initializerIndex = $methodBody->methodIndex;
+		$trait = new ABCTrait;
+		$trait->nameIndex = $nameIndex;
+		$trait->type = 0x04;
+		$trait->data = new ABCTraitClass;
+		$trait->data->slotId = 0;
+		$trait->data->classIndex = $classIndex;
+		$script->traits[] = $trait;
+		array_unshift($abcFile->scriptTable, $script);
+		
+		// create class constructor
+		$methodBody = new ABCMethodBody;
+		$methodBody->maxStack = 1;
+		$methodBody->localCount = 1;
+		$methodBody->initScopeDepth = 4;
+		$methodBody->maxScopeDepth = 5;
+		$methodBody->byteCodes = "\xd0\x30\x47";			// does nothing
+		$methodBody->methodIndex = count($abcFile->methodTable);
+		$abcFile->methodBodyTable[] = $methodBody;
+		$method = new ABCMethod;
+		$method->body = $methodBody;
+		$abcFile->methodTable[] = $method;
+		
+		// create an class object
+		$class = new ABCClass;
+		$class->constructorIndex = $methodBody->methodIndex;
+		$abcFile->classTable[] = $class;
+		
+		return $classIndex;
+	}
+	
 	protected function decodeU32($bc, &$p = 1) {
 		$s = 0;
 		$v = 0;
@@ -231,14 +369,17 @@ class ABCTextObjectInfo {
 	public $xmlIndex;
 	public $methodBody;
 	public $copyOnWrite;
-	public $imageClasses = array();
+	public $referencedImageClasses = array();		// keyed by customSource name
 }
 
-class ABCGraphicClass {
+class ABCImageClassInfo {
+	public $multinameIndex;
+	public $nameapace;
+	public $namespaceIndex;
 	public $name;
 	public $nameIndex;
-	public $sourceName;
 	public $sourceNameIndex;
+	public $sourceName;
 	public $classIndex;
 }
 

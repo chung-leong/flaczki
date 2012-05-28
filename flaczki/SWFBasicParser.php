@@ -55,38 +55,38 @@ class SWFBasicParser {
 	
 	protected function readTag() {
 		static $TAG_NAMES = array(
-			74 => 'CSMTextSettings',		14 => 'DefineSound',
-			78 => 'DefineScalingGrid',		60 => 'DefineVideoStream',
-			87 => 'DefineBinaryData',		59 => 'DoInitAction',
-			6  => 'DefineBits',			82 => 'DoABC',
-			21 => 'DefineBitsJPEG2',		12 => 'DoAction',
-			35 => 'DefineBitsJPEG3',		58 => 'EnableDebugger',
-			90 => 'DefineBitsJPEG4',		64 => 'EnableDebugger2',
-			20 => 'DefineBitsLossless',		0  => 'End',
-			36 => 'DefineBitsLossless2',		56 => 'ExportAssets',
-			7  => 'DefineButton',			69 => 'FileAttributes',
-			34 => 'DefineButton2',			43 => 'FrameLabel',
-			23 => 'DefineButtonCxform',		57 => 'ImportAssets',
-			17 => 'DefineButtonSound',		71 => 'ImportAssets2',
-			37 => 'DefineEditText',			8  => 'JPEGTables',
-			10 => 'DefineFont',			77 => 'Metadata',
-			48 => 'DefineFont2',			24 => 'Protect',
-			75 => 'DefineFont3',			4  => 'PlaceObject',
-			91 => 'DefineFont4',			26 => 'PlaceObject2',
-			73 => 'DefineFontAlignZones',		70 => 'PlaceObject3',
-			13 => 'DefineFontInfo',			5  => 'RemoveObject',
-			62 => 'DefineFontInfo2',		28 => 'RemoveObject2',
-			88 => 'DefineFontName',			65 => 'ScriptLimits',
-			46 => 'DefineMorphShape',		9  => 'SetBackgroundColor',
+			74 => 'CSMTextSettings',		60 => 'DefineVideoStream',
+			78 => 'DefineScalingGrid',		59 => 'DoInitAction',
+			87 => 'DefineBinaryData',		82 => 'DoABC',
+			6  => 'DefineBits',			12 => 'DoAction',
+			21 => 'DefineBitsJPEG2',		58 => 'EnableDebugger',
+			35 => 'DefineBitsJPEG3',		64 => 'EnableDebugger2',
+			90 => 'DefineBitsJPEG4',		0  => 'End',
+			20 => 'DefineBitsLossless',		56 => 'ExportAssets',
+			36 => 'DefineBitsLossless2',		69 => 'FileAttributes',
+			7  => 'DefineButton',			43 => 'FrameLabel',
+			34 => 'DefineButton2',			57 => 'ImportAssets',
+			23 => 'DefineButtonCxform',		71 => 'ImportAssets2',
+			17 => 'DefineButtonSound',		8  => 'JPEGTables',
+			37 => 'DefineEditText',			77 => 'Metadata',
+			10 => 'DefineFont',			24 => 'Protect',
+			48 => 'DefineFont2',			4  => 'PlaceObject',
+			75 => 'DefineFont3',			26 => 'PlaceObject2',
+			91 => 'DefineFont4',			70 => 'PlaceObject3',
+			73 => 'DefineFontAlignZones',		5  => 'RemoveObject',
+			13 => 'DefineFontInfo',			28 => 'RemoveObject2',
+			62 => 'DefineFontInfo2',		65 => 'ScriptLimits',
+			88 => 'DefineFontName',			9  => 'SetBackgroundColor',
+			46 => 'DefineMorphShape',		86 => 'SetSceneAndFrameLabelData',
 			84 => 'DefineMorphShape2',		66 => 'SetTabIndex',
-			86 => 'DefineSceneAndFrameLabelData',	1  => 'ShowFrame',
-			2  => 'DefineShape',			15 => 'StartSound',
-			22 => 'DefineShape2',			89 => 'StartSound2',
-			32 => 'DefineShape3',			18 => 'SoundStreamHead',
-			83 => 'DefineShape4',			45 => 'SoundStreamHead2',
-			39 => 'DefineSprite',			19 => 'SoundStreamBlock',
-			11 => 'DefineText',			76 => 'SymbolClass',
-			33 => 'DefineText2',			61 => 'VideoFrame',
+			2  => 'DefineShape',			1  => 'ShowFrame',
+			22 => 'DefineShape2',			15 => 'StartSound',
+			32 => 'DefineShape3',			89 => 'StartSound2',
+			83 => 'DefineShape4',			18 => 'SoundStreamHead',
+			39 => 'DefineSprite',			45 => 'SoundStreamHead2',
+			11 => 'DefineText',			19 => 'SoundStreamBlock',
+			33 => 'DefineText2',			76 => 'SymbolClass',
+			14 => 'DefineSound',			61 => 'VideoFrame',
 		);
 		
 		$tagCodeAndLength = $this->readUI16();
@@ -111,6 +111,12 @@ class SWFBasicParser {
 				$tag = $this->$methodName($tagLength);
 			} else {
 				$tag = $this->readGenericTag($tagLength);
+				
+				// we will need the character id 
+				if(preg_match('/^Define/', $tagName)) {
+					$array = unpack('v', $tag->data);
+					$tag->characterId = $array[1];
+				}
 			}
 			$tag->code = $tagCode;
 			$tag->name = $tagName;
@@ -130,7 +136,7 @@ class SWFBasicParser {
 	
 	protected function readDefineSpriteTag($tagLength) {
 		$tag = new SWFDefineSpriteTag;
-		$tag->spriteId = $this->readUI16();
+		$tag->characterId = $this->readUI16();
 		$tag->frameCount = $this->readUI16();
 		$bytesRemaining = $tagLength - 4;
 		while($bytesRemaining > 0 && ($child = $this->readTag())) {
@@ -145,7 +151,7 @@ class SWFBasicParser {
 		
 	protected function readDefineBinaryDataTag($tagLength) {
 		$tag = new SWFDefineBinaryDataTag;
-		$tag->objectId = $this->readUI16();
+		$tag->characterId = $this->readUI16();
 		$tag->reserved = $this->readUI32();
 		$bytesRemaining = $tagLength - 6;
 		
@@ -277,17 +283,18 @@ class SWFTag {
 }
 
 class SWFGenericTag extends SWFTag {
+	public $characterId;
 	public $data;
 }
 
 class SWFDefineSpriteTag extends SWFTag {
-	public $spriteId;
+	public $characterId;
 	public $frameCount;
 	public $tags = array();
 }
 
 class SWFDefineBinaryDataTag extends SWFTag {
-	public $objectId;
+	public $characterId;
 	public $reserved;
 	public $data;
 	public $swfFile;
