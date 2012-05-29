@@ -5,6 +5,7 @@ class FloogleDocs extends SWFGeneratorDataModule {
 	protected $suppliedUrl;
 	protected $sourceUrl;
 	protected $input;
+	protected $updater;
 
 	public function __construct($moduleConfig, &$persistentData) {
 		parent::__construct($moduleConfig, $persistentData);
@@ -18,23 +19,32 @@ class FloogleDocs extends SWFGeneratorDataModule {
 		$this->input = fopen($this->sourceUrl, "rb");
 		return ($this->input) ? true : false;
 	}
-
-	public function updateText($textObjects, $fontFamilies) {
+	
+	public function finishTransfer() {
 		if($this->input) {
 			// parse the ODT file
 			$parser = new ODTParser;
 			$document = $parser->parse($this->input);
 			fclose($this->input);
-		
+			$this->updater = new SWFTextObjectUpdaterODT($document);
+			return true;
+		}
+	}
+
+	public function updateText($textObjects, $fontFamilies) {
+		if($this->updater) {
 			// update the text objects
-			$updater = new SWFTextObjectUpdaterODT($document);
-			$updater->setPolicy(SWFTextObjectUpdater::ALLOWED_DEVICE_FONTS, $this->allowedDeviceFonts);
-			$updater->setPolicy(SWFTextObjectUpdater::MAINTAIN_ORIGINAL_FONT_SIZE, $this->maintainOriginalFontSize);
-			$updater->setPolicy(SWFTextObjectUpdater::ALLOW_ANY_EMBEDDED_FONT, $this->allowAnyEmbeddedFont);
-			$changes = $updater->update($textObjects, $fontFamilies);
+			$this->updater->setPolicy(SWFTextObjectUpdater::ALLOWED_DEVICE_FONTS, $this->allowedDeviceFonts);
+			$this->updater->setPolicy(SWFTextObjectUpdater::MAINTAIN_ORIGINAL_FONT_SIZE, $this->maintainOriginalFontSize);
+			$this->updater->setPolicy(SWFTextObjectUpdater::ALLOW_ANY_EMBEDDED_FONT, $this->allowAnyEmbeddedFont);
+			$changes = $this->updater->update($textObjects, $fontFamilies);
 			return $changes;
 		}
 		return array();
+	}
+	
+	public function cleanUp() {
+		unset($this->updater);
 	}
 	
 	public function validate() {

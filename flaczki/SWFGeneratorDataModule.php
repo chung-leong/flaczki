@@ -30,8 +30,15 @@ class SWFGeneratorDataModule {
 		return true;
 	}
 	
+	public function finishTransfer() {
+		return true;
+	}
+	
 	public function updateText($textObjects, $fontFamilies) {
 		return array();
+	}
+	
+	public function cleanUp() {
 	}
 	
 	public function validate() {

@@ -4,6 +4,7 @@ class FlopBox extends SWFGeneratorDataModule {
 
 	protected $sourceUrl;
 	protected $input;
+	protected $updater;
 
 	public function __construct($moduleConfig, &$persistentData) {
 		parent::__construct($moduleConfig, $persistentData);
@@ -40,6 +41,29 @@ class FlopBox extends SWFGeneratorDataModule {
 		return true;
 	}
 	
+	public function finishTransfer() {
+		if($this->input) {
+			// save etag and size
+			$metadata = $this->getMetadata();
+			if($metadata->eTag && $metadata->size) {
+				$key = "FlopBox:{$this->sourceUrl}";
+				$this->persistentData[$key] = array('etag' => $metadata->eTag, 'size' => $metadata->size);
+			}
+		
+			if(list($parserClass, $updaterClass) = $this->getClassNames()) {
+				// parse the document 
+				$parser = new $parserClass;
+				$document = $parser->parse($this->input);
+				fclose($this->input);
+		
+				// update the text objects
+				$this->updater = new $updaterClass($document);
+				return true;
+			}
+		}
+		return false;
+	}
+	
 	protected function getMetadata() {
 		$metadata = new FlopBoxFileMetadata;
 		$httpMetadata = stream_get_meta_data($this->input);
@@ -56,28 +80,13 @@ class FlopBox extends SWFGeneratorDataModule {
 	}
 
 	public function updateText($textObjects, $fontFamilies) {
-		if($this->input) {
-			// save etag and size
-			$metadata = $this->getMetadata();
-			if($metadata->eTag && $metadata->size) {
-				$key = "FlopBox:{$this->sourceUrl}";
-				$this->persistentData[$key] = array('etag' => $metadata->eTag, 'size' => $metadata->size);
-			}
-		
-			if(list($parserClass, $updaterClass) = $this->getClassNames()) {
-				// parse the document 
-				$parser = new $parserClass;
-				$document = $parser->parse($this->input);
-				fclose($this->input);
-		
-				// update the text objects
-				$updater = new $updaterClass($document);
-				$updater->setPolicy(SWFTextObjectUpdater::ALLOWED_DEVICE_FONTS, $this->allowedDeviceFonts);
-				$updater->setPolicy(SWFTextObjectUpdater::MAINTAIN_ORIGINAL_FONT_SIZE, $this->maintainOriginalFontSize);
-				$updater->setPolicy(SWFTextObjectUpdater::ALLOW_ANY_EMBEDDED_FONT, $this->allowAnyEmbeddedFont);
-				$changes = $updater->update($textObjects, $fontFamilies);
-				return $changes;
-			}
+		if($this->updater) {
+			// update the text objects
+			$this->updater->setPolicy(SWFTextObjectUpdater::ALLOWED_DEVICE_FONTS, $this->allowedDeviceFonts);
+			$this->updater->setPolicy(SWFTextObjectUpdater::MAINTAIN_ORIGINAL_FONT_SIZE, $this->maintainOriginalFontSize);
+			$this->updater->setPolicy(SWFTextObjectUpdater::ALLOW_ANY_EMBEDDED_FONT, $this->allowAnyEmbeddedFont);
+			$changes = $this->updater->update($textObjects, $fontFamilies);
+			return $changes;
 		}
 		return array();
 	}

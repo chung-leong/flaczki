@@ -155,6 +155,7 @@ class SWFGenerator {
 				return false;
 			}
 		}
+		$transferFinished = false;
 
 		$temporaryFiles = array();
 		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
@@ -188,6 +189,14 @@ class SWFGenerator {
 					$fontFinder = new SWFFontFinder;
 					$fontFamilies = $fontFinder->find($swfFile);
 					fclose($input);
+					
+					// finish transfering the data 
+					if(!$transferFinished) {
+						foreach($dataModules as $dataModule) {
+							$dataModule->finishTransfer();
+						}
+						$transferFinished = true;
+					}
 				
 					// ask the data modules to apply changes
 					$fileChanged = false;
