@@ -68,9 +68,7 @@ class SWFTextObjectFinder {
 					$plan = $this->getExportPlan($textObject->swfFile, $textObject->abcTag);
 					
 					foreach($newImageClasses as $imageClass) {
-						$imageTag = new SWFDefineBitsJPEG2Tag;
-						$imageTag->name = 'DefineBitsJPEG2';
-						$imageTag->code = 21;
+						$imageTag = new SWFDefineBitsJPEGTag;
 						$imageTag->characterId = $plan->nextCharacterId++;
 						$imageTag->imageData = $imageClass->imageData;
 						$imageClass->imageTag = $imageTag;
@@ -86,8 +84,6 @@ class SWFTextObjectFinder {
 						$symbolClassTag = $plan->symbolClassTagDestination->tags[$plan->symbolClassTagIndex];					
 					} else {
 						$symbolClassTag = new SWFSymbolClassTag;
-						$symbolClassTag->name = 'SymbolClass';
-						$symbolClassTag->code = 76;
 						array_splice($plan->symbolClassTagDestination->tags, $plan->symbolClassTagIndex++, 0, array($symbolClassTag));
 					}
 					foreach($newImageClasses as $imageClass) {
@@ -162,7 +158,7 @@ class SWFTextObjectFinder {
 				if($tag->swfFile) {
 					$this->scanTags($tag->swfFile, $textObjects, $imageExportInfo, $swfFile);
 				}
-			} else if($tag instanceof SWFDefineBitsJPEG2Tag) {
+			} else if($tag instanceof SWFDefineBitsJPEGTag) {
 				$imageExportInfo->imageTags[$tag->characterId] = $tag;
 			} else if($tag instanceof SWFSymbolClassTag) {
 				foreach($tag->characterIds as $index => $characterId) {

@@ -11,26 +11,32 @@ class SWFTextObjectAssembler extends SWFBasicAssembler {
 			$tag->length = 4 + strlen($tag->byteCodeName) + 1 + strlen($tag->byteCodes);
 			if($tearDown) {
 				$tag->abcFile = null;
-			} 
+			}
 		}
 	}
 	
 	protected function finalizeSymbolClassTag($tag, $tearDown) {
+		$tag->name = 'SymbolClass';
+		$tag->code = 76;
 		$tag->length = array_sum(array_map('strlen', $tag->names)) + count($tag->names) * 3 + 2;
 		$tag->headerLength = 6;
 	}
 	
-	protected function finalizeDefineBitsJPEG2Tag($tag, $tearDown) {
-		$tag->length = strlen($tag->imageData) + 2;
+	protected function finalizeDefineBitsJPEGTag($tag, $tearDown) {
+		if($tag->deblockingParam) {
+			$tag->code = 90;
+			$tag->name = 'DefineBitsJPEG4';
+			$tag->length = strlen($tag->imageData) + strlen($tag->alphaData) + 8;
+		} else if($tag->alphaData) {
+			$tag->code = 32;
+			$tag->name = 'DefineBitsJPEG3';
+			$tag->length = strlen($tag->imageData) + strlen($tag->alphaData) + 6;
+		} else {
+			$tag->name = 'DefineBitsJPEG2';
+			$tag->code = 21;
+			$tag->length = strlen($tag->imageData) + 2;
+		}
 		$tag->headerLength = 6;
-	}
-	
-	protected function finalizeDefineBitsJPEG3Tag($tag, $tearDown) {
-		$tag->length = strlen($tag->imageData) + strlen($tag->alphaData) + 6;
-	}
-	
-	protected function finalizeDefineBitsJPEG4Tag($tag, $tearDown) {
-		$tag->length = strlen($tag->imageData) + strlen($tag->alphaData) + 8;
 	}
 	
 	protected function writeDoABCTag($tag) {
@@ -55,22 +61,14 @@ class SWFTextObjectAssembler extends SWFBasicAssembler {
 		}
 	}
 	
-	protected function writeDefineBitsJPEG2Tag($tag) {
+	protected function writeDefineBitsJPEGTag($tag) {		
 		$this->writeUI16($tag->characterId);
-		$this->writeBytes($tag->imageData);
-	}
-
-	protected function writeDefineBitsJPEG3Tag($tag) {
-		$this->writeUI16($tag->characterId);
-		$this->writeUI32(strlen($tag->imageData));
-		$this->writeBytes($tag->imageData);
-		$this->writeBytes($tag->alphaData);
-	}
-
-	protected function writeDefineBitsJPEG4Tag($tag) {
-		$this->writeUI16($tag->characterId);
-		$this->writeUI32(strlen($tag->imageData));
-		$this->writeUI16($tag->deblockingParam);
+		if($tag->code == 32 || $tag->code == 90) {
+			$this->writeUI32(strlen($tag->imageData));
+		}
+		if($tag->code == 90) {
+			$this->writeUI16($tag->deblockingParam);
+		}
 		$this->writeBytes($tag->imageData);
 		$this->writeBytes($tag->alphaData);
 	}

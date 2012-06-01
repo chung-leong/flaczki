@@ -24,18 +24,30 @@ class TLFAssembler {
 				$this->writeStartTag('p', $paragraph->style);
 				$hyperlink = null;
 				foreach($paragraph->spans as $span) {
-					if($span->hyperlink !== $hyperlink) {
-						if($hyperlink) {
-							$this->writeEndTag('a');
+					if($span instanceof TLFInlineGraphicElement) {
+						$graphic = $span;
+						$attributes = array(
+							'source' => 'Object',
+							'customSource' => $graphic->customSource,
+							'float' => $graphic->float,
+							'width' => $graphic->width,
+							'height' => $graphic->height,
+						);
+						$this->writeStartTag('img', $attributes, true);
+					} else {
+						if($span->hyperlink !== $hyperlink) {
+							if($hyperlink) {
+								$this->writeEndTag('a');
+							}
+							$hyperlink = $span->hyperlink;
+							if($hyperlink) {
+								$this->writeStartTag('a', $hyperlink);
+							}
 						}
-						$hyperlink = $span->hyperlink;
-						if($hyperlink) {
-							$this->writeStartTag('a', $hyperlink);
-						}
+						$this->writeStartTag('span', $span->style);
+						$this->writeText($span->text);
+						$this->writeEndTag('span');
 					}
-					$this->writeStartTag('span', $span->style);
-					$this->writeText($span->text);
-					$this->writeEndTag('span');
 				}
 				if($hyperlink) {
 					$this->writeEndTag('a');

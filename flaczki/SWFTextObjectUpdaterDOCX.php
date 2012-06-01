@@ -9,7 +9,7 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		$this->document = $document;
 	}
 	
-	public function getSections() {
+	protected function getSections() {
 		$sections = array();
 		$section = null;
 		
@@ -58,21 +58,37 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 			$tlfHyperlink = null;
 			$docxHyperlink = null;
 			foreach($docxParagraph->spans as $docxSpan) {
-				$tlfSpan = new TLFSpan;
-				$this->translateProperties($tlfSpan->style, null, $docxSpan->textProperties);
-				$tlfSpan->text = $docxSpan->text;
-				if($docxSpan->hyperlink !== $docxHyperlink) {
-					$docxHyperlink = $docxSpan->hyperlink;
-					if($docxHyperlink) {
-						$tlfHyperlink = new TLFHyperlink;
-						$tlfHyperlink->href = $docxHyperlink->href;
-						$tlfHyperlink->target = $docxHyperlink->tgtFrame;
-					} else {
-						$tlfHyperlink = null;
+				if($docxSpan instanceof DOCXDrawing) {
+					$docxDrawing = $docxSpan;
+					$file = $this->document->embeddedFiles[$docxDrawing->embed];
+					$imageClass = new SWFImageClassInfo;
+					$imageClass->name = 'flaczki.image1';
+					$imageClass->imageData = $file->data;
+					$this->currentTextObject->referencedImageClasses['image1'] = $imageClass;
+					
+					$tlfGraphic = new TLFInlineGraphicElement;
+					$tlfGraphic->customSource = 'image1';
+					$tlfGraphic->float = 'left';
+					$tlfGraphic->width = '50%';
+					$tlfGraphic->height = '50%';
+					$tlfParagraph->spans[] = $tlfGraphic;
+				} else {
+					$tlfSpan = new TLFSpan;
+					$this->translateProperties($tlfSpan->style, null, $docxSpan->textProperties);
+					$tlfSpan->text = $docxSpan->text;
+					if($docxSpan->hyperlink !== $docxHyperlink) {
+						$docxHyperlink = $docxSpan->hyperlink;
+						if($docxHyperlink) {
+							$tlfHyperlink = new TLFHyperlink;
+							$tlfHyperlink->href = $docxHyperlink->href;
+							$tlfHyperlink->target = $docxHyperlink->tgtFrame;
+						} else {
+							$tlfHyperlink = null;
+						}
 					}
+					$tlfSpan->hyperlink = $tlfHyperlink;
+					$tlfParagraph->spans[] = $tlfSpan;
 				}
-				$tlfSpan->hyperlink = $tlfHyperlink;
-				$tlfParagraph->spans[] = $tlfSpan;
 			}
 			if(count($tlfParagraph->spans) > 0) {
 				$newParagraphs[] = $tlfParagraph;

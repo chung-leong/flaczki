@@ -55,7 +55,7 @@ class StreamMemory {
 	}
 	
 	public function stream_read($count) {
-		$data = substr($this->handle, $this->bytes, $count);
+		$data = substr($this->bytes, $this->position, $count);
 		$read = strlen($data);
 		$this->position += $read;
 		return $data;

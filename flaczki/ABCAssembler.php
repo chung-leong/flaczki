@@ -40,7 +40,7 @@ class ABCAssembler {
 			}
 		}
 
-		$this->writeU32(count($abcFile->stringTable));
+		$this->writeU32(count($abcFile->stringTable) > 1 ? count($abcFile->stringTable) : 0);
 		foreach($abcFile->stringTable as $index => $stringValue) {
 			if($index != 0) {
 				$length = strlen($stringValue);
@@ -51,22 +51,21 @@ class ABCAssembler {
 			}
 		}
 		
-		$this->writeU32(count($abcFile->namespaceTable));
+		$this->writeU32(count($abcFile->namespaceTable) > 1 ? count($abcFile->namespaceTable) : 0);
 		foreach($abcFile->namespaceTable as $index => $namespace) {
 			if($index != 0) {
 				$this->writeNamespace($namespace);
 			}
 		}
 		
-		$this->writeU32(count($abcFile->namespaceSetTable));
+		$this->writeU32(count($abcFile->namespaceSetTable) > 1 ? count($abcFile->namespaceSetTable) : 0);
 		foreach($abcFile->namespaceSetTable as $index => $namespaceSet) {
 			if($index != 0) {
 				$this->writeNamespaceSet($namespaceSet);
 			}
 		}
 		
-		
-		$this->writeU32(count($abcFile->multinameTable));
+		$this->writeU32(count($abcFile->multinameTable) > 1 ? count($abcFile->multinameTable) : 0);
 		foreach($abcFile->multinameTable as $index => $multiname) {
 			if($index != 0) {
 				$this->writeMultiname($multiname);

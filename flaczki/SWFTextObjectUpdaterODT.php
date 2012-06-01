@@ -9,7 +9,7 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		$this->document = $document;
 	}
 	
-	public function getSections() {
+	protected function getSections() {
 		$sections = array();
 		$section = null;
 		$nextParagraphStyle = null;

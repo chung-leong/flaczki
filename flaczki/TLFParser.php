@@ -155,6 +155,14 @@ class TLFSpan extends TLFFlowElement {
 	public $hyperlink;
 }
 
+class TLFInlineGraphicElement extends TLFFlowElement {
+	public $customSource;
+	public $imageData;
+	public $float;
+	public $width;
+	public $height;
+}
+
 class TLFHyperlink {
 	public $href;
 	public $target;

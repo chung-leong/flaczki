@@ -49,7 +49,7 @@ class SWFTextObjectParser extends SWFBasicParser {
 	}
 	
 	protected function readDefineBitsJPEG2Tag($tagLength) {
-		$tag = new SWFDefineBitsJPEG2Tag;
+		$tag = new SWFDefineBitsJPEGTag;
 		$tag->characterId = $this->readUI16();
 		$bytesRemaining = $tagLength - 2;
 		$tag->imageData = $this->readBytes($bytesRemaining);
@@ -57,7 +57,7 @@ class SWFTextObjectParser extends SWFBasicParser {
 	}
 
 	protected function readDefineBitsJPEG3Tag($tagLength) {
-		$tag = new SWFDefineBitsJPEG3Tag;
+		$tag = new SWFDefineBitsJPEGTag;
 		$tag->characterId = $this->readUI16();
 		$alphaOffset = $this->readUI32();
 		$tag->imageData = $this->readBytes($alphaOffset);
@@ -67,7 +67,7 @@ class SWFTextObjectParser extends SWFBasicParser {
 	}
 
 	protected function readDefineBitsJPEG4Tag($tagLength) {
-		$tag = new SWFDefineBitsJPEG4Tag;
+		$tag = new SWFDefineBitsJPEGTag;
 		$tag->characterId = $this->readUI16();
 		$alphaOffset = $this->readUI32();
 		$tag->deblockingParam = $this->readUI16();
@@ -98,16 +98,10 @@ class SWFSymbolClassTag extends SWFTag {
 	public $names = array();
 }
 
-class SWFDefineBitsJPEG2Tag extends SWFTag {
+class SWFDefineBitsJPEGTag extends SWFTag {
 	public $characterId;
 	public $imageData;
-}
-
-class SWFDefineBitsJPEG3Tag extends SWFDefineBitsJPEG2Tag {
 	public $alphaData;
-}
-
-class SWFDefineBitsJPEG4Tag extends SWFDefineBitsJPEG3Tag {
 	public $deblockingParam;
 }
 

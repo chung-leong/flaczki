@@ -1,6 +1,6 @@
 <?php
 
-class SWFGeneratorDataModule {
+abstract class SWFGeneratorDataModule {
 
 	// update policies
 	protected $allowedDeviceFonts;
@@ -44,6 +44,10 @@ class SWFGeneratorDataModule {
 	public function validate() {
 	}
 
+	public function getUpdateType() {
+		return 'text';
+	}
+	
 	public function getExportType() {
 		return null;
 	}
@@ -52,7 +56,10 @@ class SWFGeneratorDataModule {
 		return null;
 	}
 	
-	public function export(&$output, $textObjects, $fontFamilies) {
+	public function exportText(&$output, $textObjects, $fontFamilies) {
+	}
+	
+	public function exportImages(&$output, $images) {
 	}
 	
 	public function getRequiredPHPExtensions() {

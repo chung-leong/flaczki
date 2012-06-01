@@ -8,10 +8,12 @@ class DOCXParser {
 	protected $previousSpan;
 	protected $hyperlink;
 	protected $hyperlinks;
+	protected $drawing;
 	protected $style;
 	protected $font;
 	protected $textProperties;
 	protected $paragraphProperties;
+	protected $drawingProperties;
 	protected $fontList;
 	protected $colorScheme;
 	protected $fontScheme;
@@ -81,7 +83,7 @@ class DOCXParser {
 							xml_parse($parser, $data, strlen($data) != 1024);
 						}
 						$processed[$file] = true;
-					} else if(preg_match('/\.(jpeg|png)$/', $file)) {
+					} else if(preg_match('/\.(jpeg|jpg|png)$/', $file)) {
 						// save the image
 						$size = filesize($fullPath);
 						$stream = fopen($fullPath, "rb");
@@ -103,11 +105,12 @@ class DOCXParser {
 		} while(count($dirStack) > 0);
 		
 		foreach($this->fileReferences as $reference => $path) {
-			if(isset($this->embeddedFiles[$path])) {
+			list($referrer, $id) = explode(':', $reference);
+			$referrerFolder = dirname($referrer);			
+			if(isset($this->embeddedFiles["$referrerFolder/$path"])) {
 				// attach embedded files to the document
-				list($referrer, $id) = explode(':', $reference);
 				if($referrer == 'word/document.xml') {
-					$this->document->embeddedFiles[$id] = $this->embeddedFiles[$path];
+					$this->document->embeddedFiles[$id] = $this->embeddedFiles["$referrerFolder/$path"];
 				}
 			} else if(isset($this->hyperlinks[$reference])) {
 				// set the href of hyperlinks
@@ -190,6 +193,14 @@ class DOCXParser {
 					$this->paragraphProperties->tabStops = array();
 				}
 				break;
+			case 'drawing':
+				$this->drawingProperties = new DOCXDrawingProperties;
+				break;
+			case 'blip':
+				$this->drawing = new DOCXDrawing;
+				$this->drawing->drawingProperties = $this->drawingProperties;				
+				$this->copyProperties($this->drawing, $attributes);
+				break;
 			default:
 				if($this->textProperties) {
 					$this->copyProperties2($this->textProperties, $name, $attributes);
@@ -197,6 +208,8 @@ class DOCXParser {
 					$this->copyProperties2($this->paragraphProperties, $name, $attributes);
 				} else if($this->style) {
 					$this->copyProperties2($this->style, $name, $attributes);
+				} else if($this->drawingProperties) {
+					$this->copyProperties2($this->drawingProperties, $name, $attributes);
 				}
 		}
 	}
@@ -256,6 +269,13 @@ class DOCXParser {
 			case 'style':
 				$this->document->styles[$this->style->styleId] = $this->style;
 				$this->style = null;
+				break;
+			case 'drawing':
+				if($this->paragraph) {
+					$this->paragraph->spans[] = $this->drawing;
+				}
+				$this->drawing = null;
+				$this->drawingProperties = null;
 				break;
 		}
 	}
@@ -384,6 +404,12 @@ class DOCXSpan {
 	public $hyperlink;
 }
 
+class DOCXDrawing {
+	public $embed;
+	
+	public $drawingProperties;
+}
+
 class DOCXHyperlink {
 	public $href;
 	public $tgtFrame;
@@ -443,6 +469,15 @@ class DOCXTextProperties {
 	public $u;
 	public $vertAlignVal;
 	public $w;
+}
+
+class DOCXDrawingProperties {
+	public $extentCx;
+	public $extentCy;
+	public $srcRectL;
+	public $srcRectT;
+	public $srcRectR;
+	public $srcRectB;
 }
 
 class DOCXTabStop {

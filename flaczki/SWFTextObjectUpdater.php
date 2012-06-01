@@ -9,6 +9,7 @@ abstract class SWFTextObjectUpdater {
 	protected $tlfParser;
 	protected $tlfAssembler;
 	protected $fontFamilies;
+	protected $currentTextObject;
 
 	protected $allowedDeviceFonts = array();
 	protected $maintainOriginalFontSize = true;
@@ -19,7 +20,7 @@ abstract class SWFTextObjectUpdater {
 		$this->tlfAssembler = new TLFAssembler;
 	}
 	
-	abstract public function getSections();
+	abstract protected function getSections();
 	abstract protected function updateTextObject($tlfObject, $section);
 
 	public function update($textObjects, $fontFamilies) {
@@ -39,6 +40,7 @@ abstract class SWFTextObjectUpdater {
 						$tlfObject = $this->tlfParser->parse($textObject->xml);						
 						
 						// ask subclass to update the object
+						$this->currentTextObject = $textObject;
 						$this->updateTextObject($tlfObject, $section);
 						
 						// then put it back together
@@ -51,6 +53,15 @@ abstract class SWFTextObjectUpdater {
 		}
 		$this->fontFamilies = null;
 		return $changes;
+	}
+	
+	public function getSectionNames() {
+		$sections = $this->getSections();
+		$names = array();
+		foreach($sections as $section) {
+			$names[] = $section->title;
+		}
+		return $names;
 	}
 	
 	public function setPolicy($policy, $value) {
@@ -189,16 +200,18 @@ abstract class SWFTextObjectUpdater {
 		foreach($tlfObject->textFlow->paragraphs as $paragraph) {
 			$pStyle = $paragraph->style;
 			foreach($paragraph->spans as $span) {
-				$sStyle = $span->style;
-				$sLength = strlen($span->text);
-				foreach($properties as $name) {
-					if(($value = $sStyle->$name) !== null || ($value = $pStyle->$name) !== null || ($value = $tStyle->$name) !== null) {
-						$row =& $table[$name];
-						$count =& $row[$value]; 
-						$count += $sLength;
+				if($span instanceof TLFSpan) {
+					$sStyle = $span->style;
+					$sLength = strlen($span->text);
+					foreach($properties as $name) {
+						if(($value = $sStyle->$name) !== null || ($value = $pStyle->$name) !== null || ($value = $tStyle->$name) !== null) {
+							$row =& $table[$name];
+							$count =& $row[$value]; 
+							$count += $sLength;
+						}
 					}
+					$textLength += $sLength;
 				}
-				$textLength += $sLength;
 			}
 		}
 		

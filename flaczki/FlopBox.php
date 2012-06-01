@@ -3,12 +3,29 @@
 class FlopBox extends SWFGeneratorDataModule {
 
 	protected $sourceUrl;
+	protected $sourceType;
+	protected $updateType;
 	protected $input;
-	protected $updater;
+	protected $textUpdater;
+	protected $imageUpdater;
 
 	public function __construct($moduleConfig, &$persistentData) {
 		parent::__construct($moduleConfig, $persistentData);
 		$this->sourceUrl = isset($moduleConfig['url']) ? trim($moduleConfig['url']) : null;
+		$this->updateType = isset($moduleConfig['update-type']) ? $moduleConfig['update-type'] : 'text';
+		if(preg_match('/\.docx$/i', $this->sourceUrl)) {
+			$this->sourceType = 'DOCX';
+		} else if(preg_match('/\.odt$/i', $this->sourceUrl)) {
+			$this->sourceType = 'ODT';
+		} else if(preg_match('/\.zip$/i', $this->sourceUrl)) {
+			$this->sourceType = 'ZIP';
+		} else {
+			if(preg_match('/image/i', $this->updateType)) {
+				$this->sourceType = 'ZIP';
+			} else {
+				$this->sourceType = 'DOCX';
+			}
+		}
 	}
 
 	public function startTransfer() {
@@ -50,16 +67,7 @@ class FlopBox extends SWFGeneratorDataModule {
 				$this->persistentData[$key] = array('etag' => $metadata->eTag, 'size' => $metadata->size);
 			}
 		
-			if(list($parserClass, $updaterClass) = $this->getClassNames()) {
-				// parse the document 
-				$parser = new $parserClass;
-				$document = $parser->parse($this->input);
-				fclose($this->input);
-		
-				// update the text objects
-				$this->updater = new $updaterClass($document);
-				return true;
-			}
+			return $this->processSourceDocument();
 		}
 		return false;
 	}
@@ -80,23 +88,48 @@ class FlopBox extends SWFGeneratorDataModule {
 	}
 
 	public function updateText($textObjects, $fontFamilies) {
-		if($this->updater) {
-			// update the text objects
-			$this->updater->setPolicy(SWFTextObjectUpdater::ALLOWED_DEVICE_FONTS, $this->allowedDeviceFonts);
-			$this->updater->setPolicy(SWFTextObjectUpdater::MAINTAIN_ORIGINAL_FONT_SIZE, $this->maintainOriginalFontSize);
-			$this->updater->setPolicy(SWFTextObjectUpdater::ALLOW_ANY_EMBEDDED_FONT, $this->allowAnyEmbeddedFont);
-			$changes = $this->updater->update($textObjects, $fontFamilies);
+		if($this->textUpdater) {
+			$changes = $this->textUpdater->update($textObjects, $fontFamilies);
 			return $changes;
 		}
 		return array();
 	}
 	
-	protected function getClassNames() {
-		if(preg_match('/\.docx$/i', $this->sourceUrl)) {
-			return array('DOCXParser', 'SWFTextObjectUpdaterDOCX');
-		} else if(preg_match('/\.odt$/i', $this->sourceUrl)) {
-		 	return array('ODTParser', 'SWFTextObjectUpdaterODT');
+	public function updateImages($images) {
+		if($this->imageUpdater) {
+			$changes = $this->imageUpdater->update($images);
+			return $changes;
 		}
+		return array();
+	}
+	
+	protected function processSourceDocument() {
+		switch($this->sourceType) {
+			case 'DOCX':
+				$parser = new DOCXParser;
+				$document = $parser->parse($this->input);
+				if($document) {
+					$this->textUpdater = new SWFTextObjectUpdaterDOCX($document);
+				} 
+				break;
+			case 'ODT':
+				$parser = new ODTParser;
+				$document = $parser->parse($this->input);
+				if($document) {
+					$this->textUpdater = new SWFTextObjectUpdaterODT($document);
+				} 
+				break;
+			case 'ZIP':
+				$zipPath = StreamZipArchive::open($this->input);
+				$this->imageUpdater = new SWFImageUpdaterFolder($zipPath);
+				break;
+		}
+		if($this->textUpdater) {
+			$this->textUpdater->setPolicy(SWFTextObjectUpdater::ALLOWED_DEVICE_FONTS, $this->allowedDeviceFonts);
+			$this->textUpdater->setPolicy(SWFTextObjectUpdater::MAINTAIN_ORIGINAL_FONT_SIZE, $this->maintainOriginalFontSize);
+			$this->textUpdater->setPolicy(SWFTextObjectUpdater::ALLOW_ANY_EMBEDDED_FONT, $this->allowAnyEmbeddedFont);
+		}
+		return ($this->textUpdater || $this->imageUpdater);
 	}
 	
 	public function validate() {
@@ -106,25 +139,31 @@ class FlopBox extends SWFGeneratorDataModule {
 			$startTime = microtime(true);
 			$this->startTransfer();
 			if($this->input) {
-				$metadata = $this->getMetadata();
-				if(list($parserClass, $updaterClass) = $this->getClassNames()) {
-					$parser = new $parserClass;
-					$document = $parser->parse($this->input);
-					
-					if($document) {
-						$updater = new $updaterClass($document);
-						$sections = $updater->getSections();
-						$sectionCount = count($sections);
-						if($sectionCount) {
-							$descriptions = array();
-							foreach($sections as $section) {
-								$description = "\"{$section->title}\"";
-								$descriptions[] = $description;							
+				if($this->processSourceDocument()) {
+					if($this->textUpdater || $this->imageUpdater) {
+						if($this->textUpdater) {
+							$sections = $this->textUpdater->getSectionNames();
+							$sectionCount = count($sections);
+							if($sectionCount) {
+								$descriptions = array();
+								foreach($sections as $section) {
+									$descriptions[] = "\"$section\"";
+								}
+								$descriptions = implode(', ', $descriptions);
+								echo "<div class='subsection-ok'><b>Text sections ($sectionCount): </b> $descriptions</div>";
+							} else {
+								echo "<div class='subsection-err'><b>Text sections ($sectionCount): </b></div>";
 							}
-							$descriptions = implode(', ', $descriptions);
-							echo "<div class='subsection-ok'><b>Text sections ($sectionCount): </b> $descriptions</div>";
-						} else {
-							echo "<div class='subsection-err'><b>Text sections ($sectionCount): </b></div>";
+						}
+						if($this->imageUpdater) {
+							$imageNames = $this->imageUpdater->getImageNames();
+							$imageCount = count($imageNames);
+							if($imageCount) {
+								$descriptions = implode(', ', $imageNames);
+								echo "<div class='subsection-ok'><b>Images ($imageCount): </b> $descriptions</div>";
+							} else {
+								echo "<div class='subsection-err'><b>Images ($imageCount): </b></div>";
+							}
 						}
 					} else {
 						echo "<div class='subsection-err' style='text-align: center'><em>(errors encountered reading document)</em></div>";
@@ -134,8 +173,7 @@ class FlopBox extends SWFGeneratorDataModule {
 					echo "<div class='subsection-ok'><b>Process time: </b> $duration second(s)</div>";
 				} else {
 					echo "<div class='subsection-err' style='text-align: center'><em>(unrecognized file type)</em></div>";
-				}				
-				fclose($this->input);
+				}
 			} else {
 				echo "<div class='subsection-err' style='text-align: center'><em>(cannot download document)</em></div>";
 			}
@@ -144,24 +182,67 @@ class FlopBox extends SWFGeneratorDataModule {
 		}
 	}
 	
+	public function getUpdateType() {
+		switch($this->sourceType) {
+			case 'DOCX':
+			case 'ODT': return 'text';
+			case 'ZIP': return 'images';
+		}
+	}
+	
 	public function getExportType() {
-		return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+		switch($this->sourceType) {
+			case 'DOCX': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+			case 'ODT': return 'application/vnd.oasis.opendocument.text';
+			case 'ZIP': return 'application/zip';
+		}
 	}
 	
 	public function getExportFileName() {
-		return 'FlopBox.docx';
+		switch($this->sourceType) {
+			case 'DOCX': return 'FlopBox.docx';
+			case 'ODT': return 'FlopBox.odt';
+			case 'ZIP': return 'FlopBoxImages.zip';
+		}
 	}	
 	
-	public function export(&$output, $textObjects, $fontFamilies) {
-		// export the text into an ODTDocument object
-		$exporter = new SWFTextObjectExporterDOCX;
-		$exporter->setPolicy(SWFTextObjectExporter::IGNORE_AUTOGENERATED, $this->ignoreAutogenerated);
-		$exporter->setPolicy(SWFTextObjectExporter::IGNORE_POINT_TEXT, $this->ignorePointText);
-		$document = $exporter->export($textObjects, $fontFamilies);
-
-		// assemble it into a ODT file
-		$assembler = new DOCXAssembler;
-		$assembler->assemble($output, $document);
+	public function exportText(&$output, $textObjects, $fontFamilies) {
+		switch($this->sourceType) {
+			case 'DOCX': 
+				// export the text into an DOCXDocument object
+				$exporter = new SWFTextObjectExporterDOCX;
+				$exporter->setPolicy(SWFTextObjectExporter::IGNORE_AUTOGENERATED, $this->ignoreAutogenerated);
+				$exporter->setPolicy(SWFTextObjectExporter::IGNORE_POINT_TEXT, $this->ignorePointText);
+				$document = $exporter->export($textObjects, $fontFamilies);
+		
+				// assemble it into a DOCX file
+				$assembler = new DOCXAssembler;
+				$assembler->assemble($output, $document);
+				break;
+			case 'ODT': 
+				// export the text into an ODTDocument object
+				$exporter = new SWFTextObjectExporterODT;
+				$exporter->setPolicy(SWFTextObjectExporter::IGNORE_AUTOGENERATED, $this->ignoreAutogenerated);
+				$exporter->setPolicy(SWFTextObjectExporter::IGNORE_POINT_TEXT, $this->ignorePointText);
+				$document = $exporter->export($textObjects, $fontFamilies);
+		
+				// assemble it into a ODT file
+				$assembler = new ODTAssembler;
+				$assembler->assemble($output, $document);
+				break;
+		}
+	
+	}
+	
+	public function exportImages(&$output, $images) {
+		switch($this->sourceType) {
+			case 'ZIP':
+				$zipPath = StreamZipArchive::create($output);
+				$exporter = new SWFImageExporterFolder($zipPath);
+				$exporter->export($images);
+				StreamZipArchive::close($zipPath);
+				break;
+		}
 	}
 	
 	public function getRequiredPHPExtensions() {
