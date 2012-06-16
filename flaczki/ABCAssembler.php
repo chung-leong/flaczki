@@ -194,7 +194,7 @@ class ABCAssembler {
 		foreach($instance->interfaceIndices as $interfaceIndex) {
 			$this->writeU32($interfaceIndex);
 		}
-		$this->writeU32($instance->initializerIndex);
+		$this->writeU32($instance->constructorIndex);
 		$this->writeU32(count($instance->traits));
 		foreach($instance->traits as $trait) {
 			$this->writeTrait($trait);
@@ -242,10 +242,10 @@ class ABCAssembler {
 	protected function writeTrait($trait) {
 		$this->writeU32($trait->nameIndex);
 		$this->writeU8($trait->type);
+		$this->writeU32($trait->slotId);
 		switch($trait->type & 0x0F) {
 			case 0:		// Trait_Slot
 			case 6:		// Trait_Const
-				$this->writeU32($trait->data->slotId);
 				$this->writeU32($trait->data->typeNameIndex);
 				$this->writeU32($trait->data->valueIndex);
 				if($trait->data->valueIndex) {
@@ -255,15 +255,12 @@ class ABCAssembler {
 			case 1: 	// Trait_Method
 			case 2:		// Trait_Getter
 			case 3:		// Trait_Setter
-				$this->writeU32($trait->data->dispId);
 				$this->writeU32($trait->data->methodIndex);
 				break;
 			case 4:		// Trait_Class
-				$this->writeU32($trait->data->slotId);
 				$this->writeU32($trait->data->classIndex);
 				break;
 			case 5:		// Trait_Function
-				$this->writeU32($trait->data->slotId);
 				$this->writeU32($trait->data->methodIndex);
 				break;
 		}

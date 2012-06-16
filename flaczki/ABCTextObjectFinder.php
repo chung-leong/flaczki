@@ -68,7 +68,7 @@ class ABCTextObjectFinder {
 			foreach($abcFile->instanceTable as $instance) {
 				if($instance->superNameIndex == $movieClipNameIndex || $instance->superNameIndex == $simpleButtonNameIndex) {
 					// look up the initializer for the clip
-					$method = $abcFile->methodTable[$instance->initializerIndex];
+					$method = $abcFile->methodTable[$instance->constructorIndex];
 
 					// scan the AS3 bytecodes
 					if($method->body && preg_match_all("/$pattern/s", $method->body->byteCodes, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
@@ -268,7 +268,7 @@ class ABCTextObjectFinder {
 		$instance->superNameIndex = $bitmapDataNameIndex;
 		$instance->flags = 0x8;
 		$instance->protectedNamespaceIndex = $objectNameIndex;
-		$instance->initializerIndex = $methodBody->methodIndex;
+		$instance->constructorIndex = $methodBody->methodIndex;
 		$abcFile->instanceTable[] = $instance;
 
 		// create script initializer
@@ -295,7 +295,7 @@ class ABCTextObjectFinder {
 		
 		// create a script object
 		$script = new ABCScript;
-		$script->initializerIndex = $methodBody->methodIndex;
+		$script->constructorIndex = $methodBody->methodIndex;
 		$trait = new ABCTrait;
 		$trait->nameIndex = $nameIndex;
 		$trait->type = 0x04;

@@ -168,7 +168,7 @@ class ABCDecoder {
 		static $operandTable = array(
 			0xa0 => 0x0000,	// add
 			0xc5 => 0x0000,	// add_i
-			0x53 => 0x0111,	// applytype
+			0x53 => 0x0001,	// applytype
 			0x86 => 0x0001,	// astype (mname_index)
 			0x87 => 0x0000,	// astypelate
 			0x01 => 0x0000,	// bkpt
@@ -400,6 +400,7 @@ class ABCDecoder {
 					$op->$name = $v;					
 				}
 			}
+			$op->width = $p - $ip;
 			$ops[$ip] = $op;
 		}
 		return $ops;
@@ -409,6 +410,7 @@ class ABCDecoder {
 class ABCOp {
 	public $code;
 	public $name;
+	public $width;
 }
 
 ?>

@@ -7,6 +7,11 @@ class AS3CodeWriter {
 	protected $statementLength = 0;
 	protected $currentLabel = '';
 	protected $lastToken = '';
+	protected $context = 0;
+	
+	const DECLARATION = 0;
+	const DEFINITION = 1;
+	const ARGUMENT_LIST = 2;
 
 	public function write($output, $objects) {
 		$this->output = $output;
@@ -46,6 +51,42 @@ class AS3CodeWriter {
 				}
 			}
 		}
+	}
+	
+	protected function writeNewObject($expr) {
+		$this->writeToken("{");
+		foreach($expr->values as $index => $value) {
+			$name = $expr->names[$index];
+			if($index > 0) {
+				$this->writeToken(",");
+			}
+			$this->writeExpression($name);
+			$this->writeToken(":");
+			$this->writeExpression($value);
+		}
+		$this->writeToken("}");
+	}
+	
+	protected function writeNewArray($expr) {
+		$this->writeToken("[");
+		foreach($expr->values as $index => $value) {
+			if($index > 0) {
+				$this->writeToken(",");
+			}
+			$this->writeExpression($value);
+		}
+		$this->writeToken("]");
+	}
+	
+	protected function writeTryBlock($expr) {
+		$this->writeToken("try");
+		$this->writeCodeBlock($expr->expressions);
+	}
+	
+	protected function writeCatchBlock($expr) {
+		$this->writeToken("catch");
+		$this->writeArgumentList(array($expr->error));
+		$this->writeCodeBlock($expr->expressions);
 	}
 	
 	protected function writeIfLoop($expr) {
@@ -109,6 +150,23 @@ class AS3CodeWriter {
 		$this->writeToken(")");
 	}
 	
+	protected function writeForInLoop($expr) {
+		$this->writeToken("for");
+		$this->writeToken("(");
+		$this->writeExpression($expr->condition);
+		$this->writeToken(")");
+		$this->writeCodeBlock($expr->expressions);
+	}
+	
+	protected function writeForEachLoop($expr) {
+		$this->writeToken("for");
+		$this->writeToken("each");
+		$this->writeToken("(");
+		$this->writeExpression($expr->condition);
+		$this->writeToken(")");
+		$this->writeCodeBlock($expr->expressions);
+	}
+	
 	protected function writeBreak($expr) {
 		$this->writeToken("break");
 	}
@@ -118,12 +176,12 @@ class AS3CodeWriter {
 	}
 		
 	protected function writeUnaryOperation($expr) {
-		if($expr->associativity == 'rtl') {
-			$this->writeToken($expr->operator, $expr->precedence);
+		if($expr->postfix) {
 			$this->writeExpression($expr->operand, $expr->precedence);
+			$this->writeToken($expr->operator, $expr->precedence);
 		} else {
-			$this->writeExpression($expr->operand, $expr->precedence);
 			$this->writeToken($expr->operator, $expr->precedence);
+			$this->writeExpression($expr->operand, $expr->precedence);
 		}
 	}
 	
@@ -145,70 +203,108 @@ class AS3CodeWriter {
 		$this->writeToken(")");
 	}		
 	
-	protected function writePropertyLookUp($op) {
-		if(!($op->receiver instanceof AS3Variable) || $op->receiver->name->text != 'this') {
-			$this->writeExpression($op->receiver);
-			$this->writeToken(".");
+	protected function writeConstructorCall($call) {
+		$this->writeToken("new");
+		$this->writeExpression($call->name);
+		$this->writeToken("(");
+		foreach($call->arguments as $index => $arg) {
+			if($index > 0) {
+				$this->writeToken(", ");
+			}
+			$this->writeExpression($arg);
 		}
-		$this->writeExpression($op->name);
+		$this->writeToken(")");
+	}		
+	
+	protected function writePropertyLookUp($expr) {
+		if($expr->name instanceof AS3RuntimeName) {
+			$this->writeExpression($expr->receiver);
+			$this->writeToken("[");
+			$this->writeExpression($expr->name->text);
+			$this->writeToken("]");			
+		} else {
+			if($expr->receiver && (!($expr->receiver instanceof AS3Variable) || $expr->receiver->name->text != 'this')) {
+				$this->writeExpression($expr->receiver, 1);
+				$this->writeToken(".");
+			}
+			$this->writeExpression($expr->name);
+		}
 	}
 	
 	protected function writeConstant($const) {
 		$this->writeName($const->name);
 	}
 	
-	protected function writeConstantDeclaration($const) {
-		$this->writeToken("const");
-		$this->writeConstant($const);
-		$this->writeType($const->type);
-		if($expr->value) {
-			$this->writeExpression('=');
-			$this->writeExpression($const->value);
-		}
+	protected function writeActivationScope($var) {
+		$this->writeVariable($var);
+	}
+	
+	protected function writeCatchScope($var) {
+		$this->writeVariable($var);
 	}
 	
 	protected function writeVariable($var) {
-		$this->writeName($var->name);
-	}
-	
-	protected function writeVariableDeclaration($var) {
-		$this->writeToken("var");
-		$this->writeVariable($var);
-		$this->writeType($var->type);
-		if($var->value) {
-			$this->writeExpression('=');
-			$this->writeExpression($var->value);
+		if($this->context == self::DEFINITION) {
+			$this->writeName($var->name);
+		} else if($this->context == self::ARGUMENT_LIST) {
+			$this->writeName($var->name);
+			$this->writeType($var->type);
+			
+			if(isset($var->defaultValue)) {
+				$this->writeExpression('=');
+				$this->writeExpression($var->defaultValue);
+			}
+		} else if($this->context == self::DECLARATION) {
+			$this->writeToken("var");
+			$this->writeName($var->name);
+			$this->writeType($var->type);
+			
+			if(isset($var->defaultValue)) {
+				$this->writeExpression('=');
+				$this->writeExpression($var->defaultValue);
+			}
 		}
 	}
 	
-	protected function writeArgumentDeclaration($var) {
-		$this->writeVariable($var);
-		$this->writeType($var->type);
-		if($var->value) {
-			$this->writeExpression('=');
-			$this->writeExpression($var->value);
-		}
-	}
-	
-	protected function writeMethod($method) {
-		$this->writeToken("function");
-		$this->writeName($method->name);
+	protected function writeArgumentList($arguments) {
 		$this->writeToken("(");
-		foreach($method->arguments as $index => $var) {
+		$this->context = self::ARGUMENT_LIST;
+		foreach($arguments as $index => $var) {
 			if($index > 0) {
 				$this->writeToken(",");
 			}
-			$this->writeArgumentDeclaration($var);
+			$this->writeExpression($var);
 		}
 		$this->writeToken(")");
+	}
+	
+	protected function writeMethod($method) {
+		$declaredVariables = $this->declaredVariables;
+		$this->writeToken("function");
+		$this->writeName($method->name);
+		$this->writeArgumentList($method->arguments);
 		$this->writeType($method->type);
 		if($method->expressions !== null) {
-			$this->writeCodeBlock($method->expressions);
+			$this->writeCodeBlock($method->expressions, $method->localVariables);
 		}
+		$this->context = self::DECLARATION;
+	}
+	
+	protected function writeScope($scope) {
+		$this->writeToken("[scope]");
 	}
 
-	protected function writeCodeBlock($expressions) {	
+	protected function writeCodeBlock($expressions, $declarations = null) {	
 		$this->startScope();
+		if($declarations) {
+			$this->context = self::DECLARATION;
+			foreach($declarations as $expr) {
+				$this->startStatement();
+				$this->writeExpression($expr);
+				$this->endStatement();
+			}
+		}
+		$this->context = self::DEFINITION;
 		foreach($expressions as $expr) {
 			$this->startStatement();
 			$this->writeExpression($expr);
@@ -259,6 +355,11 @@ class AS3CodeWriter {
 		$this->writeToken("L{$branch->position}");
 	}
 	
+	protected function writeThrow($throw) {
+		$this->writeToken("throw");
+		$this->writeExpression($throw->errorObject);
+	}
+	
 	protected function writeReturn($return) {
 		$this->writeToken("return");
 		$this->writeExpression($return->value);
@@ -272,6 +373,7 @@ class AS3CodeWriter {
 		$names = array();
 		$this->addImports($class->members, $names);
 		$this->addImports($class->instance->members, $names);
+		$this->context = self::DECLARATION;
 		if($names) {
 			sort($names);
 			foreach($names as $name) {
@@ -281,7 +383,8 @@ class AS3CodeWriter {
 				$this->endStatement();
 			}
 		}
-	
+
+		$this->declaredVariables = array($class->instance->this);	
 		$this->startStatement();
 		if($class->instance->flags & AS3ClassInstance::CLASS_FINAL) {
 			$this->writeToken("final");

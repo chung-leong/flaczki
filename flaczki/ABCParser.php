@@ -213,7 +213,7 @@ class ABCParser {
 		for($j = 0; $j < $interfaceCount; $j++) {
 			$instance->interfaceIndices[] = $this->readU32();
 		}
-		$instance->initializerIndex = $this->readU32();
+		$instance->constructorIndex = $this->readU32();
 		$traitCount = $this->readU32();
 		for($i = 0; $i < $traitCount; $i++) {
 			$instance->traits[] = $this->readTrait();
@@ -271,11 +271,11 @@ class ABCParser {
 		$trait = new ABCTrait;
 		$trait->nameIndex = $this->readU32();
 		$trait->type = $this->readU8();
+		$trait->slotId = $this->readU32();
 		switch($trait->type & 0x0F) {
 			case 0:		// Trait_Slot
 			case 6:		// Trait_Const
 				$data = new ABCTraitSlot;
-				$data->slotId = $this->readU32();
 				$data->typeNameIndex = $this->readU32();
 				$data->valueIndex = $this->readU32();
 				if($data->valueIndex) {
@@ -287,19 +287,16 @@ class ABCParser {
 			case 2:		// Trait_Getter
 			case 3:		// Trait_Setter
 				$data = new ABCTraitMethod;
-				$data->dispId = $this->readU32();
 				$data->methodIndex = $this->readU32();
 				$trait->data = $data;
 				break;
 			case 4:		// Trait_Class
 				$data = new ABCTraitClass;
-				$data->slotId = $this->readU32();
 				$data->classIndex = $this->readU32();
 				$trait->data = $data;
 				break;
 			case 5:		// Trait_Function
 				$data = new ABCTraitFunction;
-				$data->slotId = $this->readU32();
 				$data->methodIndex = $this->readU32();
 				$trait->data = $data;
 				break;
@@ -434,7 +431,7 @@ class ABCInstance {
 	public $flags;
 	public $protectedNamespaceIndex;
 	public $interfaceIndices = array();
-	public $initializerIndex;
+	public $constructorIndex;
 	public $traits = array();
 }
 
@@ -463,28 +460,25 @@ class ABCTrait {
 	public $nameIndex;
 	public $type;
 	public $data;
+	public $slotId;
 	public $metadataIndices = array();
 }
 
 class ABCTraitSlot {
-	public $slotId;
 	public $typeNameIndex;
 	public $valueIndex;
 	public $valueType;
 }
 
 class ABCTraitClass {
-	public $slotId;
 	public $classIndex;
 }
 
 class ABCTraitFunction {
-	public $slotId;
 	public $methodIndex;
 }
 
 class ABCTraitMethod {
-	public $dispId;
 	public $methodIndex;
 }
 
