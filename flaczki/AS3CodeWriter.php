@@ -279,13 +279,23 @@ class AS3CodeWriter {
 	}
 	
 	protected function writeMethod($method) {
-		$declaredVariables = $this->declaredVariables;
 		$this->writeToken("function");
 		$this->writeName($method->name);
 		$this->writeArgumentList($method->arguments);
 		$this->writeType($method->type);
 		if($method->expressions !== null) {
 			$this->writeCodeBlock($method->expressions, $method->localVariables);
+		}
+		$this->context = self::DECLARATION;
+	}
+
+	protected function writeConstructor($constructor) {
+		$this->writeToken("public");
+		$this->writeToken("function");
+		$this->writeName($constructor->name);
+		$this->writeArgumentList($constructor->arguments);
+		if($constructor->expressions !== null) {
+			$this->writeCodeBlock($constructor->expressions, $constructor->localVariables);
 		}
 		$this->context = self::DECLARATION;
 	}
@@ -314,12 +324,11 @@ class AS3CodeWriter {
 	}
 	
 	protected function writeTernaryConditional($expr) {
-		$this->writeExpression($expr->condition, $expr->precedence);
+		$this->writeExpression($expr->condition, 0);
 		$this->writeToken("?");
 		if($expr->valueIfTrue instanceof AS3TernaryConditional) {
-			$this->writeToken("(");
-			$this->writeExpression($expr->valueIfTrue, $expr->precedence);
-			$this->writeToken(")");
+			// put parentheses around the expression even though they aren't needed 
+			$this->writeExpression($expr->valueIfTrue, 0);
 		} else {
 			$this->writeExpression($expr->valueIfTrue, $expr->precedence);
 		}
@@ -425,6 +434,10 @@ class AS3CodeWriter {
 				}
 			}
 		}
+
+		$this->startStatement();
+		$this->writeConstructor($class->instance->constructor);
+		$this->endStatement();
 		
 		if($class->instance->members) {
 			foreach($class->instance->members as $index => $member) {

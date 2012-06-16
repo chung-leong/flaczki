@@ -207,7 +207,7 @@ class AS3Decompiler {
 		return $name;
 	}
 	
-	protected function getExpressionClassInstance($expr) {
+	protected function getClassInstance($expr) {
 		// each expression should have a type associated with it
 		// type could be AS3Name
 		if($expr) {		
@@ -220,11 +220,18 @@ class AS3Decompiler {
 		}
 	}
 
+	protected function getParent($expr) {
+		$instance = $this->getClassInstance($expr);
+		if($instance) {
+			return $instance->super;
+		}
+	}
+	
 	protected function getPropertyType($expr, $propName) {
 		if($propName instanceof AS3RuntimeName) {
 			return $this->typeAny;
 		} else {
-			$instance = $this->getExpressionClassInstance($expr);
+			$instance = $this->getClassInstance($expr);
 			if($instance) {
 				if(isset($instance->members[$propName->index])) {
 					$member = $instance->members[$propName->index];
@@ -238,15 +245,6 @@ class AS3Decompiler {
 		}
 	}
 	
-	protected function getParentType($expr) {
-		$instance = $this->getExpressionClassInstance($expr);
-		if($instance) {
-			return $instance->parentName;
-		} else {
-			return $this->typeObject;
-		}
-	}
-	
 	protected function searchScopeStack($cxt, $propName, $strict) {
 		// we can't resolve runtime names
 		if(!($propName instanceof AS3RuntimeName)) {
@@ -254,7 +252,7 @@ class AS3Decompiler {
 				$expr = $cxt->scopeStack[$i];
 				// scope objects shouldn't have property
 				if(!($expr instanceof AS3Scope)) {
-					$instance = $this->getExpressionClassInstance($expr);
+					$instance = $this->getClassInstance($expr);
 					if(isset($instance->members[$propName->index])) {
 						return $expr;
 					}
@@ -276,7 +274,7 @@ class AS3Decompiler {
 	}
 	
 	protected function getSlotName($expr, $slotId) {
-		$instance = $this->getExpressionClassInstance($expr);
+		$instance = $this->getClassInstance($expr);
 		$member = $instance->members[-$slotId];
 		return $member->name;
 	}
@@ -314,6 +312,7 @@ class AS3Decompiler {
 		$class->name = $this->getName($traitRec->nameIndex);
 		$class->members = $this->decodeTraits($classRec->traits);
 		$class->constructor = $this->decodeConstructor($classRec->constructorIndex);
+		$class->constructor->name = $class->name;
 		$class->instance = $this->decodeClassInstance($traitRec->nameIndex);
 		$class->type = $this->typeClass;
 		return $class;
@@ -326,6 +325,7 @@ class AS3Decompiler {
 				$instance->name = $this->getName($instanceRec->nameIndex);
 				$instance->members = $this->decodeTraits($instanceRec->traits);
 				$instance->constructor = $this->decodeConstructor($instanceRec->constructorIndex);
+				$instance->constructor->name = $instance->name;
 				$instance->parentName = ($instanceRec->superNameIndex) ? $this->getName($instanceRec->superNameIndex) : null;
 				$instance->flags = $instanceRec->flags;
 				$instance->protectedNamespace = ($instanceRec->flags & 0x08) ? $this->getNamespace($instanceRec->protectedNamespaceIndex) : null;
@@ -334,6 +334,9 @@ class AS3Decompiler {
 				$instance->this = new AS3Variable;
 				$instance->this->name = $this->nameThis;
 				$instance->this->type = $instance->name;
+				$instance->super = new AS3Variable;
+				$instance->super->name = $this->nameSuper;
+				$instance->super->type = $instance->parentName;
 				return $instance;
 			}
 		}
@@ -370,6 +373,8 @@ class AS3Decompiler {
 		$method->type = $this->decodeType($methodRec->returnType);
 		$method->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
 		$method->exceptions = $this->decodeExceptions($methodRec);
+		$method->expressions = array();
+		$method->localVariables = array();
 		return $method;
 	}
 
@@ -401,6 +406,8 @@ class AS3Decompiler {
 		$function->type = $this->decodeType($methodRec->returnType);
 		$function->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
 		$function->exceptions = $this->decodeExceptions($methodRec);
+		$function->expressions = array();
+		$function->localVariables = array();
 		return $function;
 	}
 	
@@ -411,6 +418,8 @@ class AS3Decompiler {
 		$constructor->record = $methodRec;
 		$constructor->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
 		$constructor->exceptions = $this->decodeExceptions($methodRec);
+		$constructor->expressions = array();
+		$constructor->localVariables = array();
 		return $constructor;
 	}
 	
@@ -479,6 +488,12 @@ class AS3Decompiler {
 				}
 			}
 		}
+		if($class->constructor) {
+			//$this->decompileMethod($class->this, $member);
+		}
+		if($class->constructor) {
+			$this->decompileMethod($class->this, $class->constructor);
+		}
 	}
 	
 	protected function decompileMethod($receiver, $method) {
@@ -499,12 +514,12 @@ class AS3Decompiler {
 				$cxt->registers[$index + 1] = $arg;
 			}
 			// TODO: arguments array
-			$cxt->localVariables = array();
+			$cxt->method = $method;
 			$cxt->ops = $ops;
 			$cxt->currentPosition = 0;
 			
 			// decompile the ops into expressions
-			$expressions = $this->decompileInstructions($cxt, $method->exceptions);
+			$expressions = $this->decompileInstructions($cxt);
 		
 			// divide ops into basic blocks
 			$blocks = $this->createBasicBlocks($expressions, $method->exceptions);
@@ -514,14 +529,12 @@ class AS3Decompiler {
 			$this->structureLoops($blocks, $method);
 			
 			// give local variables names
-			$method->localVariables = $cxt->localVariables;
-			$this->assignVariableNames($cxt);
+			$this->assignVariableNames($method->localVariables);
 		}
 	}
 	
-	protected function assignVariableNames($cxt) {
+	protected function assignVariableNames($variables) {
 		$prefixOccurences = array();
-		$variables = $cxt->localVariables;
 		
 		foreach($variables as $var) {
 			if(!$var->name) {
@@ -540,23 +553,10 @@ class AS3Decompiler {
 		}
 	}
 	
-	protected function collectVariables($object, &$list) {
-		foreach($object as $property) {
-			if($property) {
-				if($property instanceof AS3Variable) {
-					if(!in_array($property, $list, true)) {
-						$list[] = $property;
-					}
-				} else if(!is_scalar($property)) {
-					$this->collectVariables($property, $list);
-				}
-			}
-		}
-	}
-	
-	protected function decompileInstructions($cxt, $exceptions) {
+	protected function decompileInstructions($cxt) {
 		$expressions = array();	
 		$contexts = array($cxt);
+		$exceptions = $cxt->method->exceptions;
 		while($contexts) {
 			$cxt = array_shift($contexts);
 			while(($expr = $this->decompileInstruction($cxt)) !== false) {
@@ -795,6 +795,7 @@ class AS3Decompiler {
 				$expr->valueIfTrue = ($branchOnTrue) ? $valueT : $valueF;
 				$expr->valueIfFalse = ($branchOnTrue) ? $valueF : $valueT;
 				$expr->precedence = 14;
+				$expr->type = $this->chooseSpecificType($valueT->type, $valueF->type);
 				// push the expression on to the caller's context  and advance the instruction pointer 
 				// to the jump destination
 				array_push($cxt->stack, $expr);
@@ -803,6 +804,27 @@ class AS3Decompiler {
 			}
 		}
 		return false;
+	}
+	
+	protected function chooseSpecificType($type1, $type2 /* ... */) {
+		$types = func_get_args();
+		$topScore = 0;
+		$bestType = null;
+		foreach($types as $index => $type) {
+			if($type === $this->typeUndefined) {
+				$score = 1;
+			} else if($type === $this->typeAny) {
+				$score = 2;
+			} else if($type === $this->typeObject) {
+				$score = 3;
+			} else {
+				$score = 4;
+			}
+			if($score > $topScore) {
+				$bestType = $type;
+			}
+		}
+		return $bestType;
 	}
 	
 	protected function decompileInstruction($cxt) {
@@ -814,7 +836,7 @@ class AS3Decompiler {
 			$cxt->lastPosition = $cxt->currentPosition;
 			$cxt->currentPosition = $cxt->nextPosition;
 			if($expr instanceof AS3Expression && !$expr->type) {
-				die("Missing type: $handler {$cxt->lastPosition}");
+				//die("Missing type: $handler {$cxt->lastPosition}");
 			}
 			return $expr;
 		}
@@ -1371,7 +1393,7 @@ class AS3Decompiler {
 	
 	protected function do_call($cxt, $op) {
 		$expr = new AS3MethodCall;
-		$expr->arguments = array_splice($cxt->stack, -$op->op1);
+		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->function = new AS3PropertyLookup;
 		$expr->function->receiver = array_pop($cxt->stack);
 		$expr->function->name = array_pop($cxt->stack);
@@ -1381,7 +1403,7 @@ class AS3Decompiler {
 			
 	protected function do_callmethod($cxt, $op) {
 		$expr = new AS3MethodCall;
-		$expr->args = array_splice($cxt->stack, -$op->op2);
+		$expr->args = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
 		$expr->function->name = $this->getSlotName($expr->receiver, $op->op1);
 		$expr->function->receiver = array_pop($cxt->stack);
@@ -1410,7 +1432,7 @@ class AS3Decompiler {
 	
 	protected function do_callstatic($cxt, $op) {
 		$expr = new AS3MethodCall;
-		$expr->arguments = array_splice($cxt->stack, -$op->op2);
+		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
 		$expr->function->name = $this->getMethodName($op->op1);
 		$expr->function->receiver = array_pop($cxt->stack);
@@ -1425,14 +1447,11 @@ class AS3Decompiler {
 	
 	protected function do_callsuper($cxt, $op) {		
 		$expr = new AS3MethodCall;
-		$expr->arguments = array_splice($cxt->stack, -$op->op2);
+		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
 		$expr->function->name = $this->resolveName($cxt, $op->op1);
 		$object = array_pop($cxt->stack);
-		$super = new AS3Variable;
-		$super->name = $this->nameSuper;
-		$super->type = $this->getParentType($object);
-		$expr->function->receiver = $super;
+		$expr->function->receiver = $this->getParent($object);
 		$expr->type = $this->getPropertyType($super, $expr->function->name);
 		array_push($cxt->stack, $expr);
 	}
@@ -1461,14 +1480,15 @@ class AS3Decompiler {
 	
 	protected function do_construct($cxt, $op) {
 		$expr = new AS3ConstructorCall;
-		$expr->arguments = array_splice($cxt->stack, -$op->op1);
+		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->receiver = array_pop($cxt->stack);
+		$expr->name = $expr->receiver->type;
 		array_push($cxt->stack, $expr);
 	}
 	
 	protected function do_constructprop($cxt, $op) {
 		$expr = new AS3ConstructorCall;
-		$expr->arguments = array_splice($cxt->stack, -$op->op2);
+		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->name = $this->resolveName($cxt, $op->op1);
 		$expr->receiver = array_pop($cxt->stack);
 		$expr->type = $expr->name;
@@ -1476,11 +1496,11 @@ class AS3Decompiler {
 	}
 	
 	protected function do_constructsuper($cxt, $op) {
-		$expr = new AS3ParentConstructorCall;
-		$expr->arguments = array_splice($cxt->stack, -$op->op2);
-		$expr->name = $this->resolveName($cxt, $op->op1);
+		$expr = new AS3MethodCall;
+		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
+		$expr->function = $this->nameSuper;
 		$expr->receiver = array_pop($cxt->stack);
-		array_push($cxt->stack, $expr);
+		return $expr;
 	}
 	
 	protected function do_convert_b($cxt, $op) {
@@ -1676,12 +1696,9 @@ class AS3Decompiler {
 	protected function do_getsuper($cxt, $op) {
 		$name = $this->resolveName($cxt, $op->op1);
 		$object = array_pop($cxt->stack);
-		$super = new AS3Variable;
-		$super->name = $this->nameSuper;
-		$super->type = $this->getParentType($object);
 		$expr = new AS3PropertyLookup;
 		$expr->name = $name;
-		$expr->receiver = $super;
+		$expr->receiver = $this->getParent($object);
 		$expr->type = $this->getPropertyType($object, $name);
 		array_push($cxt->stack, $expr);
 	}
@@ -1909,7 +1926,7 @@ class AS3Decompiler {
 	
 	protected function do_newarray($cxt, $op) {
 		$expr = new AS3NewArray;
-		$expr->values = array_splice($cxt->stack, -$op->op1);
+		$expr->values = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->type = $this->typeArray;
 		array_push($cxt->stack, $expr);
 	}
@@ -2138,7 +2155,7 @@ class AS3Decompiler {
 				$var = new AS3Variable;
 				$var->type = $val->type;
 				$var->values = array();
-				$cxt->localVariables[] = $var;
+				$cxt->method->localVariables[] = $var;
 			}
 			$var->values[] = $val;
 			return $this->do_set($cxt, $var, $val);
@@ -2291,7 +2308,7 @@ class AS3DecompilerContext {
 	public $ops;
 	public $relatedBranch;
 	public $branchOnTrue;
-	public $localVariables;
+	public $method;
 }
 
 class AS3Namespace {
@@ -2375,6 +2392,7 @@ class AS3ClassInstance extends AS3Expression {
 	public $protectedNamespace;
 	public $flags;
 	public $this;
+	public $super;
 }
 
 class AS3Method extends AS3Expression {
