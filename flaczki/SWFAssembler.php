@@ -26,7 +26,7 @@ class SWFAssembler {
 		$this->outputBufferStack = array();
 		$this->swfVersion = $swfFile->version;
 		
-		// convert all tags to generic ones first
+		// convert all tags to generic ones first so we know the total length
 		$tags = array();
 		$swfFile->generic = array();
 		foreach($swfFile->tags as &$tag) {
@@ -40,6 +40,7 @@ class SWFAssembler {
 				}
 			}
 		}
+		unset($tag);
 
 		// signature
 		$signature = (($swfFile->compressed) ? 0x535743 : 0x535746) | ($swfFile->version << 24);
@@ -48,7 +49,7 @@ class SWFAssembler {
 		// file length (uncompressed)
 		$fileLength = 8 + ((($swfFile->frameSize->numBits * 4 + 5) + 7) >> 3) + 4;
 		foreach($tags as $tag) {
-			$fileLength += $tag->length >= 63 ? 2 : 6;
+			$fileLength += $tag->headerLength;
 			$fileLength += $tag->length;
 		}		
 		$this->writeUI32($fileLength);
@@ -127,7 +128,7 @@ class SWFAssembler {
 			'DefineText' => 11,			'SymbolClass' => 76,
 			'DefineText2' => 33,			'VideoFrame' => 61,
 		);
-	
+		
 		$class = get_class($tag);
 		$tagName = substr($class, 3, -3);
 		$methodName = "write{$tagName}Tag";
@@ -138,6 +139,8 @@ class SWFAssembler {
 		$generic->code = $tagCodeTable[$tagName];
 		$generic->data = $this->endBuffer();
 		$generic->length = strlen($generic->data);
+		// use the short format only for tags with no data--just to be safe
+		$generic->headerLength = ($generic->length == 0) ? 2 : 6;
 		return $generic;
 	}
 	
@@ -145,13 +148,13 @@ class SWFAssembler {
 		if(!($tag instanceof SWFGenericTag)) {
 			$tag = $this->createGenericTag($tag);
 		}
-		if($tag->length >= 63) {
+		if($tag->headerLength == 2) {
+			$tagCodeAndLength = ($tag->code << 6) | $tag->length;
+			$this->writeUI16($tagCodeAndLength);
+		} else {
 			$tagCodeAndLength = ($tag->code << 6) | 0x003F;
 			$this->writeUI16($tagCodeAndLength);
 			$this->writeUI32($tag->length);
-		} else {
-			$tagCodeAndLength = ($tag->code << 6) | $tag->length;
-			$this->writeUI16($tagCodeAndLength);
 		}
 		$this->writeBytes($tag->data);
 	}
@@ -245,6 +248,32 @@ class SWFAssembler {
 		}
 	}
 	
+	protected function writeDefineButtonCxFormTag(&$bytesAvailable) {
+		$this->writeUI16($tag->characterId);
+		$this->writeColorTransform($tag->colorTransform);
+		return $tag;
+	}
+	
+	protected function writeDefineButtonSoundTag($tag) {
+		$this->writeUI16($tag->characterId);
+		$this->writeUI16($tag->overUpToIdleId);
+		if($tag->overUpToIdleId) {
+			$this->writeSoundInfo($tag->overUpToIdleInfo);
+		}
+		$this->writeUI16($tag->idleToOverUpId);
+		if($tag->idleToOverUpId) {
+			$this->writeSoundInfo($tag->idleToOverUpInfo);
+		}
+		$this->writeUI16($tag->overUpToOverDownId);
+		if($tag->overUpToOverDownId) {
+			$this->writeSoundInfo($tag->overUpToOverDownInfo);
+		}
+		$this->writeUI16($tag->overDownToOverUpId);
+		if($tag->overDownToOverUpId) {
+			$this->writeSoundInfo($tag->overDownToOverUpInfo);
+		}
+	}
+	
 	protected function writeDefineEditTextTag($tag) {
 		$this->writeUI16($tag->characterId);
 		$this->writeRect($tag->bounds);
@@ -275,6 +304,24 @@ class SWFAssembler {
 		}
 	}
 	
+	protected function writeDefineFontTag($tag) {
+		$this->writeUI16($tag->characterId);
+		$shapeTable = array();
+		$glyphCount = count($tag->glyphTable);
+		$offset = $glyphCount * 2;
+		foreach($tag->glyphTable as $glyph) {
+			$this->writeUI16($offset);
+			$this->startBuffer();
+			$this->writeShape($glyph, 1);
+			$shapeData = $this->endBuffer();
+			$shapeTable[] = $shapeData;
+			$offset += strlen($shapeData);
+		}
+		foreach($shapeTable as $shapeData) {
+			$this->writeBytes($shapeData);
+		}
+	}
+	
 	protected function writeDefineFont2Tag($tag) {
 		$this->writeUI16($tag->characterId);
 		$this->writeUI8($tag->flags);
@@ -287,11 +334,13 @@ class SWFAssembler {
 		$shapeTable = array();
 		if($tag->flags & SWFDefineFont2Tag::WideOffsets) {
 			$offset = $glyphCount * 4 + 4;
-			foreach($tag->glyphTable as $glyph) {
+			foreach($tag->glyphTable as $index => $glyph) {
 				$this->writeUI32($offset);
 				$this->startBuffer();
 				$this->writeShape($glyph, 1);
-				$shapeTable[] = $this->endBuffer();
+				$shapeData = $this->endBuffer();
+				$shapeTable[] = $shapeData;
+				$offset += strlen($shapeData);
 			}
 			$this->writeUI32($offset);
 		} else {
@@ -318,7 +367,7 @@ class SWFAssembler {
 				$this->writeUI8($code);
 			}
 		}
-		if($tag->flags & SWFDefineFont2Tag::HasLayout) {
+		if($tag->flags & SWFDefineFont2Tag::HasLayout || isset($tag->ascent)) {
 			$this->writeSI16($tag->ascent);
 			$this->writeSI16($tag->descent);
 			$this->writeSI16($tag->leading);
@@ -348,7 +397,7 @@ class SWFAssembler {
 	protected function writeDefineFont4Tag($tag) {
 		$this->writeUI16($tag->characterId);
 		$this->writeUI8($tag->flags);
-		$this->writeString($tag->fontName);
+		$this->writeString($tag->name);
 		$this->writeBytes($tag->cffData);
 	}
 
@@ -356,6 +405,45 @@ class SWFAssembler {
 		$this->writeUI16($tag->characterId);
 		$this->writeUB($tag->tableHint, 2);
 		$this->writeZoneRecords($tag->zoneTable);
+	}
+	
+	protected function writeDefineFontInfoTag(&$bytesAvailable) {
+		$this->writeUI16($tag->characterId);
+		$this->writeUI8(strlen($tag->name));
+		$this->writeBytes($tag->name);
+		$this->writeUI8($tag->flags);
+		if($tag->flags & SWFDefineFontInfo2Tag::WideCodes) {
+			foreach($tag->codeTable as $code) {
+				$this->writeU16($code);
+			}
+		} else {
+			foreach($tag->codeTable as $code) {
+				$this->writeU16($code);
+			}
+		}
+	}
+	
+	protected function writeDefineFontInfo2Tag($tag) {
+		$this->writeUI16($tag->characterId);
+		$this->writeUI8(strlen($tag->name));
+		$this->writeBytes($tag->name);
+		$this->writeUI8($tag->flags);
+		$this->writeUI8($tag->languageCode);
+		if($tag->flags & SWFDefineFontInfo2Tag::WideCodes) {
+			foreach($tag->codeTable as $code) {
+				$this->writeU16($code);
+			}
+		} else {
+			foreach($tag->codeTable as $code) {
+				$this->writeU16($code);
+			}
+		}
+	}
+	
+	protected function writeDefineFontNameTag($tag) {
+		$this->writeUI16($tag->characterId);
+		$this->writeString($tag->name);
+		$this->writeString($tag->copyright);
 	}
 	
 	protected function writeDefineMorphShapeTag($tag) {
@@ -438,6 +526,7 @@ class SWFAssembler {
 	}
 	
 	protected function writeDefineText2Tag($tag) {
+		$this->writeUI16($tag->characterId);
 		$this->writeRect($tag->bounds);
 		$this->writeMatrix($tag->matrix);
 		$this->writeUI8($tag->glyphBits);
@@ -445,7 +534,7 @@ class SWFAssembler {
 		$this->writeTextRecords($tag->textRecords, $tag->glyphBits, $tag->advanceBits, 2);
 	}
 	
-	protected function writeDefineVideoStream($tag) {
+	protected function writeDefineVideoStreamTag($tag) {
 		$this->writeUI16($tag->characterId);
 		$this->writeUI16($tag->frameCount);
 		$this->writeUI16($tag->width);
@@ -621,7 +710,7 @@ class SWFAssembler {
 		$this->writeUI16($tag->depth);
 	}
 	
-	protected function SWFScriptLimitsTag($tag) {
+	protected function writeScriptLimitsTag($tag) {
 		$this->writeU16($tag->maxRecursionDepth);
 		$this->writeU16($tag->scriptTimeoutSeconds);
 	}
@@ -1026,7 +1115,7 @@ class SWFAssembler {
 	
 	protected function writeFillStyles($styles, $version) {
 		$count = count($styles);
-		if($count >= 64) {
+		if($count >= 255) {
 			$this->writeUI8(0xFF);
 			$this->writeUI16($count);
 		} else {
@@ -1062,7 +1151,7 @@ class SWFAssembler {
 	
 	protected function writeMorphFillStyles($styles) {
 		$count = count($styles);
-		if($count >= 64) {
+		if($count >= 255) {
 			$this->writeUI8(0xFF);
 			$this->writeUI16($count);
 		} else {
@@ -1093,7 +1182,7 @@ class SWFAssembler {
 	
 	protected function writeLineStyles($styles, $version) {
 		$count = count($styles);
-		if($count >= 64) {
+		if($count >= 255) {
 			$this->writeUI8(0xFF);
 			$this->writeUI16($count);
 		} else {
@@ -1135,7 +1224,7 @@ class SWFAssembler {
 	
 	protected function writeMorphLineStyles($styles, $version) {
 		$count = count($styles);
-		if($count >= 64) {
+		if($count >= 255) {
 			$this->writeUI8(0xFF);
 			$this->writeUI16($count);
 		} else {
@@ -1211,8 +1300,8 @@ class SWFAssembler {
 	}
 	
 	protected function writeColorTransformAlpha($transform) {
-		$hasAddTerms = $transform->redAddTerm || $transform->greenAddTerm || $transform->blueAddTerm || $transform->alphaAddTerm;
-		$hasMultTerms = $transform->redMultTerm || $transform->greenMultTerm || $transform->blueMultTerm || $transform->alphaMultTerm;
+		$hasAddTerms = $transform->redAddTerm !== null || $transform->greenAddTerm !== null || $transform->blueAddTerm !== null || $transform->alphaAddTerm !== null;
+		$hasMultTerms = $transform->redMultTerm !== null || $transform->greenMultTerm !== null || $transform->blueMultTerm !== null || $transform->alphaMultTerm !== null;
 		$this->writeUB($hasAddTerms, 1);
 		$this->writeUB($hasMultTerms, 1);
 		$this->writeUB($transform->numBits, 4);
@@ -1232,8 +1321,8 @@ class SWFAssembler {
 	}
 	
 	protected function writeColorTransform($transform) {
-		$hasAddTerms = $transform->redAddTerm || $transform->greenAddTerm || $transform->blueAddTerm;
-		$hasMultTerms = $transform->redMultTerm || $transform->greenMultTerm || $transform->blueMultTerm;
+		$hasAddTerms = $transform->redAddTerm !== null || $transform->greenAddTerm !== null || $transform->blueAddTerm !== null;
+		$hasMultTerms = $transform->redMultTerm !== null || $transform->greenMultTerm !== null || $transform->blueMultTerm !== null;
 		$this->writeUB($hasAddTerms, 1);
 		$this->writeUB($hasMultTerms, 1);
 		$this->writeUB($transform->numBits, 4);
@@ -1332,6 +1421,12 @@ class SWFAssembler {
 		} else {
 			$bytes = pack('C*', $value & 0x7F | 0x80, ($value >> 7) & 0x7F | 0x80, ($value >> 14) & 0x7F | 0x80,  ($value >> 21) & 0x7F | 0x80, ($value >> 28) & 0x0F);	// the last byte can only have four bits
 		}
+		$this->writeBytes($bytes);
+	}
+	
+	protected function writeFloat($value) {
+		$bytes = pack('f', $value);
+		$this->alignToByte();
 		$this->writeBytes($bytes);
 	}
 	

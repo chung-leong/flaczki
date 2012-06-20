@@ -2,8 +2,8 @@
 
 class SWFParser {
 	protected $input;	
-	protected $bitBuffer = 0;
-	protected $bitsRemaining = 0;
+	protected $bitBuffer;
+	protected $bitsRemaining;
 	protected $swfVersion;
 	protected $tagMask;
 	
@@ -16,6 +16,9 @@ class SWFParser {
 		} else {
 			throw new Exception("Invalid input");
 		}
+		$this->bitBuffer = 0;
+		$this->bitsRemaining = 0;
+		
 		$swfFile = new SWFFile;
 		$bytesAvailable = 8;
 		
@@ -65,17 +68,6 @@ class SWFParser {
 		
 		$this->input = null;
 		return $swfFile;
-	}
-	
-	public function addTags( /* tag names ...*/ ) {
-		$list = func_get_args();
-		foreach($list as $tagName) {
-			if($tagName == self::ALL_TAGS) {
-				$this->tagMask = null;
-			} else if($this->tagMask !== null) {
-				$this->tagMask[$tagName] = true;
-			}
-		}
 	}
 	
 	protected function readTag(&$bytesAvailable) {
@@ -133,18 +125,17 @@ class SWFParser {
 			$bytesRemaining = $tagLength;
 			
 			$methodName = "read{$tagName}Tag";
-			if(($this->tagMask === null || isset($this->tagMask[$tagName])) && method_exists($this, $methodName)) {
+			if(($this->tagMask === null || isset($this->tagMask[$tagName]))) {
 				$tag = $this->$methodName($bytesRemaining);
 				if($bytesRemaining != 0) {
-					echo "<h1>$methodName: $bytesAvailable</h1>";
 					$extra = $this->readBytes($bytesRemaining, $bytesRemaining);
 				}
 			} else {
-				//echo "<div style='color: red'>No $methodName</div>\n";
 				$tag = new SWFGenericTag;
 				$tag->data = $this->readBytes($bytesRemaining, $bytesRemaining);
 				$tag->code = $tagCode;
 				$tag->name = $tagName;
+				$tag->headerLength = $headerLength;
 				$tag->length = $tagLength;
 			}
 			$bytesAvailable -= $tagLength;
@@ -264,6 +255,35 @@ class SWFParser {
 		return $tag;
 	}
 	
+	protected function readDefineButtonCxFormTag(&$bytesAvailable) {
+		$tag = new SWFDefineButtonCxFormTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
+		$tag->colorTransform = $this->readColorTransform($bytesAvailable);
+		return $tag;
+	}
+	
+	protected function readDefineButtonSoundTag(&$bytesAvailable) {
+		$tag = new SWFDefineButtonSoundTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
+		$tag->overUpToIdleId = $this->readUI16($bytesAvailable);
+		if($tag->overUpToIdleId) {
+			$tag->overUpToIdleInfo = $this->readSoundInfo($bytesAvailable);
+		}
+		$tag->idleToOverUpId = $this->readUI16($bytesAvailable);
+		if($tag->idleToOverUpId) {
+			$tag->idleToOverUpInfo = $this->readSoundInfo($bytesAvailable);
+		}
+		$tag->overUpToOverDownId = $this->readUI16($bytesAvailable);
+		if($tag->overUpToOverDownId) {
+			$tag->overUpToOverDownInfo = $this->readSoundInfo($bytesAvailable);
+		}
+		$tag->overDownToOverUpId = $this->readUI16($bytesAvailable);
+		if($tag->overDownToOverUpId) {
+			$tag->overDownToOverUpInfo = $this->readSoundInfo($bytesAvailable);
+		}
+		return $tag;
+	}
+	
 	protected function readDefineEditTextTag(&$bytesAvailable) {
 		$tag = new SWFDefineEditTextTag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
@@ -296,6 +316,21 @@ class SWFParser {
 		return $tag;
 	}
 	
+	protected function readDefineFontTag($tag) {
+		$tag = new SWFDefineFontTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
+		$offsetTable = array();
+		for($i = 0; $i < $glyphCount; $i++) {
+			$offsetTable[] = $this->readUI16($bytesAvailable);
+		}
+		$glyphCount = $offsetTable[0] >> 1;
+		$tag->glyphTable = array();
+		for($i = 0; $i < $glyphCount; $i++) {
+			$tag->glyphTable[] = $this->readShape($bytesAvailable);
+		}
+		return $tag;
+	}
+	
 	protected function readDefineFont2Tag(&$bytesAvailable) {
 		$tag = new SWFDefineFont2Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
@@ -303,7 +338,7 @@ class SWFParser {
 		$tag->languageCode = $this->readUI8($bytesAvailable);
 		$nameLength = $this->readUI8($bytesAvailable);
 		$tag->name = $this->readBytes($nameLength, $bytesAvailable);
-		$glyphCount = $this->readUI16($bytesAvailable);
+		$tag->glyphCount = $glyphCount = $this->readUI16($bytesAvailable);
 		$bytesAvailableBefore = $bytesAvailable;
 		$offsetTable = array();
 		if($tag->flags & SWFDefineFont2Tag::WideOffsets) {
@@ -331,7 +366,7 @@ class SWFParser {
 				$tag->codeTable[] = $this->readUI8($bytesAvailable);
 			}
 		}
-		if($tag->flags & SWFDefineFont2Tag::HasLayout) {
+		if($tag->flags & SWFDefineFont2Tag::HasLayout || $bytesAvailable) {
 			$tag->ascent = $this->readSI16($bytesAvailable);
 			$tag->descent = $this->readSI16($bytesAvailable);
 			$tag->leading = $this->readSI16($bytesAvailable);
@@ -368,7 +403,7 @@ class SWFParser {
 		$tag = new SWFDefineFont4Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->flags = $this->readUI8($bytesAvailable);
-		$tag->fontName = $this->readString($bytesAvailable);
+		$tag->name = $this->readString($bytesAvailable);
 		$tag->cffData = $this->readBytes($bytesAvailable, $bytesAvailable);
 		return $tag;
 	}
@@ -378,6 +413,51 @@ class SWFParser {
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->tableHint = $this->readUB(2, $bytesAvailable);
 		$tag->zoneTable = $this->readZoneRecords($bytesAvailable);
+		return $tag;
+	}
+	
+	protected function readDefineFontInfoTag(&$bytesAvailable) {
+		$tag = new SWFDefineFontInfoTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
+		$nameLength = $this->readUI8($bytesAvailable);
+		$tag->name = $this->readBytes($nameLength, $bytesAvailable);
+		$tag->flags = $this->readUI8();
+		if($tag->flags & SWFDefineFontInfoTag::WideCodes) {
+			while($bytesAvailable > 0) {
+				$tag->codeTable[] = $this->readU16($bytesAvailable);
+			}
+		} else {
+			while($bytesAvailable > 0) {
+				$tag->codeTable[] = $this->readU8($bytesAvailable);
+			}
+		}
+		return $tag;
+	}
+	
+	protected function readDefineFontInfo2Tag(&$bytesAvailable) {
+		$tag = new SWFDefineFontInfoTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
+		$nameLength = $this->readUI8($bytesAvailable);
+		$tag->name = $this->readBytes($nameLength, $bytesAvailable);
+		$tag->flags = $this->readUI8();
+		$tag->languageCode = $this->readUI8();
+		if($tag->flags & SWFDefineFontInfo2Tag::WideCodes) {
+			while($bytesAvailable > 0) {
+				$tag->codeTable[] = $this->readU16($bytesAvailable);
+			}
+		} else {
+			while($bytesAvailable > 0) {
+				$tag->codeTable[] = $this->readU8($bytesAvailable);
+			}
+		}
+		return $tag;
+	}
+	
+	protected function readDefineFontNameTag(&$bytesAvailable) {
+		$tag = new SWFDefineFontNameTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
+		$tag->name = $this->readString($bytesAvailable);
+		$tag->copyright = $this->readString($bytesAvailable);
 		return $tag;
 	}
 	
@@ -493,7 +573,7 @@ class SWFParser {
 		return $tag;
 	}
 	
-	protected function readDefineVideoStream(&$bytesAvailable) {
+	protected function readDefineVideoStreamTag(&$bytesAvailable) {
 		$tag = new SWFDefineVideoStreamTag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->frameCount = $this->readUI16($bytesAvailable);
@@ -545,7 +625,7 @@ class SWFParser {
 	
 	protected function readEnableDebugger2Tag(&$bytesAvailable) {
 		$tag = new SWFEnableDebugger2Tag;
-		$tag->reserved = $this->readU16($bytesAvailable);
+		$tag->reserved = $this->readUI16($bytesAvailable);
 		$tag->password = $this->readString($bytesAvailable);
 		return $tag;
 	}
@@ -707,7 +787,7 @@ class SWFParser {
 		return $tag;
 	}
 	
-	protected function SWFScriptLimitsTag(&$bytesAvailable) {
+	protected function readScriptLimitsTag(&$bytesAvailable) {
 		$tag = new SWFScriptLimitsTag;
 		$tag->maxRecursionDepth = $this->readU16($bytesAvailable);
 		$tag->scriptTimeoutSeconds = $this->readU16($bytesAvailable);
@@ -1476,9 +1556,6 @@ class SWFParser {
 		$this->alignToByte();
 		$bytes = $this->readBytes(4, $bytesAvailable);
 		if($bytes !== null) {		
-			if(strlen($bytes) != 4) {
-				dump_backtrace();
-			}
 			$array = unpack('V', $bytes);
 			return $array[1];
 		}
@@ -1498,6 +1575,15 @@ class SWFParser {
 		return $result;
 	}
 	
+	protected function readFloat(&$bytesAvailable) {
+		$this->alignToByte();
+		$bytes = $this->readBytes(4, $bytesAvailable);
+		if($bytes !== null) {		
+			$array = unpack('f', $bytes);
+			return $array[1];
+		}
+	}
+
 	protected function readEncodedStringTable(&$bytesAvailable) {
 		$strings = array();
 		$count = $this->readEncodedUI32($bytesAvailable);
@@ -1592,6 +1678,7 @@ class SWFFile {
 class SWFGenericTag {
 	public $code;
 	public $name;
+	public $headerLength;
 	public $length;
 	public $data;
 }
@@ -1668,6 +1755,23 @@ class SWFDefineButton2Tag extends SWFDefineButtonTag {
 	public $flags;
 }
 
+class SWFDefineButtonCxFormTag {
+	public $characterId;
+	public $colorTransform;
+}
+
+class SWFDefineButtonSoundTag {
+	public $characterId;
+	public $overUpToIdleId;
+	public $overUpToIdleInfo;
+	public $idleToOverUpId;
+	public $idleToOverUpInfo;
+	public $overUpToOverDownId;
+	public $overUpToOverDownInfo;
+	public $overDownToOverUpId;
+	public $overDownToOverUpInfo;
+}
+
 class SWFDefineEditTextTag extends SWFCharacterTag {
 	const HasFontClass	= 0x8000;
 	const AutoSize		= 0x4000;
@@ -1717,7 +1821,7 @@ class SWFDefineFont2Tag extends SWFDefineFontTag {
 	const Bold		= 0x01;
 
 	public $flags;
-	public $fontName;
+	public $name;
 	public $ascent;
 	public $descent;
 	public $leading;
@@ -1733,7 +1837,7 @@ class SWFDefineFont3Tag extends SWFDefineFont2Tag {
 
 class SWFDefineFont4Tag extends SWFCharacterTag {
 	public $flags;
-	public $fontName;
+	public $name;
 	public $cffData;
 }
 
@@ -1741,6 +1845,23 @@ class SWFDefineFontAlignZonesTag {
 	public $characterId;
 	public $tableHint;
 	public $zoneTable;
+}
+
+class SWFDefineFontInfoTag {
+	public $characterId;
+	public $name;
+	public $flags;
+	public $codeTable = array();
+}
+
+class SWFDefineFontInfo2Tag extends SWFDefineFontInfoTag {
+	public $languageCode;
+}
+
+class SWFDefineFontNameTag {
+	public $characterId;
+	public $name;
+	public $copyright;
 }
 
 class SWFDefineMorphShapeTag extends SWFCharacterTag {
@@ -2282,6 +2403,13 @@ class SWFLineStyle2 {
 	public $miterLimitFactor;
 	public $fillStyle;
 	public $style;
+}
+
+class SWFMorphLineStyle {
+	public $startWidth;
+	public $endWidth;
+	public $startColor;
+	public $endColor;
 }
 
 class SWFFocalGradient extends SWFGradient {
