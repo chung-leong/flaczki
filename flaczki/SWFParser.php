@@ -1,13 +1,13 @@
 <?php
 
 class SWFParser {
-
 	protected $input;	
 	protected $bitBuffer = 0;
 	protected $bitsRemaining = 0;
 	protected $swfVersion;
+	protected $tagMask;
 	
-	public function parse(&$input) {
+	public function parse(&$input, $tagNames = null) {
 		if(gettype($input) == 'string') {
 			$path = StreamMemory::add($input);
 			$this->input = fopen($path, "rb");
@@ -18,6 +18,15 @@ class SWFParser {
 		}
 		$swfFile = new SWFFile;
 		$bytesAvailable = 8;
+		
+		if($tagNames !== null) {
+			$this->tagMask = array();
+			foreach($tagNames as $tagName) {
+				$this->tagMask[$tagName] = true;
+			}
+		} else {
+			$this->tagMask = null;
+		}
 	
 		// signature
 		$signature = $this->readUI32($bytesAvailable);
@@ -50,7 +59,7 @@ class SWFParser {
 		$swfFile->frameRate = $this->readUI16($bytesAvailable);
 		$swfFile->frameCount = $this->readUI16($bytesAvailable);
 		
-		while($tag = $this->readTag()) {
+		while($tag = $this->readTag($bytesAvailable)) {
 			$swfFile->tags[] = $tag;
 		}
 		
@@ -58,8 +67,19 @@ class SWFParser {
 		return $swfFile;
 	}
 	
-	protected function readTag() {
-		static $TAG_NAMES = array(
+	public function addTags( /* tag names ...*/ ) {
+		$list = func_get_args();
+		foreach($list as $tagName) {
+			if($tagName == self::ALL_TAGS) {
+				$this->tagMask = null;
+			} else if($this->tagMask !== null) {
+				$this->tagMask[$tagName] = true;
+			}
+		}
+	}
+	
+	protected function readTag(&$bytesAvailable) {
+		static $tagNameTable = array(
 			74 => 'CSMTextSettings',		14 => 'DefineSound',
 			78 => 'DefineScalingGrid',		60 => 'DefineVideoStream',
 			87 => 'DefineBinaryData',		59 => 'DoInitAction',
@@ -94,7 +114,6 @@ class SWFParser {
 			33 => 'DefineText2',			61 => 'VideoFrame',
 		);
 		
-		$bytesAvailable = 32;
 		$tagCodeAndLength = $this->readUI16($bytesAvailable);
 		if($tagCodeAndLength !== null) {
 			$tagCode = ($tagCodeAndLength & 0xFFC0) >> 6;
@@ -106,36 +125,31 @@ class SWFParser {
 			} else {
 				$headerLength = 2;
 			}
-			if(isset($TAG_NAMES[$tagCode])) {
-				$tagName = $TAG_NAMES[$tagCode];
+			if(isset($tagNameTable[$tagCode])) {
+				$tagName = $tagNameTable[$tagCode];
 			} else {
 				$tagName = "UnknownTag$tagCode";
 			}
-			$bytesAvailable = $tagLength;
+			$bytesRemaining = $tagLength;
 			
 			$methodName = "read{$tagName}Tag";
-			if(method_exists($this, $methodName)) {
-				$tag = $this->$methodName($bytesAvailable);
-				if($bytesAvailable != 0) {
+			if(($this->tagMask === null || isset($this->tagMask[$tagName])) && method_exists($this, $methodName)) {
+				$tag = $this->$methodName($bytesRemaining);
+				if($bytesRemaining != 0) {
 					echo "<h1>$methodName: $bytesAvailable</h1>";
-					$extra = $this->readBytes($bytesAvailable, $bytesAvailable);
+					$extra = $this->readBytes($bytesRemaining, $bytesRemaining);
 				}
 			} else {
-				echo "<div style='color: red'>No $methodName</div>\n";
-				$tag = $this->readGenericTag($bytesAvailable);
+				//echo "<div style='color: red'>No $methodName</div>\n";
+				$tag = new SWFGenericTag;
+				$tag->data = $this->readBytes($bytesRemaining, $bytesRemaining);
+				$tag->code = $tagCode;
+				$tag->name = $tagName;
+				$tag->length = $tagLength;
 			}
-			$tag->code = $tagCode;
-			$tag->name = $tagName;
-			$tag->length = $tagLength;
-			$tag->headerLength = $headerLength;
+			$bytesAvailable -= $tagLength;
 			return $tag;
 		}
-	}
-	
-	protected function readGenericTag(&$bytesAvailable) {
-		$tag = new SWFGenericTag;
-		$tag->data = $this->readBytes($bytesAvailable, $bytesAvailable);
-		return $tag;
 	}
 	
 	protected function readCSMTextSettingsTag(&$bytesAvailable) {
@@ -143,9 +157,10 @@ class SWFParser {
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->renderer = $this->readUB(2, $bytesAvailable);
 		$tag->gridFit = $this->readUB(3, $bytesAvailable);
+		$tag->reserved1 = $this->readUB(3, $bytesAvailable);
 		$tag->thinkness = $this->readUI32($bytesAvailable);
 		$tag->sharpness = $this->readUI32($bytesAvailable);
-		$reserved = $this->readUI8($bytesAvailable);
+		$tag->reserved2 = $this->readUI8($bytesAvailable);
 		return $tag;
 	}
 	
@@ -281,15 +296,6 @@ class SWFParser {
 		return $tag;
 	}
 	
-	protected function readDefineFont3Tag(&$bytesAvailable) {
-		$tag2 = $this->readDefineFont2Tag($bytesAvailable);
-		$tag = new SWFDefineFont3Tag;
-		foreach($tag2 as $name => $value) {
-			$tag->$name = $value;
-		}
-		return $tag;
-	}
-	
 	protected function readDefineFont2Tag(&$bytesAvailable) {
 		$tag = new SWFDefineFont2Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
@@ -311,6 +317,7 @@ class SWFParser {
 			}
 			$codeTableOffset = $this->readUI16($bytesAvailable);
 		}
+		$tag->glyphTable = array();
 		for($i = 0; $i < $glyphCount; $i++) {
 			$tag->glyphTable[] = $this->readShape($bytesAvailable);
 		}
@@ -348,6 +355,15 @@ class SWFParser {
 		return $tag;
 	}
 	
+	protected function readDefineFont3Tag(&$bytesAvailable) {
+		$tag2 = $this->readDefineFont2Tag($bytesAvailable);
+		$tag = new SWFDefineFont3Tag;
+		foreach($tag2 as $name => $value) {
+			$tag->$name = $value;
+		}
+		return $tag;
+	}
+	
 	protected function readDefineFont4Tag(&$bytesAvailable) {
 		$tag = new SWFDefineFont4Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
@@ -370,8 +386,7 @@ class SWFParser {
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->startBounds = $this->readRect($bytesAvailable);
 		$tag->endBounds = $this->readRect($bytesAvailable);
-		$offset = $this->readUI32($bytesAvailable);
-		$tag->morphShape = $this->readMorphShapeWithStyle(1, $bytesAvailable);
+		$tag->morphShape = $this->readMorphShapeWithStyle(3, $bytesAvailable);		// use structures of DefineShape3
 		return $tag;
 	}
 	
@@ -383,8 +398,7 @@ class SWFParser {
 		$tag->startEdgeBounds = $this->readRect($bytesAvailable);
 		$tag->endEdgeBounds = $this->readRect($bytesAvailable);
 		$tag->flags = $this->readUI8($bytesAvailable);
-		$offset = $this->readUI32($bytesAvailable);
-		$tag->morphShape = $this->readMorphShapeWithStyle(2, $bytesAvailable);		
+		$tag->morphShape = $this->readMorphShapeWithStyle(4, $bytesAvailable);		// use structures of DefineShape4
 		return $tag;
 	}
 	
@@ -411,7 +425,7 @@ class SWFParser {
 	}
 	
 	protected function readDefineShape2Tag(&$bytesAvailable) {
-		$tag = new SWFDefineShapeTag;
+		$tag = new SWFDefineShape2Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->shapeBounds = $this->readRect($bytesAvailable);
 		$tag->shape = $this->readShapeWithStyle(2, $bytesAvailable);
@@ -419,7 +433,7 @@ class SWFParser {
 	}
 	
 	protected function readDefineShape3Tag(&$bytesAvailable) {
-		$tag = new SWFDefineShapeTag;
+		$tag = new SWFDefineShape3Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->shapeBounds = $this->readRect($bytesAvailable);
 		$tag->shape = $this->readShapeWithStyle(3, $bytesAvailable);
@@ -427,7 +441,7 @@ class SWFParser {
 	}
 	
 	protected function readDefineShape4Tag(&$bytesAvailable) {
-		$tag = new SWFDefineShapeTag;
+		$tag = new SWFDefineShape4Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->shapeBounds = $this->readRect($bytesAvailable);
 		$tag->edgeBounds = $this->readRect($bytesAvailable);
@@ -451,9 +465,8 @@ class SWFParser {
 		$tag = new SWFDefineSpriteTag;
 		$tag->characterId = $this->readUI16(&$bytesAvailable);
 		$tag->frameCount = $this->readUI16(&$bytesAvailable);
-		while($bytesAvailable > 0 && ($child = $this->readTag())) {
+		while($bytesAvailable > 0 && ($child = $this->readTag($bytesAvailable))) {
 			$tag->tags[] = $child;
-			$bytesAvailable -= $child->headerLength + $child->length;
 		}
 		return $tag;
 	}
@@ -465,17 +478,18 @@ class SWFParser {
 		$tag->matrix = $this->readMatrix($bytesAvailable);
 		$tag->glyphBits = $this->readUI8($bytesAvailable);
 		$tag->advanceBits = $this->readUI8($bytesAvailable);
-		$tag->textRecords = $this->readTextRecords(1, $tag->glyphBits, $tag->advanceBits, $bytesAvailable);
+		$tag->textRecords = $this->readTextRecords($tag->glyphBits, $tag->advanceBits, 1, $bytesAvailable);
 		return $tag;
 	}
 	
 	protected function readDefineText2Tag(&$bytesAvailable) {
 		$tag = new SWFDefineText2Tag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->bounds = $this->readRect($bytesAvailable);
 		$tag->matrix = $this->readMatrix($bytesAvailable);
 		$tag->glyphBits = $this->readUI8($bytesAvailable);
 		$tag->advanceBits = $this->readUI8($bytesAvailable);
-		$tag->textRecords = $this->readTextRecords(2, $tag->glyphBits, $tag->advanceBits, $bytesAvailable);
+		$tag->textRecords = $this->readTextRecords($tag->glyphBits, $tag->advanceBits, 2, $bytesAvailable);
 		return $tag;
 	}
 	
@@ -486,7 +500,7 @@ class SWFParser {
 		$tag->width = $this->readUI16($bytesAvailable);
 		$tag->height = $this->readUI16($bytesAvailable);
 		$tag->flags = $this->readUI8($bytesAvailable);
-		$tag->codeId = $this->readUI8($bytesAvailable);
+		$tag->codecId = $this->readUI8($bytesAvailable);
 		return $tag;
 	}
 	
@@ -538,15 +552,7 @@ class SWFParser {
 	
 	protected function readExportAssetsTag(&$bytesAvailable) {
 		$tag = new SWFExportAssetsTag;
-		$numSymbols = $this->readUI16($bytesAvailable);
-		$data = $this->readBytes($bytesAvailable, $bytesAvailable);
-		for($si = 0; $si < $bytesAvailable; $si = $ei + 1) {
-			$array = unpack('v', substr($data, $si, 2));
-			$tag->characterIds[] = $array[1];
-			$si += 2;
-			$ei = strpos($data, "\0", $si);
-			$tag->names[] = ($ei === false) ? substr($data, $si) : substr($data, $si, $ei - $si);
-		}
+		$tag->names = $this->readStringTable($bytesAvailable);
 		return $tag;
 	}
 	
@@ -733,8 +739,8 @@ class SWFParser {
 	
 	protected function readSoundStreamHeadTag(&$bytesAvailable) {
 		$tag = new SWFSoundStreamHeadTag;
-		$tag->flags = $this->readUI16(16);
-		$tag->sampleCount = $this->readUI16(16);
+		$tag->flags = $this->readUI16($bytesAvailable);
+		$tag->sampleCount = $this->readUI16($bytesAvailable);
 		if($tag->flags & 0xF000 == 0x2000) {
 			$tag->latencySeek = $this->readS16($bytesAvailable);
 		}
@@ -751,7 +757,7 @@ class SWFParser {
 		$tag->sampleRate = $this->readUB(2, $bytesAvailable);
 		$tag->sampleSize = $this->readUB(1, $bytesAvailable);
 		$tag->type = $this->readUB(1, $bytesAvailable);
-		$tag->sampleCount = $this->readUI16(16);
+		$tag->sampleCount = $this->readUI16($bytesAvailable);
 		if($tag->format == SWFDefineSoundTag::FormatMP3) {
 			$tag->latencySeek = $this->readS16($bytesAvailable);
 		}
@@ -774,15 +780,15 @@ class SWFParser {
 	
 	protected function readSymbolClassTag(&$bytesAvailable) {
 		$tag = new SWFSymbolClassTag;
-		$numSymbols = $this->readUI16($bytesAvailable);
-		$data = $this->readBytes($bytesAvailable, $bytesAvailable);
-		for($si = 0; $si < $bytesAvailable; $si = $ei + 1) {
-			$array = unpack('v', substr($data, $si, 2));
-			$tag->characterIds[] = $array[1];
-			$si += 2;
-			$ei = strpos($data, "\0", $si);
-			$tag->names[] = ($ei === false) ? substr($data, $si) : substr($data, $si, $ei - $si);
-		}
+		$tag->names = $this->readStringTable($bytesAvailable);
+		return $tag;
+	}
+	
+	protected function readVideoFrameTag(&$bytesAvailable) {
+		$tag = new SWFVideoFrameTag;
+		$tag->streamId = $this->readUI16($bytesAvailable);
+		$tag->frameNumber = $this->readUI16($bytesAvailable);
+		$tag->data = $this->readBytes($bytesAvailable, $bytesAvailable);
 		return $tag;
 	}
 	
@@ -832,7 +838,6 @@ class SWFParser {
 	protected function readClipAction(&$bytesAvailable) {
 		$eventFlags = ($this->swfVersion >= 6) ? $this->readUI32($bytesAvailable) : $this->readUI16($bytesAvailable);
 		if($eventFlags) {
-			//exit;
 			$clipAction = new SWFClipAction;
 			$clipAction->eventFlags = $eventFlags;
 			$actionLength = $this->readUI32($bytesAvailable);
@@ -944,15 +949,15 @@ class SWFParser {
 		return $filter;
 	}
 
-	protected function readTextRecords($version, $glyphBits, $advanceBits, &$bytesAvailable) {
+	protected function readTextRecords($glyphBits, $advanceBits, $version, &$bytesAvailable) {
 		$records = array();
-		while($record = $this->readTextRecord($version, $glyphBits, $advanceBits, $bytesAvailable)) {
+		while($record = $this->readTextRecord($glyphBits, $advanceBits, $version, $bytesAvailable)) {
 			$records[] = $record;
 		}
 		return $records;
 	}
 	
-	protected function readTextRecord($version, $glyphBits, $advanceBits, &$bytesAvailable) {
+	protected function readTextRecord($glyphBits, $advanceBits, $version, &$bytesAvailable) {
 		$flags = $this->readUI8($bytesAvailable);
 		if($flags) {
 			$record = new SWFTextRecord;
@@ -981,7 +986,10 @@ class SWFParser {
 		$glyphs = array();
 		$count = $this->readUI8($bytesAvailable);
 		for($i = 0; $i < $count; $i++) {
-			$glyphs[] = $this->readGlyphEntry($glyphBits, $advanceBits, $bytesAvailable);
+			$glyph = $this->readGlyphEntry($glyphBits, $advanceBits, $bytesAvailable);
+			$glyph->bytesAvailable = $bytesAvailable;
+			$glyph->count = $count;
+			$glyphs[] = $glyph;
 		}
 		return $glyphs;
 	}
@@ -993,14 +1001,6 @@ class SWFParser {
 		return $glyph;
 	}
 	
-	protected function readVideoFrameTag(&$bytesAvailable) {
-		$tag = new SWFVideoFrameTag;
-		$tag->streamId = $this->readUI16($bytesAvailable);
-		$tag->frameNumber = $this->readUI16($bytesAvailable);
-		$tag->data = $this->readBytes($bytesAvailable, $bytesAvailable);
-		return $tag;
-	}
-
 	protected function readSoundInfo(&$bytesAvailable) {
 		$info = new SWFSoundInfo;
 		$info->flags = $this->readUI8($bytesAvailable);
@@ -1065,7 +1065,7 @@ class SWFParser {
 		$shape = new SWFShape;
 		$shape->numFillBits = $this->readUB(4, $bytesAvailable);
 		$shape->numLineBits = $this->readUB(4, $bytesAvailable);
-		$shape->edges = $this->readShapeRecords(1, $shape->numFillBits, $shape->numLineBits, &$bytesAvailable);
+		$shape->edges = $this->readShapeRecords($shape->numFillBits, $shape->numLineBits, 1, &$bytesAvailable);
 		return $shape;
 	}
 	
@@ -1075,24 +1075,25 @@ class SWFParser {
 		$shape->lineStyles = $this->readLineStyles($version, $bytesAvailable);
 		$shape->numFillBits = $this->readUB(4, $bytesAvailable);
 		$shape->numLineBits = $this->readUB(4, $bytesAvailable);
-		$shape->edges = $this->readShapeRecords($version, $shape->numFillBits, $shape->numLineBits, &$bytesAvailable);
+		$shape->edges = $this->readShapeRecords($shape->numFillBits, $shape->numLineBits, $version, &$bytesAvailable);
 		return $shape;
 	}
 	
 	protected function readMorphShapeWithStyle($version, &$bytesAvailable) {
 		$shape = new SWFMorphShapeWithStyle;
+		$offset = $this->readUI32($bytesAvailable);
 		$shape->fillStyles = $this->readMorphFillStyles($bytesAvailable);
 		$shape->lineStyles = $this->readMorphLineStyles($version, $bytesAvailable);
 		$shape->startNumFillBits = $this->readUB(4, $bytesAvailable);
 		$shape->startNumLineBits = $this->readUB(4, $bytesAvailable);
-		$shape->startEdges = $this->readShapeRecords(3, $shape->startNumFillBits, $shape->startNumLineBits, &$bytesAvailable);
+		$shape->startEdges = $this->readShapeRecords($shape->startNumFillBits, $shape->startNumLineBits, $version, &$bytesAvailable);
 		$shape->endNumFillBits = $this->readUB(4, $bytesAvailable);
 		$shape->endNumLineBits = $this->readUB(4, $bytesAvailable);		
-		$shape->endEdges = $this->readShapeRecords(3, $shape->endNumFillBits, $shape->endNumLineBits, &$bytesAvailable);
+		$shape->endEdges = $this->readShapeRecords($shape->endNumFillBits, $shape->endNumLineBits, $version, &$bytesAvailable);
 		return $shape;
 	}
 		
-	protected function readShapeRecords($version, $numFillBits, $numLineBits, &$bytesAvailable) {
+	protected function readShapeRecords($numFillBits, $numLineBits, $version, &$bytesAvailable) {
 		$records = array();
 		while($bytesAvailable) {
 			if($this->readUB(1, $bytesAvailable)) {
@@ -1217,7 +1218,7 @@ class SWFParser {
 		if($style->type == 0x10 || $style->type == 0x12) {
 			$style->startGradientMatrix = $this->readMatrix($bytesAvailable);
 			$style->endGradientMatrix = $this->readMatrix($bytesAvailable);
-			$style->gradient = $this->readMorphGradient(3, $bytesAvailable);
+			$style->gradient = $this->readMorphGradient($bytesAvailable);
 		}
 		if($style->type == 0x40 || $style->type == 0x41 || $style->type == 0x42 || $style->type == 0x43) {
 			$style->bitmapId = $this->readUI16($bytesAvailable);
@@ -1234,7 +1235,7 @@ class SWFParser {
 		}
 		$styles = array();
 		for($i = 0; $i < $count; $i++) {
-			$styles[] = ($version == 4) ? $this->readLineStyle2($version, $bytesAvailable) : $this->readLineStyle($version, $bytesAvailable);
+			$styles[] = ($version >= 4) ? $this->readLineStyle2($version, $bytesAvailable) : $this->readLineStyle($version, $bytesAvailable);
 		}
 		return $styles;
 	}
@@ -1271,9 +1272,7 @@ class SWFParser {
 		}
 		$styles = array();
 		for($i = 0; $i < $count; $i++) {
-			if(!$bytesAvailable) {
-			}
-			$styles[] = ($version == 2) ? $this->readMorphLineStyle2($bytesAvailable) : $this->readMorphLineStyle($bytesAvailable);
+			$styles[] = ($version >= 4) ? $this->readMorphLineStyle2($bytesAvailable) : $this->readMorphLineStyle($bytesAvailable);
 		}
 		return $styles;
 	}
@@ -1336,7 +1335,7 @@ class SWFParser {
 		return $controlPoints;
 	}
 	
-	protected function readMorphGradient($version, &$bytesAvailable) {
+	protected function readMorphGradient(&$bytesAvailable) {
 		$gradient = new SWFMorphGradient;
 		$gradient->records = array();
 		$count = $this->readUI8($bytesAvailable);
@@ -1449,6 +1448,7 @@ class SWFParser {
 	}
 		
 	protected function readUI8(&$bytesAvailable) {
+		$this->alignToByte();
 		$byte = $this->readBytes(1, $bytesAvailable);
 		if($byte !== null) {
 			return ord($byte);
@@ -1456,6 +1456,7 @@ class SWFParser {
 	}
 
 	protected function readUI16(&$bytesAvailable) {
+		$this->alignToByte();
 		$bytes = $this->readBytes(2, $bytesAvailable);
 		if($bytes !== null) {
 			$array = unpack('v', $bytes);
@@ -1472,6 +1473,7 @@ class SWFParser {
 	}
 	
 	protected function readUI32(&$bytesAvailable) {
+		$this->alignToByte();
 		$bytes = $this->readBytes(4, $bytesAvailable);
 		if($bytes !== null) {		
 			if(strlen($bytes) != 4) {
@@ -1483,6 +1485,7 @@ class SWFParser {
 	}
 
 	protected function readEncodedUI32(&$bytesAvailable) {
+		$this->alignToByte();
 		$result = null;
 		$shift = 0;
 		do {
@@ -1516,6 +1519,7 @@ class SWFParser {
 	}
 
 	protected function readString(&$bytesAvailable) {
+		$this->alignToByte();
 		$bytes = '';
 		while(($byte = $this->readBytes(1, $bytesAvailable)) !== null) {
 			if($byte == "\0") {
@@ -1539,10 +1543,8 @@ class SWFParser {
 	protected function readUB($count, &$bytesAvailable) {
 		// the next available bit is always at the 31st bit of the buffer
 		while($this->bitsRemaining < $count) {
-			if($bytesAvailable > 0) {
-				$this->bitBuffer = $this->bitBuffer | (ord(fread($this->input, 1)) << (24 - $this->bitsRemaining));
-				$bytesAvailable--;
-			}
+			$byte = ord($this->readBytes(1, $bytesAvailable));
+			$this->bitBuffer = $this->bitBuffer | ($byte << (24 - $this->bitsRemaining));
 			$this->bitsRemaining += 8;
 		}
 		
@@ -1557,9 +1559,6 @@ class SWFParser {
 	}
 	
 	protected function readBytes($count, &$bytesAvailable) {
-		if($this->bitsRemaining) {
-			$this->bitsRemaining = $this->bitBuffer = 0;
-		}
 		$toRead = min($count, $bytesAvailable);
 		if($toRead > 0) {
 			$bytes = fread($this->input, $toRead);
@@ -1590,23 +1589,18 @@ class SWFFile {
 	public $tags = array();
 }
 
-class SWFTag {
+class SWFGenericTag {
 	public $code;
 	public $name;
-	public $length;	
-	public $headerLength;
-}
-
-class SWFGenericTag extends SWFTag {
-	public $characterId;
+	public $length;
 	public $data;
 }
 
-class SWFCharacterTag extends SWFTag {
+class SWFCharacterTag {
 	public $characterId;
 }
 
-class SWFCSMTextSettingsTag extends SWFTag {
+class SWFCSMTextSettingsTag {
 	const RendererNormal		= 0;
 	const RendererAdvanced		= 1;
 	
@@ -1619,12 +1613,14 @@ class SWFCSMTextSettingsTag extends SWFTag {
 	public $gridFit;
 	public $thinkness;
 	public $sharpness;
+	public $reserved1;
+	public $reserved2;
 }
 
-class SWFEndTag extends SWFTag {
+class SWFEndTag {
 }
 
-class SWFDefineBitsTag extends SWFTag {
+class SWFDefineBitsTag {
 	public $jpegData;
 }
 
@@ -1721,7 +1717,7 @@ class SWFDefineFont2Tag extends SWFDefineFontTag {
 	const Bold		= 0x01;
 
 	public $flags;
-	public $name;
+	public $fontName;
 	public $ascent;
 	public $descent;
 	public $leading;
@@ -1741,7 +1737,7 @@ class SWFDefineFont4Tag extends SWFCharacterTag {
 	public $cffData;
 }
 
-class SWFDefineFontAlignZonesTag extends SWFTag {
+class SWFDefineFontAlignZonesTag {
 	public $characterId;
 	public $tableHint;
 	public $zoneTable;
@@ -1765,12 +1761,12 @@ class SWFDefineMorphShape2Tag extends SWFDefineMorphShapeTag {
 	public $endEdgeBounds;
 }
 
-class SWFDefineScalingGridTag extends SWFTag {
+class SWFDefineScalingGridTag {
 	public $characterId;
 	public $splitter;
 }
 
-class SWFDefineSceneAndFrameLabelDataTag extends SWFTag {
+class SWFDefineSceneAndFrameLabelDataTag {
 	public $sceneNames = array();
 	public $frameLabels = array();
 }
@@ -1846,10 +1842,10 @@ class SWFDefineVideoStreamTag extends SWFCharacterTag {
 	public $width;
 	public $height;
 	public $flags;
-	public $codeId;
+	public $codecId;
 }
 
-class SWFDoABCTag extends SWFTag {
+class SWFDoABCTag {
 	public $flags;
 	public $byteCodeName;
 	public $byteCodes;
@@ -1857,15 +1853,15 @@ class SWFDoABCTag extends SWFTag {
 	public $abcFile;
 }
 
-class SWFDoActionTag extends SWFTag {
+class SWFDoActionTag {
 	public $actions;
 }
 
-class SWFDoInitActionTag extends SWFTag {
+class SWFDoInitActionTag {
 	public $actions;
 }
 
-class SWFEnableDebuggerTag extends SWFTag {
+class SWFEnableDebuggerTag {
 	public $password;
 }
 
@@ -1873,20 +1869,20 @@ class SWFEnableDebugger2Tag extends SWFEnableDebuggerTag {
 	public $reserved;
 }
 
-class SWFExportAssetsTag extends SWFTag {
+class SWFExportAssetsTag {
 	public $names = array();
 }
 
-class SWFFileAttributesTag extends SWFTag {
+class SWFFileAttributesTag {
 	public $flags;
 }
 
-class SWFFrameLabelTag extends SWFTag {
+class SWFFrameLabelTag {
 	public $name;
 	public $anchor;
 }
 
-class SWFImportAssetsTag extends SWFTag {
+class SWFImportAssetsTag {
 	public $names = array();
 	public $url;
 }
@@ -1896,11 +1892,11 @@ class SWFImportAssets2Tag extends SWFImportAssetsTag {
 	public $reserved2;	
 }
 
-class SWFJPEGTablesTag extends SWFTag {
+class SWFJPEGTablesTag {
 	public $jpegData;
 }
 
-class SWFMetadataTag extends SWFTag {
+class SWFMetadataTag {
 	public $metadata;
 }
 
@@ -1945,41 +1941,41 @@ class SWFPlaceObject3Tag extends SWFPlaceObject2Tag {
 	public $visibility;
 }
 
-class SWFProtectTag extends SWFTag {
+class SWFProtectTag {
 	public $password;
 }
 
-class SWFRemoveObjectTag extends SWFTag {
+class SWFRemoveObjectTag {
 	public $characterId;
 	public $depth;
 }
 
-class SWFRemoveObject2Tag extends SWFTag {
+class SWFRemoveObject2Tag {
 	public $depth;
 }
 
-class SWFScriptLimitsTag extends SWFTag {
+class SWFScriptLimitsTag {
 	public $maxRecursionDepth;
 	public $scriptTimeoutSeconds;
 }
 
-class SWFSetBackgroundColorTag extends SWFTag {
+class SWFSetBackgroundColorTag {
 	public $color;
 }
 
-class SWFSetTabIndexTag extends SWFTag {
+class SWFSetTabIndexTag {
 	public $depth;
 	public $tabIndex;
 }
 
-class SWFShowFrameTag extends SWFTag {
+class SWFShowFrameTag {
 }
 
-class SWFSoundStreamBlockTag extends SWFTag {
+class SWFSoundStreamBlockTag {
 	public $data;
 }
 
-class SWFSoundStreamHeadTag extends SWFTag {
+class SWFSoundStreamHeadTag {
 	public $playbackSampleSize;
 	public $playbackSampleRate;
 	public $playbackType;
@@ -1994,20 +1990,20 @@ class SWFSoundStreamHeadTag extends SWFTag {
 class SWFSoundStreamHead2Tag extends SWFSoundStreamHeadTag {
 }
 
-class SWFStartSoundTag extends SWFTag {
+class SWFStartSoundTag {
 	public $info;
 }
 
-class SWFStartSound2Tag extends SWFTag {
+class SWFStartSound2Tag {
 	public $className;
 	public $info;
 }
 
-class SWFSymbolClassTag extends SWFTag {
+class SWFSymbolClassTag {
 	public $names = array();
 }
 
-class SWFVideoFrameTag extends SWFTag {
+class SWFVideoFrameTag {
 	public $streamId;
 	public $frameNumber;
 	public $data;
@@ -2224,9 +2220,9 @@ class SWFStyleChange {
 
 class SWFTextRecord {
 	const HasFont			= 0x08;
-	const HasColor			= 0x08;
-	const HasYOffset		= 0x08;
-	const HasXOffset		= 0x08;
+	const HasColor			= 0x04;
+	const HasYOffset		= 0x02;
+	const HasXOffset		= 0x01;
 
 	public $flags;
 	public $fontId;
