@@ -6,53 +6,38 @@ abstract class SWFTextObjectUpdater {
 	const MAINTAIN_ORIGINAL_FONT_SIZE = 2;
 	const ALLOW_ANY_EMBEDDED_FONT = 3;
 
-	protected $tlfParser;
-	protected $tlfAssembler;
 	protected $fontFamilies;
-	protected $currentTextObject;
 
 	protected $allowedDeviceFonts = array();
 	protected $maintainOriginalFontSize = true;
 	protected $allowAnyEmbeddedFont = true;
 	
 	public function __construct() {
-		$this->tlfParser = new TLFParser;
-		$this->tlfAssembler = new TLFAssembler;
 	}
 	
 	abstract protected function getSections();
 	abstract protected function updateTextObject($tlfObject, $section);
 
-	public function update($textObjects, $fontFamilies) {
-		$this->fontFamilies = $fontFamilies;
-		$changes = array();
-		$updated = array();
+	public function update($assets) {
+		$this->fontFamilies = $assets->fontFamilies;
+		$changed = false;
 	
 		$sections = $this->getSections();
 		foreach($sections as $section) {
 			// look for a text object with matching name and update it
-			foreach($textObjects as $tIndex => $textObject) {
+			foreach($assets->textObjects as $tIndex => $textObject) {
 				if(strcasecmp($textObject->name, $section->name) == 0) {
 					// in case of duplicate names, don't process the same object twice
 					// look for a different object with the same name instead
-					if(!isset($updated[$tIndex])) {
-						// parse the TLF XML
-						$tlfObject = $this->tlfParser->parse($textObject->xml);						
-						
+					if(!$textObject->changed) {
 						// ask subclass to update the object
-						$this->currentTextObject = $textObject;
-						$this->updateTextObject($tlfObject, $section);
-						
-						// then put it back together
-						$this->tlfAssembler->assemble($textObject->xml, $tlfObject);
-						$updated[$tIndex] = true;
-						$changes[] = $textObject;
+						$this->updateTextObject($textObject->tlfObject, $section);
+						$textObject->changed = true;
 					}
 				}
 			}
 		}
 		$this->fontFamilies = null;
-		return $changes;
 	}
 	
 	public function getSectionNames() {
@@ -66,9 +51,9 @@ abstract class SWFTextObjectUpdater {
 	
 	public function setPolicy($policy, $value) {
 		switch($policy) {
-			case ALLOWED_DEVICE_FONTS: $this->allowedDeviceFonts = $value; break;
-			case MAINTAIN_ORIGINAL_FONT_SIZE: $this->maintainOriginalFontSize = $value; break;
-			case ALLOW_ANY_EMBEDDED_FONT: $this->allowAnyEmbeddedFont = $value; break;
+			case self::ALLOWED_DEVICE_FONTS: $this->allowedDeviceFonts = $value; break;
+			case self::MAINTAIN_ORIGINAL_FONT_SIZE: $this->maintainOriginalFontSize = $value; break;
+			case self::ALLOW_ANY_EMBEDDED_FONT: $this->allowAnyEmbeddedFont = $value; break;
 		}
 	}
 	

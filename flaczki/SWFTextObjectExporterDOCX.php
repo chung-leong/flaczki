@@ -2,79 +2,61 @@
 
 class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 
-	protected $document;
-
-	public function __construct($document = null) {
-		parent::__construct();		
-		$this->document = ($document) ? $document : new DOCXDocument;
-	}
-
-	protected function exportSections($sections, $fontFamilies) {
-		// add font references
-		$styleUsage = $this->getStyleUsage($sections, array('fontFamily', 'fontSize', 'locale', 'direction', 'lineHeight', 'textIndent'));
-		$fontUsage = $this->getFontUsage($sections);
-		$this->addFonts($fontFamilies, $fontUsage);
+	protected function addSection($textObject) {
+		// add section name 
+		$heading = new DOCXParagraph;
+		$heading->paragraphProperties = new DOCXParagraphProperties;
+		$heading->paragraphProperties->pStyleVal = 'Heading1';
+		$heading->paragraphProperties->pageBreakBefore = count($this->document->paragraphs) > 0;
 		
-		// add default style, using the most frequently used properties as basis
-		$this->addDefaultStyles($styleUsage);
+		$span = new DOCXSpan;
+		$span->textProperties = new DOCXTextProperties;
+		$span->textProperties->rStyleVal = 'Heading1Char';
+		$span->text = $this->beautifySectionName($textObject->name);
+		$heading->spans[] = $span;
+		$this->document->paragraphs[] = $heading;
 		
-		foreach($sections as $section) {
-			// add section name 
-			$heading = new DOCXParagraph;
-			$heading->paragraphProperties = new DOCXParagraphProperties;
-			$heading->paragraphProperties->pStyleVal = 'Heading1';
-			$heading->paragraphProperties->pageBreakBefore = count($this->document->paragraphs) > 0;
-			
-			$span = new DOCXSpan;
-			$span->textProperties = new DOCXTextProperties;
-			$span->textProperties->rStyleVal = 'Heading1Char';
-			$span->text = $this->beautifySectionName($section->name);
-			$heading->spans[] = $span;
-			$this->document->paragraphs[] = $heading;
-			
-			// add the paragraphs
-			$textFlow = $section->tlfObject->textFlow;
-			foreach($textFlow->paragraphs as $tlfParagraph) {
-				$docxParagraph = new DOCXParagraph;
-				$docxParagraph->paragraphProperties = new DOCXParagraphProperties;
-				$docxParagraphTextProperties = new DOCXTextProperties;
-				$this->translateProperties($docxParagraph->paragraphProperties, $docxParagraphTextProperties, $textFlow->style);
-				$this->translateProperties($docxParagraph->paragraphProperties, $docxParagraphTextProperties, $tlfParagraph->style);
+		// add the paragraphs
+		$textFlow = $textObject->tlfObject->textFlow;
+		foreach($textFlow->paragraphs as $tlfParagraph) {
+			$docxParagraph = new DOCXParagraph;
+			$docxParagraph->paragraphProperties = new DOCXParagraphProperties;
+			$docxParagraphTextProperties = new DOCXTextProperties;
+			$this->translateProperties($docxParagraph->paragraphProperties, $docxParagraphTextProperties, $textFlow->style);
+			$this->translateProperties($docxParagraph->paragraphProperties, $docxParagraphTextProperties, $tlfParagraph->style);
 
-				$tlfHyperlink = null;
-				$docxHyperlink = null;
-				foreach($tlfParagraph->spans as $tlfSpan) {
-					$docxSpan = new DOCXSpan;
-					$docxSpan->textProperties = clone $docxParagraphTextProperties;
-					$docxSpanParagraphProperties = new DOCXParagraphProperties;
-					$this->translateProperties($docxSpanParagraphProperties, $docxSpan->textProperties, $tlfSpan->style);
-					
-					if($docxSpanParagraphProperties != new DOCXParagraphProperties) {
-						// spans cannot have paragraph style properties
-						// take it off and apply the properties to the paragraph instead
-						foreach($docxSpanParagraphProperties as $name => $value) {
-							if($value !== null && $docxParagraph->paragraphProperties->$name !== null) {
-								$docxParagraph->paragraphProperties->$name = $value;
-							}
+			$tlfHyperlink = null;
+			$docxHyperlink = null;
+			foreach($tlfParagraph->spans as $tlfSpan) {
+				$docxSpan = new DOCXSpan;
+				$docxSpan->textProperties = clone $docxParagraphTextProperties;
+				$docxSpanParagraphProperties = new DOCXParagraphProperties;
+				$this->translateProperties($docxSpanParagraphProperties, $docxSpan->textProperties, $tlfSpan->style);
+				
+				if($docxSpanParagraphProperties != new DOCXParagraphProperties) {
+					// spans cannot have paragraph style properties
+					// take it off and apply the properties to the paragraph instead
+					foreach($docxSpanParagraphProperties as $name => $value) {
+						if($value !== null && $docxParagraph->paragraphProperties->$name !== null) {
+							$docxParagraph->paragraphProperties->$name = $value;
 						}
 					}
-					$docxSpan->text = $tlfSpan->text;
-					if($tlfSpan->hyperlink !== $tlfHyperlink) {
-						$tlfHyperlink = $tlfSpan->hyperlink;
-						if($tlfHyperlink) {
-							$docxHyperlink = new DOCXHyperlink;
-							$docxHyperlink->href = $tlfHyperlink->href;
-						} else {
-							$docxHyperlink = null;
-						}
-					}
-					$docxSpan->hyperlink = $docxHyperlink;
-					$docxParagraph->spans[] = $docxSpan;
 				}
-				$this->document->paragraphs[] = $docxParagraph;
+				$docxSpan->text = $tlfSpan->text;
+				if($tlfSpan->hyperlink !== $tlfHyperlink) {
+					$tlfHyperlink = $tlfSpan->hyperlink;
+					if($tlfHyperlink) {
+						$docxHyperlink = new DOCXHyperlink;
+						$docxHyperlink->href = $tlfHyperlink->href;
+					} else {
+						$docxHyperlink = null;
+					}
+				}
+				$docxSpan->hyperlink = $docxHyperlink;
+				$docxParagraph->spans[] = $docxSpan;
 			}
+			$this->document->paragraphs[] = $docxParagraph;
 		}
-		return $this->document;
 	}
 	
 	protected function translateProperties($docxParagraphProperties, $docxTextProperties, $tlfStyle) {
@@ -284,7 +266,10 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		return round((float) $point * 20);
 	}
 		
-	protected function addDefaultStyles($styleUsage) {
+	protected function addDefaultStyles() {
+		// add font references
+		$styleUsage = $this->getStyleUsage(array('fontFamily', 'fontSize', 'locale', 'direction', 'lineHeight', 'textIndent'));
+	
 		$tlfStyle = new TLFFlowElementStyle;
 		foreach($styleUsage as $propName => $values) {
 			$mostFrequentValue = key($values);
@@ -354,9 +339,9 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		
 	}
 	
-	protected function addFonts($fontFamilies, $fontUsage) {
+	protected function addFonts() {		
 		// add properties of embedded fonts
-		foreach($fontFamilies as $fontFamily) {
+		foreach($this->assets->fontFamilies as $fontFamily) {
 			if(!isset($document->fonts[$fontFamily->name])) {				
 				$docxFont = new DOCXFont;
 				$docxFont->name = $fontFamily->name;
@@ -380,6 +365,7 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		}
 		
 		// add properties of other referenced fonts
+		$fontUsage = $this->getFontUsage();
 		foreach($fontUsage as $fontFamilyName => $usage) {
 			if(!isset($this->document->fonts[$fontFamilyName])) {
 				$docxFont = new DOCXFont;
@@ -431,7 +417,5 @@ class SWFTextObjectExporterDOCX extends SWFTextObjectExporter {
 		$docxFont->panose1 = sprintf("%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X", $panose[1], $panose[2], $panose[3], $panose[4], $panose[5], $panose[6], $panose[7], $panose[8], $panose[9], $panose[10]);
 	}
 }
-
-require_once 'DOCXParser.php'	// need DOCXDocument
 
 ?>

@@ -2,7 +2,7 @@
 
 abstract class SWFImageExporter {
 
-	public function export($images) {
+	public function export($folderPath, $assets) {
 	}
 }
 

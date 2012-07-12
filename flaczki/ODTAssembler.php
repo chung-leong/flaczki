@@ -289,7 +289,7 @@ class ODTAssembler {
 				$this->addAttribute($attributes, 'style:text-line-through-type', $textProperties->textLineThroughType);
 				$this->addAttribute($attributes, 'style:text-position', $textProperties->textPosition);
 				$this->addAttribute($attributes, 'style:text-rotation-angle', $textProperties->textRotationAngle);
-				$this->addAttribute($attributes, 'fo:text-transformation', $textProperties->textTransformations);
+				$this->addAttribute($attributes, 'fo:text-transformation', $textProperties->textTransform);
 				$this->addAttribute($attributes, 'style:text-underline-style', $textProperties->textUnderlineStyle);
 				$this->addAttribute($attributes, 'style:text-underline-type', $textProperties->textUnderlineType);
 				$this->writeTag('style:text-properties', $attributes);	

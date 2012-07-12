@@ -2,94 +2,64 @@
 
 class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 
-	protected $document;
+	protected $firstSectionHeadingStyle;
+	protected $sectionHeadingStyle;
 
-	public function __construct($document = null) {
-		parent::__construct();		
-		$this->document = ($document) ? $document : new ODTDocument;
-	}
+	protected function addSection($textObject) {
+		// add section name as heading
+		$heading = new ODTHeading;
+		$heading->styleName = (count($this->document->paragraphs) > 0) ? $this->sectionHeadingStyle->name : $this->firstSectionHeadingStyle->name;
+		$heading->outlineLevel = 10;
+		$span = new ODTSpan;
+		$span->text = $this->beautifySectionName($textObject->name);
+		$heading->spans[] = $span;
+		$this->document->paragraphs[] = $heading;
+		
+		// add the paragraphs
+		$textFlow = $textObject->tlfObject->textFlow;
+		foreach($textFlow->paragraphs as $tlfParagraph) {
+			$odtParagraph = new ODTParagraph;
+			$odtParagraphStyle = new ODTStyle;
+			$odtParagraphStyle->family = 'paragraph';
+			$this->translateProperties($odtParagraphStyle, $textFlow->style);
+			$this->translateProperties($odtParagraphStyle, $tlfParagraph->style);
 
-	protected function exportSections($sections, $fontFamilies) {
-		// add font references
-		$styleUsage = $this->getStyleUsage($sections, array('fontFamily'));
-		$fontUsage = $styleUsage['fontFamily'];
-		$this->addFonts($fontFamilies, $fontUsage);
-		
-		// add default style, using the most frequently used font as the standard font
-		$standardFontName = key($fontUsage);
-		$this->addDefaultStyles($standardFontName);
-		
-		// add heading style for the first section--not starting with a page break
-		$firstSectionHeadingStyle =  new ODTStyle;
-		$firstSectionHeadingStyle->family = 'paragraph';
-		$firstSectionHeadingStyle->parentStyleName = 'Heading_20_1';
-		$this->addAutomaticStyle($firstSectionHeadingStyle);
-		
-		// add heading style of subsequent sections--start with a page break 
-		$sectionHeadingStyle =  new ODTStyle;
-		$sectionHeadingStyle->family = 'paragraph';
-		$sectionHeadingStyle->parentStyleName = 'Heading_20_1';
-		$sectionHeadingStyle->paragraphProperties = new ODTParagraphProperties;
-		$sectionHeadingStyle->paragraphProperties->breakBefore = "page";
-		$this->addAutomaticStyle($sectionHeadingStyle);
-				
-		foreach($sections as $section) {
-			// add section name as heading
-			$heading = new ODTHeading;
-			$heading->styleName = (count($this->document->paragraphs) > 0) ? $sectionHeadingStyle->name : $firstSectionHeadingStyle->name;
-			$heading->outlineLevel = 10;
-			$span = new ODTSpan;
-			$span->text = $this->beautifySectionName($section->name);
-			$heading->spans[] = $span;
-			$this->document->paragraphs[] = $heading;
-			
-			// add the paragraphs
-			$textFlow = $section->tlfObject->textFlow;
-			foreach($textFlow->paragraphs as $tlfParagraph) {
-				$odtParagraph = new ODTParagraph;
-				$odtParagraphStyle = new ODTStyle;
-				$odtParagraphStyle->family = 'paragraph';
-				$this->translateProperties($odtParagraphStyle, $textFlow->style);
-				$this->translateProperties($odtParagraphStyle, $tlfParagraph->style);
-
-				$tlfHyperlink = null;
-				$odtHyperlink = null;
-				foreach($tlfParagraph->spans as $tlfSpan) {
-					$odtSpan = new ODTSpan;
-					$odtSpanStyle = new ODTStyle;
-					$odtSpanStyle->family = 'text';
-					$this->translateProperties($odtSpanStyle, $tlfSpan->style);
-					if($odtSpanStyle->paragraphProperties) {
-						// spans cannot have paragraph style properties
-						// take it off and apply the properties to the paragraph instead
-						foreach($odtSpanStyle->paragraphProperties as $name => $value) {
-							if($value && !$odtParagraphStyle->paragraphProperties->$name) {
-								$odtParagraphStyle->paragraphProperties->$name = $value;
-							}
-						}
-						$odtSpanStyle->paragraphProperties = null;
-					}
-					$odtSpan->styleName = $this->addAutomaticStyle($odtSpanStyle);
-					$odtSpan->text = $tlfSpan->text;
-					if($tlfSpan->hyperlink !== $tlfHyperlink) {
-						$tlfHyperlink = $tlfSpan->hyperlink;
-						if($tlfHyperlink) {
-							$odtHyperlink = new ODTHyperlink;
-							$odtHyperlink->type = 'simple';
-							$odtHyperlink->href = $tlfHyperlink->href;
-							$odtHyperlink->target = $tlfHyperlink->target;
-						} else {
-							$odtHyperlink = null;
+			$tlfHyperlink = null;
+			$odtHyperlink = null;
+			foreach($tlfParagraph->spans as $tlfSpan) {
+				$odtSpan = new ODTSpan;
+				$odtSpanStyle = new ODTStyle;
+				$odtSpanStyle->family = 'text';
+				$this->translateProperties($odtSpanStyle, $tlfSpan->style);
+				if($odtSpanStyle->paragraphProperties) {
+					// spans cannot have paragraph style properties
+					// take it off and apply the properties to the paragraph instead
+					foreach($odtSpanStyle->paragraphProperties as $name => $value) {
+						if($value && !$odtParagraphStyle->paragraphProperties->$name) {
+							$odtParagraphStyle->paragraphProperties->$name = $value;
 						}
 					}
-					$odtSpan->hyperlink = $odtHyperlink;
-					$odtParagraph->spans[] = $odtSpan;
+					$odtSpanStyle->paragraphProperties = null;
 				}
-				$odtParagraph->styleName = $this->addAutomaticStyle($odtParagraphStyle);
-				$this->document->paragraphs[] = $odtParagraph;
+				$odtSpan->styleName = $this->addAutomaticStyle($odtSpanStyle);
+				$odtSpan->text = $tlfSpan->text;
+				if($tlfSpan->hyperlink !== $tlfHyperlink) {
+					$tlfHyperlink = $tlfSpan->hyperlink;
+					if($tlfHyperlink) {
+						$odtHyperlink = new ODTHyperlink;
+						$odtHyperlink->type = 'simple';
+						$odtHyperlink->href = $tlfHyperlink->href;
+						$odtHyperlink->target = $tlfHyperlink->target;
+					} else {
+						$odtHyperlink = null;
+					}
+				}
+				$odtSpan->hyperlink = $odtHyperlink;
+				$odtParagraph->spans[] = $odtSpan;
 			}
+			$odtParagraph->styleName = $this->addAutomaticStyle($odtParagraphStyle);
+			$this->document->paragraphs[] = $odtParagraph;
 		}
-		return $this->document;
 	}
 	
 	protected function translateProperties($odtStyle, $tlfStyle) {
@@ -391,7 +361,10 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		return $styleName;
 	}
 	
-	protected function addDefaultStyles($standardFontName) {
+	protected function addDefaultStyles() {
+		$fontUsage = $this->getFontUsage();
+		$standardFontName = key($fontUsage);
+	
 		if(!isset($this->document->defaultStyles[$family = 'paragraph'])) {
 			$defaultStyle = new ODTStyle;
 			$defaultStyle->family = $family;
@@ -530,11 +503,27 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 			$headingStyle->textProperties->fontStyle = "italic";
 			$this->document->commonStyles[$headingStyleName] = $headingStyle;
 		}
+		
+		// add heading style for the first section--not starting with a page break
+		$firstSectionHeadingStyle = new ODTStyle;
+		$firstSectionHeadingStyle->family = 'paragraph';
+		$firstSectionHeadingStyle->parentStyleName = 'Heading_20_1';
+		$this->addAutomaticStyle($firstSectionHeadingStyle);
+		$this->firstSectionHeadingStyle = $firstSectionHeadingStyle;
+		
+		// add heading style of subsequent sections--start with a page break 
+		$sectionHeadingStyle = new ODTStyle;
+		$sectionHeadingStyle->family = 'paragraph';
+		$sectionHeadingStyle->parentStyleName = 'Heading_20_1';
+		$sectionHeadingStyle->paragraphProperties = new ODTParagraphProperties;
+		$sectionHeadingStyle->paragraphProperties->breakBefore = "page";
+		$this->addAutomaticStyle($sectionHeadingStyle);
+		$this->sectionHeadingStyle = $sectionHeadingStyle;
 	}
 	
-	protected function addFonts($fontFamilies, $fontUsage) {
+	protected function addFonts() {
 		// add properties of embedded fonts
-		foreach($fontFamilies as $fontFamily) {
+		foreach($this->assets->fontFamilies as $fontFamily) {
 			if(!isset($document->fonts[$fontFamily->name])) {				
 				$odtFont = new ODTFont;
 				$odtFont->name = $fontFamily->name;
@@ -563,6 +552,7 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		}
 		
 		// add properties of other referenced fonts
+		$fontUsage = $this->getFontUsage();
 		foreach($fontUsage as $fontFamilyName => $usage) {
 			if(!isset($this->document->fonts[$fontFamilyName])) {
 				$odtFont = new ODTFont;
@@ -634,7 +624,5 @@ class SWFTextObjectExporterODT extends SWFTextObjectExporter {
 		$odtFont->panose1 = sprintf("%d %d %d %d %d %d %d %d %d %d", $panose[1], $panose[2], $panose[3], $panose[4], $panose[5], $panose[6], $panose[7], $panose[8], $panose[9], $panose[10]);
 	}
 }
-
-require_once 'ODTParser.php'	// need ODTDocument
 
 ?>

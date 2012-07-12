@@ -34,8 +34,8 @@ abstract class SWFGeneratorDataModule {
 		return true;
 	}
 	
-	public function updateText($textObjects, $fontFamilies) {
-		return array();
+	public function update() {
+		return false;
 	}
 	
 	public function cleanUp() {
@@ -44,10 +44,6 @@ abstract class SWFGeneratorDataModule {
 	public function validate() {
 	}
 
-	public function getUpdateType() {
-		return 'text';
-	}
-	
 	public function getExportType() {
 		return null;
 	}

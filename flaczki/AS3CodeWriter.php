@@ -280,7 +280,9 @@ class AS3CodeWriter {
 	
 	protected function writeMethod($method) {
 		$this->writeToken("function");
-		$this->writeName($method->name);
+		if($method->name) {
+			$this->writeName($method->name);
+		}
 		$this->writeArgumentList($method->arguments);
 		$this->writeType($method->type);
 		if($method->expressions !== null) {
@@ -380,8 +382,7 @@ class AS3CodeWriter {
 	
 	protected function writeClass($class) {
 		$names = array();
-		$this->addImports($class->members, $names);
-		$this->addImports($class->instance->members, $names);
+		$this->addImports($class, $names);
 		$this->context = self::DECLARATION;
 		if($names) {
 			sort($names);
@@ -423,6 +424,7 @@ class AS3CodeWriter {
 		}
 		
 		$this->startScope();
+
 		if($class->members) {
 			foreach($class->members as $index => $member) {
 				if($index > 0) {
@@ -476,14 +478,18 @@ class AS3CodeWriter {
 		foreach($object as $propName => $property) {
 			if(is_object($property)) {
 				if($propName == 'type' && $property instanceof AS3Name) {
-					if($property->namespace->text) {
-						if(!in_array($property, $list, true)) {
-							$list[] = $property;
+					if(is_object($property->namespace)) {
+						if($property->namespace->text && !preg_match('/^__AS3__\./', $property->namespace->text)) {
+							if(!in_array($property, $list, true)) {
+								$list[] = $property;
+							}
 						}
 					}
 				} else {
 					$this->addImports($property, $list);
 				}
+			} else if(is_array($property)) {
+				$this->addImports($property, $list);
 			}
 		}
 	}

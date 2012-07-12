@@ -56,7 +56,7 @@ class SWFGenerator {
 	
 	public function update($forceUpdate) {
 		// turn off error reporting since the output should be Javascript
-		//error_reporting(0);
+		error_reporting(0);
 		
 		// set expiration date
 		$now = time();
@@ -157,17 +157,6 @@ class SWFGenerator {
 		}
 		$transferFinished = false;
 		
-		// see what kind of contents will be updated
-		$updateText = false;
-		$updateImages = false;
-		foreach($dataModules as $dataModule) {
-			switch($dataModule->getUpdateType()) {
-				case 'text': $updateText = true; break;
-				case 'images': $updateImages = true; break;
-			}
-			
-		}
-
 		$temporaryFiles = array();
 		foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
 			// see if a temporary file exists already 
@@ -193,19 +182,11 @@ class SWFGenerator {
 				// parse the SWF file and find the text objects within it
 				$input = fopen($swfSourceFilePath, "rb");
 				if($input) {
-					$swfParser = new SWFTextObjectParser;
-					$swfFile = $swfParser->parse($input);
+					$assetFinder = new SWFAssetFinder; 
+					$swfParser = new SWFParser;
+					$swfFile = $swfParser->parse($input, $assetFinder->getRequiredTags());
 					fclose($input);
-					if($updateText) {
-						$textFinder = new SWFTextObjectFinder;
-						$textObjects = $textFinder->find($swfFile);
-						$fontFinder = new SWFFontFinder;
-						$fontFamilies = $fontFinder->find($swfFile);
-					}
-					if($updateImages) {
-						$imageFinder = new SWFImageFinder;
-						$images = $imageFinder->find($swfFile);
-					}
+					$assets = $assetFinder->find($swfFile);
 					
 					// finish transfering the data 
 					if(!$transferFinished) {
@@ -216,40 +197,13 @@ class SWFGenerator {
 					}
 				
 					// ask the data modules to apply changes
-					$fileChanged = false;
 					foreach($dataModules as $dataModule) {
-						if($updateText) {
-							$changes = $dataModule->updateText($textObjects, $fontFamilies);
-							if($changes) {
-								$fileChanged = true;
-								$textFinder->replace($changes);
-								
-								// remove the ones that's been changed from the list
-								foreach($textObjects as $index => $textObject) {
-									if(in_array($textObject, $changes, true)) {
-										unset($textObjects[$index]);
-									}
-								}
-								$changes = null;
-							}
-						}
-						if($updateImages) {
-							$changes = $dataModule->updateText($textObjects, $fontFamilies);
-							if($changes) {
-								$fileChanged = true;
-								$imageFinder->replace($changes);
-								
-								foreach($textObjects as $index => $textObject) {
-									if(in_array($textObject, $changes, true)) {
-										unset($textObjects[$index]);
-									}
-								}
-								$changes = null;
-							}
-						}
+						$dataModule->update($assets);
 					}
-					$textObjects = null;
-					$fontFamilies = null;
+					
+					// transfer changes to SWF tags
+					$assetUpdater = new SWFAssetUpdater;
+					$fileChanged = $assetUpdater->update($assets);
 					
 					if($fileChanged || !file_exists($swfDestinationFilePath)) {
 						// assemble the files
@@ -259,7 +213,7 @@ class SWFGenerator {
 						// where temporary files are created right after the call to checkTemporaryFiles()
 						$output = fopen($swfTempFilePath, "a");
 						if($output && ftell($output) == 0) {
-							$swfAssembler = new SWFTextObjectAssembler;
+							$swfAssembler = new SWFAssembler;
 							$swfAssembler->assemble($output, $swfFile, true);
 							fclose($output);
 							$temporaryFiles[$swfDestinationFilePath] = $swfTempFilePath;
@@ -376,9 +330,14 @@ class SWFGenerator {
 					$filesize = sprintf("%0.1fK", filesize($swfSourceFilePath) / 1024.0);
 					echo "<div class='subsection-ok'><b>File size:</b> {$filesize}</div>";
 					$startTime = microtime(true);
-					$swfParser = new SWFTextObjectParser;
 					$input = fopen($swfSourceFilePath, "rb");
-					$swfFile = ($input) ? $swfParser->parse($input) : null;
+					if($input) {
+						$assetFinder = new SWFAssetFinder;
+						$swfParser = new SWFParser;
+						$swfFile = $swfParser->parse($input, $assetFinder->getRequiredTags());
+					} else {
+						$swfFile = null;
+					}
 					$endTime = microtime(true);
 					if($swfFile) {
 						if($swfFile->version >= 11) {
@@ -392,11 +351,10 @@ class SWFGenerator {
 						$compressed = ($swfFile->compressed) ? 'yes' : 'no';
 						echo "<div class='subsection-ok'><b>Compressed:</b> $compressed</div>";
 						
-						$textFinder = new SWFTextObjectFinder;
-						$textObjects = $textFinder->find($swfFile);
-						$textObjectCount = count($textObjects);
+						$assets = $assetFinder->find($swfFile);
+						$textObjectCount = count($assets->textObjects);
 						$textObjectNames = array();
-						foreach($textObjects as $textObject) {
+						foreach($assets->textObjects as $textObject) {
 							$textObjectNames[] = $textObject->name;
 						}
 						natsort($textObjectNames);
@@ -408,11 +366,9 @@ class SWFGenerator {
 							echo "<div class='subsection-err'><b>TLF text objects ($textObjectCount):</b></div>";
 						}
 						
-						$fontFinder = new SWFFontFinder;
-						$fontFamilies = $fontFinder->find($swfFile);
-						$fontCount = count($fontFamilies);
+						$fontCount = count($assets->fontFamilies);
 						$fontDescriptions = array();
-						foreach($fontFamilies as $fontFamily) {
+						foreach($assets->fontFamilies as $fontFamily) {
 							$fontDescription = $fontFamily->name;
 							$fontStyles = array();
 							if($fontFamily->normal) $fontStyles[] = 'normal';
@@ -425,11 +381,9 @@ class SWFGenerator {
 						$fontDescriptions = implode(', ', $fontDescriptions);
 						echo "<div class='subsection-ok'><b>Embedded fonts ($fontCount):</b> $fontDescriptions</div>";
 						
-						$imageFinder = new SWFImageFinder;
-						$images = $imageFinder->find($swfFile);
-						$imageCount = count($images);
+						$imageCount = count($assets->images);
 						$imageDescriptions = array();
-						foreach($images as $image) {
+						foreach($assets->images as $image) {
 							$imageDescriptions[] = $image->name;
 						}
 						$imageDescriptions = implode(', ', $imageDescriptions);
@@ -510,17 +464,6 @@ class SWFGenerator {
 			}
 		}
 				
-		// see what kind of contents will be updated (hence exported)
-		$updateText = false;
-		$updateImages = false;
-		foreach($dataModules as $dataModule) {
-			switch($dataModule->getUpdateType()) {
-				case 'text': $updateText = true; break;
-				case 'images': $updateImages = true; break;
-			}
-			
-		}
-		
 		if(count($exportingModules) == 0) {
 			echo "<p>Not exportable contents available</p>";
 		} else {
@@ -530,19 +473,11 @@ class SWFGenerator {
 			foreach($this->swfFileMappings as $swfSourceFilePath => $swfDestinationFilePath) {
 				$input = fopen($swfSourceFilePath, "rb");
 				if($input) {
-					$swfParser = new SWFTextObjectParser;
-					$swfFile = $swfParser->parse($input);
+					$assetFinder = new SWFAssetFinder; 
+					$swfParser = new SWFParser;
+					$swfFile = $swfParser->parse($input, $assetFinder->getRequiredTags());
 					fclose($input);
-					if($updateText) {
-						$textFinder = new SWFTextObjectFinder;
-						$textObjects = array_merge($textObjects, $textFinder->find($swfFile));
-						$fontFinder = new SWFFontFinder;
-						$fontFamilies = array_merge($fontFamilies, $fontFinder->find($swfFile));
-					}
-					if($updateImages) {
-						$imageFinder = new SWFImageFinder;
-						$images = array_merge($images, $imageFinder->find($swfFile));
-					}
+					$assets = $assetFinder->find($swfFile);
 				}
 			}
 			
@@ -554,12 +489,7 @@ class SWFGenerator {
 				$fileName = $exportingModule->getExportFileName();
 				header("Content-type: $mimeType");
 				header("Content-Disposition: attachment; filename=\"$fileName\"");
-				if($updateText) {
-					$exportingModule->exportText($output, $textObjects, $fontFamilies);
-				}
-				if($updateImages) {
-					$exportingModule->exportImages($output, $images);
-				}
+				$exportingModule->export($output, $assets);
 			} else {
 				// put the files into a zip archive
 				$mimeType = "application/zip";
@@ -570,12 +500,7 @@ class SWFGenerator {
 				foreach($exportingModules as $exportingModule) {
 					$name = $exportingModule->getExportFileName();
 					$stream = fopen("$zipPath/$name", "wb");
-					if($updateText) {
-						$exportingModule->exportText($output, $textObjects, $fontFamilies);
-					}
-					if($updateImages) {
-						$exportingModule->exportImages($output, $images);
-					}
+					$exportingModule->export($output, $assets);
 				}
 				StreamZipArchive::close($zipPath);
 			}
@@ -622,7 +547,7 @@ class SWFGenerator {
 			$text .= "$h hour" . (($h > 1) ? 's ' : ' ');
 		}
 		if($s > 60) {
-			$m - $s / 60;
+			$m = $s / 60;
 			$s = $s % 60;
 			$text .= "$m minute" . (($m > 1) ? 's ' : ' ');
 		}

@@ -152,8 +152,9 @@ class ABCParser {
 			case 0x1C:	// CONSTANT_MultinameLA
 				$multiname->namespaceSetIndex = $this->readU32();
 				break;
-			case 0x1D:	// ???
+			case 0x1D:	// CONSTANT_GENERIC
 				$multiname->nameIndex = $this->readU32();
+				$multiname->typeIndices = array();
 				$count = $this->readU32();
 				for($i = 0; $i < $count; $i++) {
 					$multiname->typeIndices[] = $this->readU32();
@@ -399,7 +400,7 @@ class ABCMultiname {
 	public $namespaceIndex;
 	public $namespaceSetIndex;
 	public $nameIndex;
-	public $typeIndices = array();
+	public $typeIndices;
 }
 
 class ABCMethod {

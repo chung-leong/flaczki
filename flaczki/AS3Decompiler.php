@@ -38,20 +38,20 @@ class AS3Decompiler {
 		// set up literals and other fixed objects
 		$this->defaultNamespace = $this->getNamespace(0);
 		
-		$this->nameThis = $this->obtainName('this');
-		$this->nameSuper = $this->obtainName('super');
+		$this->nameThis = $this->obtainQName('this');
+		$this->nameSuper = $this->obtainQName('super');
 		
 		$this->typeAny = $this->getName(0);
-		$this->typeBoolean = $this->obtainName('Boolean');
-		$this->typeClass = $this->obtainName('Class');
-		$this->typeUInt = $this->obtainName('uint');
-		$this->typeInt = $this->obtainName('int');
-		$this->typeString = $this->obtainName('String');
-		$this->typeNumber = $this->obtainName('Number');
-		$this->typeObject = $this->obtainName('Object');
-		$this->typeArray = $this->obtainName('Array');
-		$this->typeXML = $this->obtainName('XML');
-		$this->typeUndefined = $this->obtainName('undefined');
+		$this->typeBoolean = $this->obtainQName('Boolean');
+		$this->typeClass = $this->obtainQName('Class');
+		$this->typeUInt = $this->obtainQName('uint');
+		$this->typeInt = $this->obtainQName('int');
+		$this->typeString = $this->obtainQName('String');
+		$this->typeNumber = $this->obtainQName('Number');
+		$this->typeObject = $this->obtainQName('Object');
+		$this->typeArray = $this->obtainQName('Array');
+		$this->typeXML = $this->obtainQName('XML');
+		$this->typeUndefined = $this->obtainQName('undefined');
 		
 		$this->literalNaN = new AS3Literal;
 		$this->literalNaN->value = NAN;
@@ -72,8 +72,11 @@ class AS3Decompiler {
 		
 		// attach traits of scripts to global class
 		$globalClass = new AS3Class;
-		$globalClass->name = $this->addName("GLOBAL");
+		$globalClass->name = $this->addQName("GLOBAL");
 		$globalClass->type = $this->typeClass;
+		$globalClass->this = new AS3Variable;
+		$globalClass->this->name = $this->nameThis;
+		$globalClass->this->type = $this->typeClass;
 		$globalClass->members = array();
 		$globalClass->instance = new AS3ClassInstance;
 		$globalClass->instance->name = $globalClass->name;
@@ -91,17 +94,19 @@ class AS3Decompiler {
 			if($object instanceof AS3Class) {
 				$class = $object;
 				$classClass = new AS3Class;
-				$classClass->name = $this->addName("CLASS:{$class->name->text}");
+				$classClass->name = $this->addQName("CLASS:{$class->name->text}");
 				$classClass->type = $this->typeClass;
 				$classClass->members = array();
 				$classClass->instance = $class;
 				$class->type = $classClass->name;
+				$class->this->type = $classClass->name;
 				$globalClass->instance->members[$classClass->name->index] = $classClass;
 			}
 		}
 		
 		$this->global = new AS3Variable;
 		$this->global->type = $globalClass->name;
+		$this->global->name = $this->nameThis;
 		$this->globalClass = $globalClass;
 		
 		$this->decompileMembers($globalClass->instance);
@@ -146,9 +151,10 @@ class AS3Decompiler {
 	}
 	
 	protected function getNamespace($index) {
-		$namespace =& $this->namespaces[(int) $index];
+		$index = (int) $index;
+		$namespace =& $this->namespaces[$index];
 		if(!$namespace) {
-			$nsRec = $this->abcFile->namespaceTable[(int) $index];
+			$nsRec = $this->abcFile->namespaceTable[$index];
 			$namespace = new AS3Namespace;
 			$namespace->kind = $nsRec->kind;
 			$namespace->text = $this->getString($nsRec->stringIndex);
@@ -156,26 +162,72 @@ class AS3Decompiler {
 		return $namespace;
 	}
 	
+	protected function getNamespaceSet($index) {
+		$index = (int) $index;
+		$nssRec = $this->abcFile->namespaceSetTable[$index];
+		$namespaces = array();
+		foreach($nssRec->namespaceIndices as $nsIndex) {
+			$namespaces[] = $this->getNamespace($nsIndex);
+		}
+		return $namespaces;
+	}
+	
 	protected function getName($index) {
-		$name =& $this->names[(int) $index];
+		$index = (int) $index;
+		$name =& $this->names[$index];
 		if(!$name) {
 			$mnRec = $this->abcFile->multinameTable[(int) $index];
 			$name = new AS3Name;
-			$name->kind = $mnRec->type;
-			$name->namespace = $this->getNamespace($mnRec->namespaceIndex);
-			$name->text = $this->getString($mnRec->stringIndex);
+			switch($mnRec->type) {
+				case 0x0D:
+				case 0x10:
+				case 0x12:
+				case 0x0E:
+				case 0x1C: $name->isAttribute = true; break;
+			}
+			if($mnRec->stringIndex !== null) {
+				$name->text = $this->getString($mnRec->stringIndex);
+			}
+			if($mnRec->namespaceIndex !== null) {
+				$name->namespace = $this->getNamespace($mnRec->namespaceIndex);
+			}
+			if($mnRec->namespaceSetIndex !== null) {
+				$name->namespace = $this->getNamespaceSet($mnRec->namespaceSetIndex);
+			}
+			if($mnRec->typeIndices !== null) {
+				$baseName = $this->getName($mnRec->nameIndex);
+				$types = array();
+				foreach($mnRec->typeIndices as $typeIndex) {
+					$typeName = $this->getName($typeIndex);
+					$types[] = $typeName->text;
+				}
+				$types = implode(', ', $types);
+				$name->text = "{$baseName->text}.<$types>";
+				$name->namespace = $baseName->namespace;
+			}
 			$name->index = $index;
 		}
 		return $name;
 	}
 	
-	protected function findName($text, $namespace = null) {
+	protected function findQName($text, $namespace = null) {
 		$nameIndex = array_search($text, $this->abcFile->stringTable, true);
 		foreach($this->abcFile->multinameTable as $mnIndex => $mnRec) {
 			if($mnRec->stringIndex === $nameIndex) {
 				if($namespace) {
-					$nsRec = $this->abcFile->namespaceTable[(int) $mnRec->namespaceIndex];
-					if($this->abcFile->stringTable[(int) $nsRec->stringIndex] != $namespace) {
+					if($mnRec->namespaceIndex !== null) {
+						$nsRec = $this->abcFile->namespaceTable[$mnRec->namespaceIndex];
+						$nsText = $this->abcFile->stringTable[(int) $nsRec->stringIndex];
+						if(is_array($namespace)) {
+							if(!in_array($nsText, $namespace)) {
+								continue;
+							}
+						} else {
+							if($nsText != $namespace) {
+								continue;
+							}
+						}
+					} else {
 						continue;
 					}
 				}
@@ -185,26 +237,43 @@ class AS3Decompiler {
 		return false;
 	}
 	
-	protected function obtainName($text) {
-		if(!($name = $this->findName($text))) {
-			$name = $this->addName($text);
+	protected function obtainQName($text) {
+		if(!($name = $this->findQName($text))) {
+			$name = $this->addQName($text);
 		}
 		return $name;
 	}
 	
-	protected function addName($text, $template = null) {
+	protected function addQName($text, $namespace = null) {
 		$name = new AS3Name;
-		if($template) {
-			$name->kind = $template->kind;
-			$name->namespace = $template->namespace;
-		} else {
-			$name->kind = AS3Name::QNAME;
-			$name->namespace = $this->defaultNamespace;
-		}
+		$name->namespace = ($namespace) ? $namespace : $this->defaultNamespace;
 		$name->text = $text;
 		$name->index = max(count($this->names), count($this->abcFile->multinameTable));
 		$names[$name->index] = $name;
 		return $name;
+	}
+	
+	protected function findGName($baseType, $types) {
+		// find the qname of the base type first if it's a multiname
+		if(is_array($baseType->namespace)) {
+			$namespaces = array();
+			foreach($baseType->namespace as $namespace) {
+				$namespaces[] = $namespace->text;
+			}
+			$baseType = $this->findQName($baseType->text, $namespaces);
+		}
+		// find the generic name
+		$typeIndices = array();
+		foreach($types as $type) {
+			$typeIndices[] = $type->index;
+		}
+		foreach($this->abcFile->multinameTable as $mnIndex => $mnRec) {
+			if($mnRec->nameIndex == $baseType->index) {
+				if($mnRec->typeIndices == $typeIndices) {
+					return $this->getName($mnIndex);
+				}
+			}
+		}
 	}
 	
 	protected function getClassInstance($expr) {
@@ -275,8 +344,10 @@ class AS3Decompiler {
 	
 	protected function getSlotName($expr, $slotId) {
 		$instance = $this->getClassInstance($expr);
-		$member = $instance->members[-$slotId];
-		return $member->name;
+		if($instance) {
+			$member = $instance->members[-$slotId];
+			return $member->name;
+		}
 	}
 	
 	protected function decodeTraits($traitRecs) {
@@ -315,6 +386,9 @@ class AS3Decompiler {
 		$class->constructor->name = $class->name;
 		$class->instance = $this->decodeClassInstance($traitRec->nameIndex);
 		$class->type = $this->typeClass;
+		$class->this = new AS3Variable;
+		$class->this->name = $this->nameThis;
+		$class->this->type = $class->name;
 		return $class;
 	}
 	
@@ -363,9 +437,9 @@ class AS3Decompiler {
 		$method = new AS3Method;
 		$name = $this->getName($traitRec->nameIndex);
 		if(($traitRec->type & 0x0F) == 2) {
-			$method->name = $this->addName("get $name->text", $name);
+			$method->name = $this->addQName("get $name->text", $name->namespace);
 		} else if(($traitRec->type & 0x0F) == 3) {
-			$method->name = $this->addName("set $name->text", $name);
+			$method->name = $this->addQName("set $name->text", $name->namespace);
 		} else {
 			$method->name = $name;
 		}
@@ -430,9 +504,9 @@ class AS3Decompiler {
 			$arg->type = $this->decodeType($methodRec->paramTypes[$i]);
 			if(isset($methodRec->paramNameIndices[$i])) {
 				$text = $this->getString($methodRec->paramNameIndices[$i]);
-				$arg->name = $this->addName($text);
+				$arg->name = $this->addQName($text);
 			} else {
-				$arg->name = $this->addName("arg$i");
+				$arg->name = $this->addQName("arg$i");
 			}
 			$optionalParamIndex = count($methodRec->optionalParams) - count($methodRec->paramNameIndices) + $i;
 			if(isset($methodRec->optionalParams[$optionalParamIndex])) {
@@ -492,7 +566,7 @@ class AS3Decompiler {
 			//$this->decompileMethod($class->this, $member);
 		}
 		if($class->constructor) {
-			$this->decompileMethod($class->this, $class->constructor);
+			//$this->decompileMethod($class->this, $class->constructor);
 		}
 	}
 	
@@ -502,6 +576,23 @@ class AS3Decompiler {
 			$decoder = new ABCDecoder;
 			$ops = $decoder->decode($method->byteCodes);
 			unset($method->byteCodes);
+			
+			foreach($ops as $ip => $op) {
+				if(!preg_match('/debug/', $op->name)) {
+					$operands = array();
+					$i = 1;
+					while(1) {
+						$name = "op" . $i++;
+						if(isset($op->$name)) {
+							$operands[] = $op->$name;
+						} else {
+							break;
+						}
+					}
+					$operands = implode(' ', $operands);
+					echo "$ip $op->name $operands\n";
+				}
+			}
 			
 			// set up execution environment
 			$cxt = new AS3DecompilerContext;
@@ -539,7 +630,7 @@ class AS3Decompiler {
 		foreach($variables as $var) {
 			if(!$var->name) {
 				if($var->type && $var->type->text) {
-					$prefix = $var->type->text;
+					$prefix = preg_replace("/\.<.*>/", "", $var->type->text);
 				} else {
 					$prefix = "var";
 				}
@@ -1309,19 +1400,16 @@ class AS3Decompiler {
 	
 	protected function resolveName($cxt, $index) {
 		$name = $this->getName($index);
-		if($name->kind == 0x07 || $name->kind == 0x0D || $name->kind == 0x09 || $name->kind == 0x0E) {
+		if($name->text !== null && $name->namespace !== null) {
 			return $name;
 		}
 		$rtName = new AS3RuntimeName;
-		if($name->kind == 0x0F || $name->kind == 0x10) {
+		if($name->text !== null) {
 			$rtName->text = $name->text;
-			$rtName->namespace = array_pop($cxt->stack);
-		} else if($name->kind == 0x11 || $name->kind == 0x12) {
-			$rtName->text = array_pop($cxt->stack);
-			$rtName->namespace = array_pop($cxt->stack);
-		} else if($name->kind == 0x1B || $name->kind == 0x1C) {
+		} else {
 			$rtName->text = array_pop($cxt->stack);
 		}
+		$rtName->namespace = array_pop($cxt->stack);
 		return $rtName;
 	}
 	
@@ -1334,13 +1422,17 @@ class AS3Decompiler {
 	}
 	
 	protected function do_applytype($cxt, $op) {
-		$parameters = array();
+		$types = array();
 		for($i = 0; $i < $op->op1; $i++) {
-			$index = array_pop($cxt->stack);
-			$parameters[] = $this->getName($index);
+			$lookup = array_pop($cxt->stack);
+			$types[] = $lookup->name;
 		}
-		$index = array_pop($cxt->stack);
-		$name = $this->getName($index);
+		$lookup = array_pop($cxt->stack);
+		$baseType = $lookup->name;
+		$genericType = $this->findGName($baseType, $types);
+		$lookup->name = $genericType;
+		$lookup->type = $genericType;
+		array_push($cxt->stack, $lookup);
 	}
 	
 	protected function do_astype($cxt, $op) {
@@ -1482,7 +1574,8 @@ class AS3Decompiler {
 		$expr = new AS3ConstructorCall;
 		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->receiver = array_pop($cxt->stack);
-		$expr->name = $expr->receiver->type;
+		$expr->name = $expr->receiver->name;
+		$expr->type = $expr->receiver->type;
 		array_push($cxt->stack, $expr);
 	}
 	
@@ -1948,7 +2041,16 @@ class AS3Decompiler {
 	}
 	
 	protected function do_newfunction($cxt, $op) {
-		// TODO
+		$methodRec = $this->abcFile->methodTable[$op->op1];
+		$method = new AS3Method;
+		$method->arguments = $this->decodeMethodArguments($methodRec);
+		$method->type = $this->decodeType($methodRec->returnType);
+		$method->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
+		$method->exceptions = $this->decodeExceptions($methodRec);
+		$method->expressions = array();
+		$method->localVariables = array();
+		$this->decompileMethod(null, $method);
+		array_push($cxt->stack, $method);
 	}
 	
 	protected function do_newobject($cxt, $op) {
@@ -2325,19 +2427,9 @@ class AS3Namespace {
 }
 
 class AS3Name {
-	const QNAME			= 0x07;
-	const QNAMEA			= 0x0D;
-	const RTQNAME			= 0x0F;
-	const RTQNAMEA			= 0x10;
-	const RTQNAMEL			= 0x12;
-	const MULTINAME			= 0x09;
-	const MULTINAMEA		= 0x0E;
-	const MULTINAMEL		= 0x1B;
-	const MULTINAMELA		= 0x1C;
-
-	public $kind;
 	public $namespace;
 	public $text;
+	public $isAttribute;
 	public $index;
 }
 
@@ -2377,6 +2469,7 @@ class AS3Class extends AS3Expression {
 	public $constructor;
 	public $members;
 	public $instance;
+	public $this;
 }
 
 class AS3ClassInstance extends AS3Expression {
