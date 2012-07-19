@@ -174,7 +174,7 @@ abstract class SWFTextObjectUpdater {
 	
 	protected function insertImage($imageData) {
 		// see if the image already has a class associated with it
-		foreach($this->assets->symbolClasses as $className => $object) {
+		foreach($this->assets->exports as $className => $object) {
 			if($object instanceof SWFImage) {
 				if($object->data == $imageData) {
 					return $className;
@@ -186,12 +186,13 @@ abstract class SWFTextObjectUpdater {
 		$num = 1;
 		do {
 			$className = "flaczki.imageClass$num";
-		} while(isset($this->assets->symbolClasses[$className]));
+		} while(isset($this->assets->exports[$className]));
 		
 		$image = new SWFImage;
 		$image->data = $imageData;
+		$image->changed = true;
 		$this->assets->images[] = $image;
-		$this->assets->symbolClasses[$className] = $image;
+		$this->assets->exports[$className] = $image;
 		return $className;
 	}
 	

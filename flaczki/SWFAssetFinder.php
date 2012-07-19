@@ -40,7 +40,7 @@ class SWFAssetFinder {
 	
 	protected function processBitmapTag($tag) {
 		$image = new SWFImage;
-		$image->tag = $tag;
+		$image->tag =& $tag;
 		$image->swfFile = $this->swfFile;
 		$this->assets->images[] = $image;
 		$this->dictionary[$tag->characterId] = $image;
@@ -89,7 +89,7 @@ class SWFAssetFinder {
 	
 	protected function processDefineFont4Tag($tag) {
 		$font = new SWFCFFFont;
-		$font->tag = $tag;
+		$font->tag =& $tag;
 		$font->swfFile = $this->swfFile;
 		$font->name = $tag->name;
 		if($tag->cffData) {
@@ -123,7 +123,7 @@ class SWFAssetFinder {
 			$abcTextObjects = $abcFinder->find($tag->abcFile);
 			foreach($abcTextObjects as $abcTextObject) {
 				$textObject = new SWFTextObject;
-				$textObject->tag = $tag;
+				$textObject->tag =& $tag;
 				$textObject->swfFile = $this->swfFile;
 				$textObject->name = $abcTextObject->name;
 				$textObject->tlfObject = $tlfParser->parse($abcTextObject->xml, $abcTextObject->extraInfo);
@@ -150,7 +150,7 @@ class SWFAssetFinder {
 		foreach($tag->names as $characterId => $className) {
 			if(isset($this->dictionary[$characterId])) {
 				$object = $this->dictionary[$characterId];
-				$tag->symbolClasses[$className] = $object;
+				$tag->exports[$className] = $object;
 			}
 		}
 	}
@@ -160,7 +160,7 @@ class SWFAssets {
 	public $textObjects = array();
 	public $fontFamilies = array();
 	public $images = array();
-	public $symbolClasses = array();
+	public $exports = array();
 }
 
 class SWFCharacter {
