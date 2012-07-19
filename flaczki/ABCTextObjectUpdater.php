@@ -13,34 +13,37 @@ class ABCTextObjectUpdater {
 		$abcFile->stringTable[$textObject->xmlIndex] = $textObject->xml;
 		
 		// see if there are images
-		if($textObject->referencedImageClasses) {
+		if($textObject->extraInfo) {
 			// create the extraInfo object linking source names in the XML to AS3 classes
 			$patch = "";
 			$count = 0;
-			foreach($textObject->referencedImageClasses as $sourceName => $imageClass) {
-				if(!$imageClass->nameIndex) {
+			foreach($textObject->extraInfo as $customSource => $imageClassName) {
+				$dotIndex = strrpos($imageClassName, '.');
+				if($dotIndex !== false) {
+					$namespace = substr($imageClassName, 0, $dotIndex);
+					$className = substr($imageClassName, $dotIndex + 1);
+				} else {
+					$namespace = null;
+					$className = $imageClassName;
+				}
+				$imageClassNameIndex = $this->findMultinameIndex($abcFile, $className, $namespace);
+				if($imageClassNameIndex === false) {
 					// create a name for the class
-					$imageClass->nameIndex = $this->findMultinameIndex($abcFile, $imageClass->name, $imageClass->namespace);
-					if(!$imageClass->nameIndex) {
-						$imageClass->nameIndex = $this->createMultiname($abcFile, $imageClass->name, $imageClass->namespace);
-					}
-				}
-				if(!$imageClass->classIndex) {
+					$imageClassNameIndex = $this->createMultiname($abcFile, $className, $namespace);
+					
 					// create a class for the image
-					$imageClass->classIndex = $this->createEmptyClass($abcFile, $imageClass->nameIndex);
-				}
-				if(!$imageClass->sourceNameIndex) {
-					// allocate a string in the constant pool
-					$imageClass->sourceNameIndex = array_search($sourceName, $abcFile->stringTable, true);
-					if(!$imageClass->sourceNameIndex) {
-						$imageClass->sourceNameIndex = count($abcFile->stringTable);
-						$abcFile->stringTable[] = $sourceName;
-					}
-					$imageClass->sourceName = $sourceName;
+					$imageClassIndex = $this->createEmptyClass($abcFile, $imageClassNameIndex);
 				}
 				
-				$patch .= "\x2c" . $this->packU32($imageClass->sourceNameIndex) // pushstring
-					. "\x60" . $this->packU32($imageClass->nameIndex);	// getlex
+				$customSourceIndex = array_search($customSource, $abcFile->stringTable, true);
+				if($customSourceIndex === false) {
+					// allocate a string in the constant pool
+					$customSourceIndex = count($abcFile->stringTable);
+					$abcFile->stringTable[] = $customSource;
+				}
+				
+				$patch .= "\x2c" . $this->packU32($customSourceIndex) 		// pushstring
+					. "\x60" . $this->packU32($imageClassNameIndex);	// getlex
 				$count++;
 			}
 			$patch .= "\x55" . $this->packU32($count);				// newobject
@@ -76,12 +79,14 @@ class ABCTextObjectUpdater {
 	protected function findMultinameIndex($abcFile, $name, $namespace = null) {
 		// find the name in the string table first to reduce the number of string comparisons
 		$nameIndex = array_search($name, $abcFile->stringTable, true);
-		foreach($abcFile->multinameTable as $multinameIndex => $multiname) {
-			if($multiname->stringIndex === $nameIndex) {
-				// see if the namespace matches (if one is supplied)
-				$multinameNamespace = $abcFile->namespaceTable[$multiname->namespaceIndex];
-				if(!$namespace || $abcFile->stringTable[$multinameNamespace->stringIndex] == $namespace) {
-					return $multinameIndex;
+		if($nameIndex !== false) {
+			foreach($abcFile->multinameTable as $multinameIndex => $multiname) {
+				if($multiname->stringIndex === $nameIndex) {
+					// see if the namespace matches (if one is supplied)
+					$multinameNamespace = $abcFile->namespaceTable[$multiname->namespaceIndex];
+					if(!$namespace || $abcFile->stringTable[$multinameNamespace->stringIndex] == $namespace) {
+						return $multinameIndex;
+					}
 				}
 			}
 		}
@@ -106,10 +111,14 @@ class ABCTextObjectUpdater {
 		if($namespace) {
 			$namespaceIndex = $this->findNamespaceIndex($abcFile, $namespace);
 			if(!$namespaceIndex) {
+				$namespaceStringIndex = array_search($namespace, $abcFile->stringTable, true);
+				if($namespaceStringIndex === false) {
+					$namespaceStringIndex = count($abcFile->stringTable);
+					$abcFile->stringTable[] = $namespace;
+				}
 				$namespaceRec = new ABCNamespace;
 				$namespaceRec->kind = 0x08;
-				$namespaceRec->stringIndex = count($abcFile->stringTable);
-				$abcFile->stringTable[] = $namespace;
+				$namespaceRec->stringIndex = $namespaceStringIndex;
 				$namespaceIndex = count($abcFile->namespaceTable);
 				$abcFile->namespaceTable[] = $namespaceRec;
 			}
@@ -136,6 +145,8 @@ class ABCTextObjectUpdater {
  		$spriteNameIndex = $this->findMultinameIndex($abcFile, 'Sprite', 'flash.display');
  		$movieClipNameIndex = $this->findMultinameIndex($abcFile, 'MovieClip', 'flash.display');
  		$bitmapDataNameIndex = $this->findMultinameIndex($abcFile, 'BitmapData', 'flash.display');
+		//$ancestry = array($objectNameIndex, $eventDispatcherNameIndex, $displayObjectNameIndex, $interactiveObjectNameIndex, $displayObjectContainerNameIndex, $spriteNameIndex, $movieClipNameIndex);
+		$ancestry = array($objectNameIndex, $bitmapDataNameIndex);
 
  		// create the instance initializer
 		$methodBody = new ABCMethodBody;
@@ -162,19 +173,17 @@ class ABCTextObjectUpdater {
 
 		// create script initializer
 		$methodBody = new ABCMethodBody;
-		$methodBody->maxStack = 2;
+		$methodBody->maxStack = count($ancestry);
 		$methodBody->localCount = 1;
 		$methodBody->initScopeDepth = 1;
 		$methodBody->maxScopeDepth = 4;
 		$methodBody->byteCodes = "\xd0\x30\x65\x00";
-		//$ancestry = array($objectNameIndex, $eventDispatcherNameIndex, $displayObjectNameIndex, $interactiveObjectNameIndex, $displayObjectContainerNameIndex, $spriteNameIndex, $movieClipNameIndex);
-		$ancestry = array($objectNameIndex, $bitmapDataNameIndex);
 		foreach($ancestry as $ancestorNameIndex) {
-			$methodBody->byteCodes .= "\x60" . $this->packU32($ancestorNameIndex) . "\x30";
+			$methodBody->byteCodes .= "\x60" . $this->packU32($ancestorNameIndex) . "\x30";					// getlex [index] 
 		}
 		//$methodBody->byteCodes .= "\x60" . $this->packU32($movieClipNameIndex) . "\x58" . $this->packU32($classIndex);
-		$methodBody->byteCodes .= "\x60" . $this->packU32($bitmapDataNameIndex) . "\x58" . $this->packU32($classIndex);
-		$methodBody->byteCodes .= str_repeat("\x1d", count($ancestry));
+		$methodBody->byteCodes .= "\x60" . $this->packU32($bitmapDataNameIndex) . "\x58" . $this->packU32($classIndex);		// getlex [index] newclass [index]
+		$methodBody->byteCodes .= str_repeat("\x1d", count($ancestry));								// popscope
 		$methodBody->byteCodes .= "\x68" . $this->packU32($nameIndex) . "\x47";
 		$methodBody->methodIndex = count($abcFile->methodTable);
 		$abcFile->methodBodyTable[] = $methodBody;
@@ -184,7 +193,7 @@ class ABCTextObjectUpdater {
 		
 		// create a script object
 		$script = new ABCScript;
-		$script->constructorIndex = $methodBody->methodIndex;
+		$script->initializerIndex = $methodBody->methodIndex;
 		$trait = new ABCTrait;
 		$trait->nameIndex = $nameIndex;
 		$trait->type = 0x04;

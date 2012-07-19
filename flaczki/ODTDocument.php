@@ -6,6 +6,9 @@ class ODTDocument {
 	public $defaultStyles = array();
 	public $paragraphs = array();
 	public $fonts = array();
+	public $embeddedFiles = array();
+	public $pageWidth;
+	public $pageHeight;
 }
 
 class ODTParagraph {
@@ -31,6 +34,11 @@ class ODTHyperlink {
 	public $href;
 	public $targetFrameName;
 	public $type;
+}
+
+class ODTDrawing {
+	public $href;
+	public $drawingProperties;
 }
 
 class ODTStyle {
@@ -83,6 +91,15 @@ class ODTTextProperties {
 	public $textUnderlineType;
 }
 
+class ODTDrawingProperties {
+	public $x;
+	public $y;
+	public $width;
+	public $height;
+	public $anchorType;
+	public $zIndex;
+}
+
 class ODTTabStop {
 	public $type;
 	public $char;
@@ -98,6 +115,10 @@ class ODTFont {
 	public $fontVariant;
 	public $fontWeight;
 	public $panose1;
+}
+
+class ODTEmbeddedFile {
+	public $data;
 }
 
 ?>

@@ -6,20 +6,17 @@ abstract class SWFTextObjectUpdater {
 	const MAINTAIN_ORIGINAL_FONT_SIZE = 2;
 	const ALLOW_ANY_EMBEDDED_FONT = 3;
 
-	protected $fontFamilies;
+	protected $assets;
 
 	protected $allowedDeviceFonts = array();
 	protected $maintainOriginalFontSize = true;
 	protected $allowAnyEmbeddedFont = true;
 	
-	public function __construct() {
-	}
-	
 	abstract protected function getSections();
 	abstract protected function updateTextObject($tlfObject, $section);
 
 	public function update($assets) {
-		$this->fontFamilies = $assets->fontFamilies;
+		$this->assets = $assets;
 		$changed = false;
 	
 		$sections = $this->getSections();
@@ -37,7 +34,7 @@ abstract class SWFTextObjectUpdater {
 				}
 			}
 		}
-		$this->fontFamilies = null;
+		$this->assets = null;
 	}
 	
 	public function getSectionNames() {
@@ -94,7 +91,7 @@ abstract class SWFTextObjectUpdater {
 		// see how fonts should be mapped
 		$fontFamilyMap = array();
 		$fontLookupMap = array();
-		$embeddedFonts = $this->fontFamilies;
+		$embeddedFonts = $this->assets->fontFamilies;
 		$allowedDeviceFonts = array_flip($this->allowedDeviceFonts);
 		$originalFontUsage = $originalStyleUsage['fontFamily'];
 		$newFontUsage = $newStyleUsage['fontFamily'];		
@@ -156,21 +153,46 @@ abstract class SWFTextObjectUpdater {
 			}
 		}
 		
-		// update the font properties
+		// update the font properties 
 		foreach($tlfObject->textFlow->paragraphs as $paragraph) {
 			foreach($paragraph->spans as $span) {
-				if($span->style->fontFamily) {
-					$span->style->fontFamily = $fontFamilyMap[$span->style->fontFamily];
-					$span->style->fontLookup = $fontLookupMap[$span->style->fontFamily];
-					$span->style->renderingMode = ($span->style->fontLookup == 'embeddedCFF') ? 'cff' : null;
-					if($fontSizeScaleFactor !== 1) {
-						if($span->style->fontSize) {
-							$span->style->fontSize = round($span->style->fontSize * $fontSizeScaleFactor);
+				if($span instanceof TLFSpan) {
+					if($span->style->fontFamily) {
+						$span->style->fontFamily = $fontFamilyMap[$span->style->fontFamily];
+						$span->style->fontLookup = $fontLookupMap[$span->style->fontFamily];
+						$span->style->renderingMode = ($span->style->fontLookup == 'embeddedCFF') ? 'cff' : null;
+						if($fontSizeScaleFactor !== 1) {
+							if($span->style->fontSize) {
+								$span->style->fontSize = round($span->style->fontSize * $fontSizeScaleFactor);
+							}
 						}
 					}
 				}
 			}
 		}
+	}
+	
+	protected function insertImage($imageData) {
+		// see if the image already has a class associated with it
+		foreach($this->assets->symbolClasses as $className => $object) {
+			if($object instanceof SWFImage) {
+				if($object->data == $imageData) {
+					return $className;
+				}
+			}
+		}
+	
+		// create a unique class name for the image
+		$num = 1;
+		do {
+			$className = "flaczki.imageClass$num";
+		} while(isset($this->assets->symbolClasses[$className]));
+		
+		$image = new SWFImage;
+		$image->data = $imageData;
+		$this->assets->images[] = $image;
+		$this->assets->symbolClasses[$className] = $image;
+		return $className;
 	}
 	
 	protected function getStyleUsage($tlfObject, $properties) {
@@ -212,9 +234,9 @@ abstract class SWFTextObjectUpdater {
 	}
 
 	protected function getFontPanose($fontFamilyName) {
-		if(isset($this->fontFamilies[$fontFamilyName])) {
+		if(isset($this->assets->fontFamilies[$fontFamilyName])) {
 			// an embedded font
-			$fontFamily = $this->fontFamilies[$fontFamilyName];
+			$fontFamily = $this->assets->fontFamilies[$fontFamilyName];
 			if($fontFamily->normal) {
 				return $fontFamily->normal->panose;
 			}

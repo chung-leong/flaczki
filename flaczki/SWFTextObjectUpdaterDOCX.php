@@ -5,7 +5,6 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 	protected $document;
 
 	public function __construct($document) {
-		parent::__construct();
 		$this->document = $document;
 	}
 	

@@ -5,6 +5,7 @@ class SWFFile {
 	public $compressed;
 	public $frameSize;
 	public $tags = array();
+	public $highestCharacterId;
 }
 
 class SWFGenericTag {
@@ -180,6 +181,13 @@ class SWFDefineFontAlignZonesTag {
 }
 
 class SWFDefineFontInfoTag {
+	const SmallText		= 0x20;
+	const ShiftJIS		= 0x10;
+	const ANSI		= 0x08;
+	const Italic		= 0x04;
+	const Bold		= 0x02;
+	const WideCodes		= 0x01;
+
 	public $characterId;
 	public $name;
 	public $flags;
@@ -290,7 +298,6 @@ class SWFDefineText2Tag extends SWFDefineTextTag {
 }
 
 class SWFDefineVideoStreamTag extends SWFCharacterTag {
-	public $characterId;
 	public $frameCount;
 	public $width;
 	public $height;
@@ -353,7 +360,8 @@ class SWFMetadataTag {
 	public $metadata;
 }
 
-class SWFPlaceObjectTag extends SWFCharacterTag {
+class SWFPlaceObjectTag {
+	public $characterId;
 	public $depth;
 	public $matrix;
 	public $colorTransform;
@@ -574,7 +582,7 @@ class SWFSoundEnvelope {
 	public $rightLevel;
 }
 
-class SWFButtonRecord {
+class SWFButtonRecord extends SWFCharacterTag {
 	const HasBlendMode	= 0x20;
 	const HasFilterList	= 0x10;
 	const StateHitTest	= 0x08;
@@ -583,7 +591,6 @@ class SWFButtonRecord {
 	const StateUp		= 0x01;
 
 	public $flags;
-	public $characterId;
 	public $placeDepth;
 	public $matrix;
 	public $colorTransform;

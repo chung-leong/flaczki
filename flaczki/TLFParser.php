@@ -6,9 +6,12 @@ class TLFParser {
 	protected $textFlow;
 	protected $paragraph;
 	protected $span;
+	protected $graphic;
 	protected $hyperlink;
+	protected $extraInfo;
 
-	public function parse($input) {
+	public function parse($input, $extraInfo) {
+		$this->extraInfo = $extraInfo;
 		$parser = xml_parser_create();
 		xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
 		xml_set_object($parser, $this);
@@ -23,7 +26,9 @@ class TLFParser {
 		} else {
 			throw new Exception("Invalid input");
 		}
-		return $this->textObject;
+		$textObject = $this->textObject;
+		$this->textObject = $this->extraInfo = null;
+		return $textObject;
 	}
 
 	public function processStartTag($parser, $name, $attributes) {
@@ -46,6 +51,12 @@ class TLFParser {
 			case 'a':
 				$this->hyperlink = new TLFHyperlink;
 				$this->copyProperties($this->hyperlink, $attributes);
+				break;
+			case 'img':
+				$this->graphic = new TLFInlineGraphicElement;
+				$this->copyProperties($this->graphic, $attributes);
+				$customSource = $attributes['customSource'];
+				$this->graphic->className = $this->extraInfo[$customSource];
 				break;
 			case 'TextFlow':
 				$this->textFlow = new TLFTextFlow;
@@ -74,6 +85,12 @@ class TLFParser {
 				break;
 			case 'a':
 				$this->hyperlink = null;
+				break;
+			case 'img':
+				if($this->paragraph) {
+					$this->paragraph->spans[] = $this->graphic;
+				}
+				$this->graphic = null;
 				break;
 			case 'TextFlow':
 				if($this->textObject) {
@@ -156,8 +173,7 @@ class TLFSpan extends TLFFlowElement {
 }
 
 class TLFInlineGraphicElement extends TLFFlowElement {
-	public $customSource;
-	public $imageData;
+	public $className;
 	public $float;
 	public $width;
 	public $height;

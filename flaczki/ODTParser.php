@@ -5,6 +5,7 @@ class ODTParser {
 	protected $document;
 	protected $paragraph;
 	protected $span;
+	protected $drawing;
 	protected $previousSpan;
 	protected $hyperlink;
 	protected $style;
@@ -25,26 +26,57 @@ class ODTParser {
 		$zipPath = StreamZipArchive::open($input);
 		$dir = opendir($zipPath);
 		$processed = array('content.xml' => false, 'styles.xml' => false );
-		while($file = readdir($dir)) {
-			if($file == 'content.xml' || $file == 'styles.xml') {
-				$this->fileName = $file;
-				$path = "$zipPath/$file";
-				$stream = fopen($path, "rb");
-				
-				// parse it with PHP's SAX event-based parser, which requires less memory than a tree-based 
-				// parser and is perfect for on-the-fly processing
-				$parser = xml_parser_create();
-				xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
-				xml_set_object($parser, $this);
-				xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
-				xml_set_character_data_handler($parser, 'processCharacterData');
-				while($data = fread($stream, 1024)) {
-					xml_parse($parser, $data, strlen($data) != 1024);
+		$rootDir = opendir($zipPath);
+		$dirStack = array($rootDir);
+		$pathStack = array();
+		do {
+			// recursively scan the file structure in the zip file
+			// because StreamZipArchive scans a file sequentially, an item must be open
+			// immediately after it's returned
+			$dir = array_pop($dirStack);
+			while($file = readdir($dir)) {
+				$directory = implode('/', $pathStack);
+				$path = (($directory) ? "$directory/" : "") . $file;
+				$fullPath = "$zipPath/$path";
+				if(is_dir($fullPath)) {
+					array_push($dirStack, $dir);
+					array_push($pathStack, $file);
+					$dir = opendir($fullPath);
+				} else {
+					if($file == 'content.xml' || $file == 'styles.xml') {
+						$this->fileName = $file;
+						$stream = fopen($fullPath, "rb");
+						
+						// parse it with PHP's SAX event-based parser, which requires less memory than a tree-based 
+						// parser and is perfect for on-the-fly processing
+						$parser = xml_parser_create();
+						xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
+						xml_set_object($parser, $this);
+						xml_set_element_handler($parser, 'processStartTag', 'processEndTag');
+						xml_set_character_data_handler($parser, 'processCharacterData');
+						while($data = fread($stream, 1024)) {
+							xml_parse($parser, $data, strlen($data) != 1024);
+						}
+						$processed[$file] = true;
+					} else if(preg_match('/\.(jpeg|jpg|png)$/', $file)) {
+						// save the image
+						$stream = fopen($fullPath, "rb");
+						$embeddedFile = new ODTEmbeddedFile;
+						while($data = fread($stream, 10240)) {
+							if($embeddedFile->data) {
+								$embeddedFile->data .= $data;
+							} else {
+								$embeddedFile->data = $data;
+							}
+						}
+						$this->document->embeddedFiles[$path] = $embeddedFile;
+					}
 				}
-				$processed[$file] = true;
 			}
-		}
+			$file = array_pop($pathStack);
+		} while(count($dirStack) > 0);
 		StreamZipArchive::close($zipPath);
+		
 		$this->document = $this->paragraph = $this->span = $this->previousSpan = $this->style = $this->font = null;
 		if(array_sum($processed) == count($processed)) {
 			return $document;
@@ -116,6 +148,20 @@ class ODTParser {
 				$this->copyProperties($font, $attributes);
 				$this->document->fonts[$font->name] = $font;
 				break;
+			case 'frame':
+				$this->drawing = new ODTDrawing;
+				$this->drawing->drawingProperties = new ODTDrawingProperties;
+				$this->copyProperties($this->drawing->drawingProperties, $attributes);
+				$this->paragraph->spans[] = $this->drawing;
+				break;
+			case 'image':
+				if($this->drawing) {
+					$this->copyProperties($this->drawing, $attributes);
+				}
+				break;
+			case 'page-layout-properties':
+				$this->copyProperties($this->document, $attributes);
+				break;
 		}
 	}
 
@@ -159,6 +205,9 @@ class ODTParser {
 			case 'default-style':
 				$this->document->defaultStyles[$this->style->family] = $this->style;
 				$this->style = null;
+				break;
+			case 'frame':
+				$this->drawing = null;
 				break;
 		}
 	}

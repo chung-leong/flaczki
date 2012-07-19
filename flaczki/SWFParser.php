@@ -61,11 +61,27 @@ class SWFParser {
 		// frame rate and count
 		$swfFile->frameRate = $this->readUI16($bytesAvailable);
 		$swfFile->frameCount = $this->readUI16($bytesAvailable);
+		$swfFile->highestCharacterId = 0;
 		
 		while($tag = $this->readTag($bytesAvailable)) {
 			$swfFile->tags[] = $tag;
+			
+			// see if the tag holds a character
+			if($tag instanceof SWFCharacterTag) {
+				if($tag->characterId > $swfFile->highestCharacterId) {
+					$swfFile->highestCharacterId = $tag->characterId;
+				}
+			} else if($tag instanceof SWFGenericTag) {
+				$className = "SWF{$tag->name}Tag";
+				if(is_subclass_of($className, 'SWFCharacterTag')) {
+					$array = unpack('v', $tag->data);
+					$characterId = $array[1];
+					if($characterId > $swfFile->highestCharacterId) {
+						$swfFile->highestCharacterId = $characterId;
+					}
+				}
+			}
 		}
-		
 		$this->input = null;
 		return $swfFile;
 	}
@@ -367,6 +383,7 @@ class SWFParser {
 			}
 		}
 		if($tag->flags & SWFDefineFont2Tag::HasLayout || $bytesAvailable) {
+			echo "Has layout<br>";
 			$tag->ascent = $this->readSI16($bytesAvailable);
 			$tag->descent = $this->readSI16($bytesAvailable);
 			$tag->leading = $this->readSI16($bytesAvailable);

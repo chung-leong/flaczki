@@ -5,7 +5,6 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 	protected $document;
 
 	public function __construct($document) {
-		parent::__construct();
 		$this->document = $document;
 	}
 	
@@ -50,25 +49,35 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			$odtParagraphStyle = $section->paragraphStyles[$index];
 			$this->translateProperties($tlfParagraph->style, $odtParagraphStyle);
 			
+			foreach($odtParagraph->spans as $odtSpan) {
+				if($odtSpan instanceof ODTDrawing) {
+					$tlfGraphic = new TLFInlineGraphicElement;
+					$this->translateImageProperties($tlfGraphic, $odtSpan);
+					$tlfParagraph->spans[] = $tlfGraphic;
+				}
+			}
+			
 			$tlfHyperlink = null;
 			$odtHyperlink = null;
 			foreach($odtParagraph->spans as $odtSpan) {
-				$tlfSpan = new TLFSpan;
-				$odtSpanStyle = $this->getApplicableStyle($odtSpan, $odtParagraphStyle);
-				$this->translateProperties($tlfSpan->style, $odtSpanStyle);
-				$tlfSpan->text = $odtSpan->text;
-				if($odtSpan->hyperlink !== $odtHyperlink) {
-					$odtHyperlink = $odtSpan->hyperlink;
-					if($odtHyperlink) {
-						$tlfHyperlink = new TLFHyperlink;
-						$tlfHyperlink->href = $odtHyperlink->href;
-						$tlfHyperlink->target = $odtHyperlink->target;
-					} else {
-						$tlfHyperlink = null;
+				if($odtSpan instanceof ODTSpan) {
+					$tlfSpan = new TLFSpan;
+					$odtSpanStyle = $this->getApplicableStyle($odtSpan, $odtParagraphStyle);
+					$this->translateProperties($tlfSpan->style, $odtSpanStyle);
+					$tlfSpan->text = $odtSpan->text;
+					if($odtSpan->hyperlink !== $odtHyperlink) {
+						$odtHyperlink = $odtSpan->hyperlink;
+						if($odtHyperlink) {
+							$tlfHyperlink = new TLFHyperlink;
+							$tlfHyperlink->href = $odtHyperlink->href;
+							$tlfHyperlink->target = $odtHyperlink->target;
+						} else {
+							$tlfHyperlink = null;
+						}
 					}
+					$tlfSpan->hyperlink = $tlfHyperlink;
+					$tlfParagraph->spans[] = $tlfSpan;
 				}
-				$tlfSpan->hyperlink = $tlfHyperlink;
-				$tlfParagraph->spans[] = $tlfSpan;
 			}
 			if(count($tlfParagraph->spans) > 0) {
 				$newParagraphs[] = $tlfParagraph;
@@ -482,6 +491,20 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 				}
 				break;
 		}
+	}
+	
+	protected function translateImageProperties($tlfGraphic, $odtDrawing) {
+		$embeddedFile = $this->document->embeddedFiles[$odtDrawing->href];
+		$className = $this->insertImage($embeddedFile->data);
+		$tlfGraphic->className = $className;
+		$tlfGraphic->width = $this->parseLength($odtDrawing->drawingProperties->width, 0, 4096);
+		$tlfGraphic->height = $this->parseLength($odtDrawing->drawingProperties->height, 0, 4096);
+		
+		// see which edge the image is closer to
+		$pageWidth = $this->parseLength($this->document->pageWidth, 0, 4096);
+		$left = $this->parseLength($odtDrawing->drawingProperties->x, 0, 4096);
+		$right = $pageWidth - ($left + $tlfGraphic->width);
+		$tlfGraphic->float = ($left < $right) ? 'left' : 'right';
 	}
 }
 

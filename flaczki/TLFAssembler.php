@@ -5,7 +5,7 @@ class TLFAssembler {
 	protected $output;
 	protected $written;
 
-	public function assemble(&$output, $textObject) {
+	public function assemble(&$output, &$extraInfo, $tlfObject) {
 		if(gettype($output) == 'string') {
 			$path = StreamMemory::create($output);
 			$this->output = fopen($path, "wb");
@@ -16,9 +16,11 @@ class TLFAssembler {
 		}
 		$this->written = 0;
 		
-		$this->writeStartTag('tlfTextObject', $textObject->style);
-		if($textObject->textFlow) {
-			$textFlow = $textObject->textFlow;
+		$extraInfo = $this->getExtraInfo($tlfObject);
+		
+		$this->writeStartTag('tlfTextObject', $tlfObject->style);
+		if($tlfObject->textFlow) {
+			$textFlow = $tlfObject->textFlow;
 			$this->writeStartTag('TextFlow', $textFlow->style);
 			foreach($textFlow->paragraphs as $paragraph) {
 				$this->writeStartTag('p', $paragraph->style);
@@ -26,9 +28,10 @@ class TLFAssembler {
 				foreach($paragraph->spans as $span) {
 					if($span instanceof TLFInlineGraphicElement) {
 						$graphic = $span;
+						$customSource = array_search($graphic->className, $extraInfo);
 						$attributes = array(
 							'source' => 'Object',
-							'customSource' => $graphic->customSource,
+							'customSource' => $customSource,
 							'float' => $graphic->float,
 							'width' => $graphic->width,
 							'height' => $graphic->height,
@@ -91,6 +94,22 @@ class TLFAssembler {
 	
 	protected function writeBytes($bytes) {
 		$this->written .= fwrite($this->output, $bytes);
+	}
+	
+	protected function getExtraInfo($tlfObject) {
+		$extraInfo = array();
+		foreach($tlfObject->textFlow->paragraphs as $paragraph) {
+			foreach($paragraph->spans as $graphic) {
+				if($graphic instanceof TLFInlineGraphicElement) {
+					if(!in_array($graphic->className, $extraInfo)) {
+						$num = count($extraInfo) + 1;
+						$customSource = "image$num";
+						$extraInfo[$customSource ] = $graphic->className;
+					}
+				}
+			}
+		}
+		return $extraInfo;
 	}
 }
 

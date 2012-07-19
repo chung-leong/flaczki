@@ -87,6 +87,7 @@ class ABCTextObjectFinder {
 							$textObject->extraInfoOpOffset = $extraInfoOpOffset;
 							$textObject->extraInfoOpLength = strlen($extraInfoOp);
 							$textObject->methodBody = $method->body;
+							$textObject->extraInfo = array();
 							$textObjects[] = $textObject;
 						}
 					}
@@ -169,7 +170,7 @@ class ABCTextObjectInfo {
 	public $xmlIndex;
 	public $methodBody;
 	public $copyOnWrite;
-	public $referencedImageClasses = array();		// keyed by customSource name
+	public $extraInfo;
 }
 
 class ABCImageClassInfo {

@@ -178,7 +178,7 @@ class SWFAssembler {
 			// assemble the file using a clone of $this
 			$data = '';
 			$assembler = clone $this;
-			$assembler->assemble($data, $tag->swfFile, $tearDown);
+			$assembler->assemble($data, $tag->swfFile);
 			$this->writeBytes($data);
 		} else {
 			$this->writeBytes($tag->data);

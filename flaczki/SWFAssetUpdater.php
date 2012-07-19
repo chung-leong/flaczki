@@ -22,7 +22,7 @@ class SWFAssetUpdater {
 			$tlfAssembler = new TLFAssembler;
 			$abcTextObject = $textObject->abcObject;
 			$abcFile = $textObject->tag->abcFile;
-			$tlfAssembler->assemble($abcTextObject->xml, $textObject->tlfObject);
+			$tlfAssembler->assemble($abcTextObject->xml, $abcTextObject->extraInfo, $textObject->tlfObject);
 			$abcUpdater = new ABCTextObjectUpdater;
 			$abcUpdater->update($abcFile, $abcTextObject);
 		}

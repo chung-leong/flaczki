@@ -2,8 +2,10 @@
 
 class SWFAssetFinder {
 
+	protected $swfFile;
 	protected $assets;
 	protected $dictionary;
+	protected $currentSprite;
 	
 	public function getRequiredTags() {
 		$methodNames = get_class_methods($this);
@@ -17,11 +19,12 @@ class SWFAssetFinder {
 	}
 	
 	public function find($swfFile) {
+		$this->swfFile = $swfFile;
 		$this->assets = new SWFAssets;
 		$this->dictionary = array();
 		$this->processTags($swfFile->tags);
 		$assets = $this->assets;
-		$this->assets = $this->dictionary = null;
+		$this->assets = $this->dictionary = $this->swfFile = null;
 		return $assets;
 	}
 	
@@ -38,12 +41,9 @@ class SWFAssetFinder {
 	protected function processBitmapTag($tag) {
 		$image = new SWFImage;
 		$image->tag = $tag;
+		$image->swfFile = $this->swfFile;
 		$this->assets->images[] = $image;
 		$this->dictionary[$tag->characterId] = $image;
-	}
-	
-	protected function processDefineBitsTag($tag) {
-		// TODO--need sample file
 	}
 	
 	protected function processDefineBitsJPEG2Tag($tag) {
@@ -66,62 +66,54 @@ class SWFAssetFinder {
 		$this->processBitmapTag($tag);
 	}
 	
-	protected function processJPEGTablesTag($tag) {
-	}
-	
-	protected function processDefineFontTag($tag) {
-	}
-	
-	protected function processDefineFont2Tag($tag) {
-	}
-	
-	protected function processDefineFont3Tag($tag) {
+	protected function addFont($font) {
+		if(isset($this->assets->fontFamilies[$font->name])) {
+			$family = $this->assets->fontFamilies[$font->name];
+		} else {
+			$family = $this->assets->fontFamilies[$font->name] = new SWFFontFamily;
+			$family->name = $font->name;
+		}
+		if($font->isBold) {
+			if($font->isItalic) {
+				$family->boldItalic = $font;
+			} else {
+				$family->bold = $font;
+			}
+		} else if($font->isItalic) {
+			$family->italic = $font;
+		} else {
+			$family->normal = $font;
+		}
+		$this->dictionary[$font->tag->characterId] = $font;
 	}
 	
 	protected function processDefineFont4Tag($tag) {
-		if(isset($this->assets->fontFamilies[$tag->name])) {
-			$family = $this->assets->fontFamilies[$tag->name];
-		} else {
-			$family = $this->assets->fontFamilies[$tag->name] = new SWFFontFamily;
-			$family->name = $tag->name;
-		}
-		
+		$font = new SWFCFFFont;
+		$font->tag = $tag;
+		$font->swfFile = $this->swfFile;
+		$font->name = $tag->name;
 		if($tag->cffData) {
-			// embedded font
-			$cffParser = new CFFParser;
-			$font = $cffParser->parse($tag->cffData);
-			if($font) {
-				if($font->bold) {
-					if($font->italic || $font->oblique) {
-						$family->boldItalic = $font;
-					} else {
-						$family->bold = $font;
+			$header = unpack('Nversion/nnumTables/nsearchRange/nentrySelector/nrangeShift', $tag->cffData);
+			if($header['version'] == 0x4F54544f) {	// 'OTTO'
+				for($i = 0, $n = $header['numTables'], $offset = 12; $i < $n; $i++) {
+					$table = unpack('Ntag/NcheckSum/Noffset/Nlength', substr($tag->cffData, $offset, 16));
+					if($table['tag'] == 0x4F532F32) {	// 'OS/2'
+						$tableData = substr($tag->cffData, $table['offset'], $table['length']);
+						$os2 = unpack('nversion/navgCharWidth/nweightClass/nwidthClass/nfsType/nsubscriptXSize/nsubscriptYSize/nsubscriptXOffset/nsubscriptYOffset/nsuperscriptXSize/nsuperscriptYSize/nsuperscriptXOffset/nsuperscriptYOffset/nstrikeoutSize/nstrikeoutPosition/nfamilyClass/C10panose/N4unicodeRange/a4vendId/nselection/nfirstCharIndex/nlastCharIndex/ntypoAscender/ntypoDescender/ntypeLineGap/nwinAscent/nwinDescent/NcodePageRange1/NcodePageRange2', $tableData);
+						$font->weight = $os2['weightClass'];
+						$font->width = $os2['widthClass'];
+						$font->isItalic = ($os2['selection'] & 0x0001) != 0 || ($os2['selection'] & 0x0200) != 0;
+						$font->isBold = ($os2['selection'] & 0x0020) != 0;
+						for($j = 1; $j <= 10; $j++) {
+							$font->panose[$j] = $os2["panose$j"];
+						}
+						break;
 					}
-				} else if($font->italic || $font->oblique) {
-					$family->italic = $font;
-				} else {
-					$family->normal = $font;
+					$offset += 16;
 				}
 			}
 		}
-	}
-	
-	protected function processDefineFontInfoTag($tag) {
-	}
-	
-	protected function processDefineFontInfo2Tag($tag) {
-	}
-	
-	protected function processDefineFontNameTag($tag) {
-	}
-	
-	protected function processDefineEditTextTag($tag) {
-	}
-	
-	protected function processDefineTextTag($tag) {
-	}
-	
-	protected function processDefineText2Tag($tag) {
+		$this->addFont($font);
 	}
 	
 	protected function processDoABCTag($tag) {
@@ -132,8 +124,9 @@ class SWFAssetFinder {
 			foreach($abcTextObjects as $abcTextObject) {
 				$textObject = new SWFTextObject;
 				$textObject->tag = $tag;
+				$textObject->swfFile = $this->swfFile;
 				$textObject->name = $abcTextObject->name;
-				$textObject->tlfObject = $tlfParser->parse($abcTextObject->xml);
+				$textObject->tlfObject = $tlfParser->parse($abcTextObject->xml, $abcTextObject->extraInfo);
 				$textObject->abcObject = $abcTextObject;
 				$this->assets->textObjects[] = $textObject;
 			}
@@ -142,7 +135,10 @@ class SWFAssetFinder {
 	
 	protected function processDefineBinaryDataTag($tag) {
 		if($tag->swfFile) {
+			$container = $this->swfFile;
+			$this->swfFile = $tag->swfFile;
 			$this->processTags($tag->swfFile->tags);
+			$this->swfFile = $container;
 		}
 	}
 	
@@ -150,19 +146,13 @@ class SWFAssetFinder {
 		$this->processTags($tag->tags);
 	}
 	
-	protected function processExportAssetsTag($tag) {
-	}
-	
 	protected function processSymbolClassTag($tag) {
-	}
-	
-	protected function processPlaceObjectTag($tag) {
-	}
-	
-	protected function processPlaceObject2Tag($tag) {
-	}
-	
-	protected function processPlaceObject3Tag($tag) {
+		foreach($tag->names as $characterId => $className) {
+			if(isset($this->dictionary[$characterId])) {
+				$object = $this->dictionary[$characterId];
+				$tag->symbolClasses[$className] = $object;
+			}
+		}
 	}
 }
 
@@ -170,21 +160,26 @@ class SWFAssets {
 	public $textObjects = array();
 	public $fontFamilies = array();
 	public $images = array();
-	public $swfFile = array();
+	public $symbolClasses = array();
 }
 
-class SWFAsset {
-	public $name;
+class SWFCharacter {
 	public $tag;
-	public $changed;
+	public $swfFile;
 }
 
-class SWFTextObject extends SWFAsset {
+class SWFTextObject extends SWFCharacter {
+	public $name;
+	public $changed;
 	public $tlfObject;
 	public $abcObject;
+	public $embeddedImages = array();
 }
 
-class SWFImage extends SWFAsset {
+class SWFImage extends SWFCharacter {
+	public $name;
+	public $changed;
+	
 	private $_data;
 	
 	public function __get($name) {
@@ -214,11 +209,31 @@ class SWFImage extends SWFAsset {
 	}
 }
 
-class SWFFontFamily extends SWFAsset {
+class SWFSprite extends SWFCharacter {
+}
+
+class SWFFontFamily  {
+	public $name;
 	public $normal;
 	public $bold;
 	public $italic;
 	public $boldItalic;
+}
+
+class SWFFont extends SWFCharacter {
+	public $name;
+	public $isBold;
+	public $isItalic;
+}
+
+class SWFGlyphFont extends SWFFont {
+	public $codeTable;
+}
+
+class SWFCFFFont extends SWFFont {
+	public $weight;			// 100 = thin, 400 = normal, 900 = heavy
+	public $width;			// 1 = ultra-condensed, 5 = normal, 9 = ultra-expanded
+	public $panose = array();	// see http://www.monotypeimaging.com/ProductsServices/pan1.aspx
 }
 
 ?>

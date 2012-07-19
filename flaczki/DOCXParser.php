@@ -85,12 +85,10 @@ class DOCXParser {
 						$processed[$file] = true;
 					} else if(preg_match('/\.(jpeg|jpg|png)$/', $file)) {
 						// save the image
-						$size = filesize($fullPath);
 						$stream = fopen($fullPath, "rb");
 						$embeddedFile = new DOCXEmbeddedFile;
 						$embeddedFile->fileName = $file;
-						// use a loop to read the data just in case fread doesn't return everything in one call
-						while($data = fread($stream, $size)) {
+						while($data = fread($stream, 10240)) {
 							if($embeddedFile->data) {
 								$embeddedFile->data .= $data;
 							} else {
@@ -103,6 +101,7 @@ class DOCXParser {
 			}
 			$file = array_pop($pathStack);
 		} while(count($dirStack) > 0);
+		StreamZipArchive::close($zipPath);
 		
 		foreach($this->fileReferences as $reference => $path) {
 			list($referrer, $id) = explode(':', $reference);
