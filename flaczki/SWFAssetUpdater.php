@@ -14,7 +14,7 @@ class SWFAssetUpdater {
 			}
 		}
 		foreach($assets->images as $image) {
-			if($textObject->changed) {
+			if($image->changed) {
 				$this->updateImage($image);
 				$changed = true;
 			}
@@ -48,7 +48,7 @@ class SWFAssetUpdater {
 			}
 		}
 		$this->assets = null;
-		return true;
+		return $changed;
 	}
 	
 	protected function updateTextObject($textObject) {
@@ -64,10 +64,10 @@ class SWFAssetUpdater {
 	
 	protected function updateImage($image) {
 		$originalTag = $image->tag;
-		if($originalTag instanceof SWFDefineBitsJPEG3) {
+		if($originalTag instanceof SWFDefineBitsJPEG3Tag && TransparentJPEGConverter::isAvailable()) {
 			// should be a JPEG image with alpha channel
 			$converter = new TransparentJPEGConverter;
-			$deblockingParam = ($originalTag instanceof SWFDefineBitsJPEG4) ? $$originalTag->deblockingParam : 0; 
+			$deblockingParam = ($originalTag instanceof SWFDefineBitsJPEG4) ? $originalTag->deblockingParam : 0; 
 			$image->tag = $converter->convertFromPNG($image->data, $deblockingParam);
 		} else {
 			$image->tag = new SWFDefineBitsJPEG2Tag;
@@ -75,6 +75,13 @@ class SWFAssetUpdater {
 		}
 		if($originalTag) {
 			$image->tag->characterId = $originalTag->characterId;
+			
+			// replace the tag
+			$swfFile = $image->swfFile;
+			$index = array_search($originalTag, $swfFile->tags, true);
+			if($index !== false) {
+				$swfFile->tags[$index] = $image->tag;
+			}
 		}
 	}
 }

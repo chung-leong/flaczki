@@ -2,8 +2,7 @@
 
 abstract class SWFImageUpdater {
 
-	public function update($images) {
-	}
+	abstract public function update($assets);
 	
 	abstract public function getImageNames();
 }

@@ -94,6 +94,10 @@ class FlopBox extends SWFGeneratorDataModule {
 			$changes = $this->textUpdater->update($assets);
 			return $changes;
 		}
+		if($this->imageUpdater) {
+			$changes = $this->imageUpdater->update($assets);
+			return $changes;
+		}
 		return array();
 	}
 	

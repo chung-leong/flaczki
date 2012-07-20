@@ -10,7 +10,7 @@ class SWFImageUpdaterFolder extends SWFImageUpdater {
 		$this->canUseGD = function_exists('imagepng');
 	}
 
-	public function update($images) {
+	public function update($assets) {
 		$dir = opendir($this->folderPath);
 		while($file = readdir($dir)) {
 			if(preg_match('/(\.jpg|\.jpeg|\.png|\.gif)$/i', $file, $m)) {
@@ -21,9 +21,10 @@ class SWFImageUpdaterFolder extends SWFImageUpdater {
 				$path = "{$this->folderPath}/{$file}";
 				$data = file_get_contents($path);
 				
-				foreach($images as $image) {
+				foreach($assets->images as $image) {
 					if($image->name == $namePart) {
-						
+						$image->data = $data;
+						$image->changed = true;
 					}
 				}
 			}

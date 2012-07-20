@@ -2,6 +2,10 @@
 
 class TransparentJPEGConverter {
 
+	public static function isAvailable() {
+		return function_exists('imagecreatefromstring');
+	}
+
 	public function convertToPNG($tag) {
 		// create the image and get the GD raw data, using output buffering as
 		// GD doesn't work with stream wrappers in all versions of PHP
@@ -65,7 +69,7 @@ class TransparentJPEGConverter {
 		return $pngData;
 	}
 	
-	public convertFromPNG($pngData, $deblockingParam) {
+	public function convertFromPNG($pngData, $deblockingParam) {
 		// create the image and get the GD raw data, using output buffering as
 		// GD doesn't work with stream wrappers in all versions of PHP
 		$image = imagecreatefromstring($pngData);

@@ -40,8 +40,21 @@ class SWFAssetFinder {
 	
 	protected function processBitmapTag($tag) {
 		$image = new SWFImage;
-		$image->tag =& $tag;
+		$image->tag = $tag;
 		$image->swfFile = $this->swfFile;
+		if($tag instanceof SWFDefineBitsJPEG2Tag) {
+			$imagePath = StreamMemory::add($tag->imageData);
+			$imageInfo = getimagesize($imagePath);
+			$image->originalMimeType = $imageInfo['mime'];
+			$width = $imageInfo[0];
+			$height = $imageInfo[1];
+		} else if($tag instanceof SWFDefineBitsLosslessTag) {
+			$width = $tag->width;
+			$height = $tag->height;
+		}
+		$crc32 = crc32($tag->imageData);
+		$image->name = sprintf("image.%04dx%04d.%010u", $width, $height, $crc32);
+		
 		$this->assets->images[] = $image;
 		$this->dictionary[$tag->characterId] = $image;
 	}
@@ -89,7 +102,7 @@ class SWFAssetFinder {
 	
 	protected function processDefineFont4Tag($tag) {
 		$font = new SWFCFFFont;
-		$font->tag =& $tag;
+		$font->tag = $tag;
 		$font->swfFile = $this->swfFile;
 		$font->name = $tag->name;
 		if($tag->cffData) {
@@ -123,7 +136,7 @@ class SWFAssetFinder {
 			$abcTextObjects = $abcFinder->find($tag->abcFile);
 			foreach($abcTextObjects as $abcTextObject) {
 				$textObject = new SWFTextObject;
-				$textObject->tag =& $tag;
+				$textObject->tag = $tag;
 				$textObject->swfFile = $this->swfFile;
 				$textObject->name = $abcTextObject->name;
 				$textObject->tlfObject = $tlfParser->parse($abcTextObject->xml, $abcTextObject->extraInfo);
@@ -179,8 +192,10 @@ class SWFTextObject extends SWFCharacter {
 class SWFImage extends SWFCharacter {
 	public $name;
 	public $changed;
+	public $originalMimeType;
 	
 	private $_data;
+	private $_mimeType;
 	
 	public function __get($name) {
 		if($name == 'data') {
@@ -188,6 +203,12 @@ class SWFImage extends SWFCharacter {
 				$this->_data = $this->getImageData();
 			}
 			return $this->_data;
+		}
+		if($name == 'mimeType') {
+			if(!$this->_mimeType) {
+				$this->_mimeType = $this->getMimeType();
+			}
+			return $this->_mimeType;
 		}
 	}
 	
@@ -198,14 +219,25 @@ class SWFImage extends SWFCharacter {
 	}
 	
 	protected function getImageData() {
-		if($this->tag instanceof SWFDefineBitsJPEG3Tag) {
+		if($this->tag instanceof SWFDefineBitsJPEG3Tag && $this->tag->alphaData && TransparentJPEGConverter::isAvailable()) {
 			$converter = new TransparentJPEGConverter;
 			return $converter->convertToPNG($this->tag);
-		} else if($this->tag instanceof SWFDefineBitsLosslessTag) {
+		} else if($this->tag instanceof SWFDefineBitsLosslessTag && LosslessBitsConverter::isAvailable()) {
 			$converter = new LosslessBitsConverter;
 			return $converter->convertToPNG($this->tag);
-		} 
-		return $this->tag->imageData;
+		} else if($this->tag instanceof SWFDefinesJPEG2Tag) {
+			return $this->tag->imageData;
+		}
+	}
+	
+	protected function getMimeType() {
+		if($this->tag instanceof SWFDefineBitsJPEG3Tag && $this->tag->alphaData && TransparentJPEGConverter::isAvailable()) {
+			return 'image/png';
+		} else if($this->tag instanceof SWFDefineBitsLosslessTag && LosslessBitsConverter::isAvailable()) {
+			return 'image/png';
+		} else if($this->tag instanceof SWFDefinesJPEG2Tag) {
+			return $this->originalMimeType;
+		}
 	}
 }
 

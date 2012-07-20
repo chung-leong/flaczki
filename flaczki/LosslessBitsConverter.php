@@ -2,6 +2,10 @@
 
 class LosslessBitsConverter {
 	
+	public static function isAvailable() {
+		return function_exists('imagecreatefromstring');
+	}
+
 	public function convertToPNG($tag) {
 		$transparent = ($tag instanceof SWFDefineBitsLossless2Tag);
 		$format = $tag->format;

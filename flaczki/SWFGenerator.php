@@ -56,7 +56,7 @@ class SWFGenerator {
 	
 	public function update($forceUpdate) {
 		// turn off error reporting since the output should be Javascript
-		error_reporting(E_ALL);
+		error_reporting(0);
 		
 		// set expiration date
 		$now = time();
