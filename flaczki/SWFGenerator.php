@@ -71,7 +71,7 @@ class SWFGenerator {
 		// see if any file is out-of-date (or missing)
 		if($forceUpdate) {
 			$needUpdate = true;
-			$mustUpdate = false;
+			$mustUpdate = true;
 			$canShowOlderVersion = false;
 		} else {
 			$needUpdate = false;
@@ -205,7 +205,7 @@ class SWFGenerator {
 					$assetUpdater = new SWFAssetUpdater;
 					$fileChanged = $assetUpdater->update($assets);
 					
-					if($fileChanged || !file_exists($swfDestinationFilePath)) {
+					if($fileChanged || $mustUpdate) {
 						// assemble the files
 						$swfTempFilePath = "$swfDestinationFilePath.new";
 						

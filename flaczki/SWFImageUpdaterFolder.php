@@ -20,11 +20,12 @@ class SWFImageUpdaterFolder extends SWFImageUpdater {
 				// get the data
 				$path = "{$this->folderPath}/{$file}";
 				$data = file_get_contents($path);
-				
+
 				foreach($assets->images as $image) {
 					if($image->name == $namePart) {
 						$image->data = $data;
 						$image->changed = true;
+						break;
 					}
 				}
 			}

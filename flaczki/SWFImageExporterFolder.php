@@ -7,7 +7,7 @@ class SWFImageExporterFolder extends SWFImageExporter {
 			$imageData = $image->data;
 			if($imageData) {
 				switch($image->mimeType) {
-					case 'image/jpeg': $extension = '.jpeg'; break;
+					case 'image/jpeg': $extension = '.jpg'; break;
 					case 'image/png': $extension = '.png'; break;
 					case 'image/gif': $extension = '.gif'; break;
 				}

@@ -5,7 +5,7 @@ class SWFAssetFinder {
 	protected $swfFile;
 	protected $assets;
 	protected $dictionary;
-	protected $currentSprite;
+	protected $jpegTables;
 	
 	public function getRequiredTags() {
 		$methodNames = get_class_methods($this);
@@ -42,7 +42,7 @@ class SWFAssetFinder {
 		$image = new SWFImage;
 		$image->tag = $tag;
 		$image->swfFile = $this->swfFile;
-		if($tag instanceof SWFDefineBitsJPEG2Tag) {
+		if($tag instanceof SWFDefineBitsJPEG2Tag || $tag instanceof SWFDefineBitsTag) {
 			$imagePath = StreamMemory::add($tag->imageData);
 			$imageInfo = getimagesize($imagePath);
 			$image->originalMimeType = $imageInfo['mime'];
@@ -52,11 +52,20 @@ class SWFAssetFinder {
 			$width = $tag->width;
 			$height = $tag->height;
 		}
+		$image->jpegTables = ($tag instanceof SWFDefineBitsTag) ? $this->jpegTables : null;
 		$crc32 = crc32($tag->imageData);
 		$image->name = sprintf("image.%04dx%04d.%010u", $width, $height, $crc32);
 		
 		$this->assets->images[] = $image;
 		$this->dictionary[$tag->characterId] = $image;
+	}
+	
+	protected function processJPEGTablesTag($tag) {
+		$this->jpegTables = $tag->jpegData;
+	}
+	
+	protected function processDefineBitsTag($tag) {
+		$this->processBitmapTag($tag);
 	}
 	
 	protected function processDefineBitsJPEG2Tag($tag) {
@@ -193,6 +202,7 @@ class SWFImage extends SWFCharacter {
 	public $name;
 	public $changed;
 	public $originalMimeType;
+	public $jpegTables;
 	
 	private $_data;
 	private $_mimeType;
@@ -227,6 +237,8 @@ class SWFImage extends SWFCharacter {
 			return $converter->convertToPNG($this->tag);
 		} else if($this->tag instanceof SWFDefinesJPEG2Tag) {
 			return $this->tag->imageData;
+		} else if($this->tag instanceof SWFDefineBitsTag) {
+			return $this->tag->jpegTables . $this->tag->imageData;
 		}
 	}
 	
@@ -237,6 +249,8 @@ class SWFImage extends SWFCharacter {
 			return 'image/png';
 		} else if($this->tag instanceof SWFDefinesJPEG2Tag) {
 			return $this->originalMimeType;
+		} else if($this->tag instanceof SWFDefineBitsTag) {
+			return 'image/jpeg';
 		}
 	}
 }

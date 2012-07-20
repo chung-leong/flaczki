@@ -40,17 +40,13 @@ class SWFCSMTextSettingsTag {
 class SWFEndTag {
 }
 
-class SWFDefineBitsTag {
-	public $jpegData;
-}
-
 class SWFDefineBinaryDataTag extends SWFCharacterTag {
 	public $reserved;
 	public $data;
 	public $swfFile;
 }
 
-class SWFDefineBits extends SWFCharacterTag {
+class SWFDefineBitsTag extends SWFCharacterTag {
 	public $imageData;
 }
 
