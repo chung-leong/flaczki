@@ -75,13 +75,15 @@ class FlopBox extends SWFGeneratorDataModule {
 	protected function getMetadata() {
 		$metadata = new FlopBoxFileMetadata;
 		$httpMetadata = stream_get_meta_data($this->input);
-		foreach($httpMetadata['wrapper_data'] as $header) {
-			if(preg_match('/Content-length:\s*(\d+)/i', $header, $m)) {
-				$metadata->size = (int) $m[1];
-			} else if(preg_match('/Etag:\s*(\S+)/i', $header, $m)) {
-				$metadata->eTag = $m[1];
-			} else if(preg_match('/Content-Type:\s*(\S+)/i', $header, $m)) {
-				$metadata->mimeType = $m[1];
+		if(isset($httpMetadata['wrapper_data'])) {
+			foreach($httpMetadata['wrapper_data'] as $header) {
+				if(preg_match('/Content-length:\s*(\d+)/i', $header, $m)) {
+					$metadata->size = (int) $m[1];
+				} else if(preg_match('/Etag:\s*(\S+)/i', $header, $m)) {
+					$metadata->eTag = $m[1];
+				} else if(preg_match('/Content-Type:\s*(\S+)/i', $header, $m)) {
+					$metadata->mimeType = $m[1];
+				}
 			}
 		}
 		return $metadata;

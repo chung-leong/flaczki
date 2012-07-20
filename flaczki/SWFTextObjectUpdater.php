@@ -108,7 +108,7 @@ abstract class SWFTextObjectUpdater {
 					$fontFamilyMap[$fontFamilyName] = $fontFamilyName;
 				} else {
 					// need to look for a suitable substitute
-					$substituteName = null;
+					$substituteFontName = null;
 					$desiredFontPanose = $this->getFontPanose($fontFamilyName);
 					if($desiredFontPanose) {
 						// find a font with panose values nearest to the one desired
@@ -117,10 +117,10 @@ abstract class SWFTextObjectUpdater {
 							// any font that was referenced by the text object originally is available
 							$availableFonts = array_keys($originalFontUsage);	
 							if($this->allowAnyEmbeddedFont) {
-								$availableFonts = array_merge($availableFonts, array_key($embeddedFonts));
+								$availableFonts = array_merge($availableFonts, array_keys($embeddedFonts));
 							}
 							if($this->allowedDeviceFonts) {
-								$availableFonts = array_merge($availableFonts, array_key($allowedDeviceFonts));
+								$availableFonts = array_merge($availableFonts, array_keys($allowedDeviceFonts));
 							}
 							$availableFonts = array_unique($availableFonts);
 						}

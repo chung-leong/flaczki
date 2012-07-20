@@ -177,6 +177,10 @@ class TLFInlineGraphicElement extends TLFFlowElement {
 	public $float;
 	public $width;
 	public $height;
+	public $paddingLeft;
+	public $paddingTop;
+	public $paddingRight;
+	public $paddingBottom;
 }
 
 class TLFHyperlink {

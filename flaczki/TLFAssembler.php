@@ -35,6 +35,10 @@ class TLFAssembler {
 							'float' => $graphic->float,
 							'width' => $graphic->width,
 							'height' => $graphic->height,
+							'paddingLeft' => $graphic->paddingLeft,
+							'paddingRight' => $graphic->paddingRight,
+							'paddingTop' => $graphic->paddingTop,
+							'paddingBottom' => $graphic->paddingBottom,
 						);
 						$this->writeStartTag('img', $attributes, true);
 					} else {

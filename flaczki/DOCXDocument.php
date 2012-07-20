@@ -1,6 +1,7 @@
 <?php
 
 class DOCXDocument {
+	public $documentProperties;
 	public $defaultParagraphProperties;
 	public $defaultTextProperties;
 	public $paragraphs = array();
@@ -32,6 +33,11 @@ class DOCXDrawing {
 class DOCXHyperlink {
 	public $href;
 	public $tgtFrame;
+}
+
+class DOCXDocumentProperties {
+	public $pgSzW;
+	public $pgSzH;
 }
 
 class DOCXParagraphProperties {
@@ -97,6 +103,10 @@ class DOCXDrawingProperties {
 	public $srcRectT;
 	public $srcRectR;
 	public $srcRectB;
+	public $positionHRelativeFrom;
+	public $positionHPosOffset;
+	public $positionVRelativeFrom;
+	public $positionVPosOffset;
 }
 
 class DOCXTabStop {

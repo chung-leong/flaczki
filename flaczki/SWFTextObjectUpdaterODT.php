@@ -49,18 +49,19 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			$odtParagraphStyle = $section->paragraphStyles[$index];
 			$this->translateProperties($tlfParagraph->style, $odtParagraphStyle);
 			
+			$tlfHyperlink = null;
+			$odtHyperlink = null;
 			foreach($odtParagraph->spans as $odtSpan) {
 				if($odtSpan instanceof ODTDrawing) {
 					$tlfGraphic = new TLFInlineGraphicElement;
 					$this->translateImageProperties($tlfGraphic, $odtSpan);
-					$tlfParagraph->spans[] = $tlfGraphic;
-				}
-			}
-			
-			$tlfHyperlink = null;
-			$odtHyperlink = null;
-			foreach($odtParagraph->spans as $odtSpan) {
-				if($odtSpan instanceof ODTSpan) {
+					if($tlfGraphic->float) {
+						// insert at beginning
+						array_unshift($tlfParagraph->spans, $tlfGraphic);
+					} else {
+						$tlfParagraph->spans[] = $tlfGraphic;
+					}
+				} else {
 					$tlfSpan = new TLFSpan;
 					$odtSpanStyle = $this->getApplicableStyle($odtSpan, $odtParagraphStyle);
 					$this->translateProperties($tlfSpan->style, $odtSpanStyle);
@@ -267,9 +268,9 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 			
 			if($textProperties->letterSpacing) {
 				if($tlfStyle->direction == 'rtl') {
-					$tlfStyle->trackingLeft = $this->parseLength($value, -1000, 1000);
+					$tlfStyle->trackingLeft = $this->parseLength($textProperties->letterSpacing, -1000, 1000);
 				} else {
-					$tlfStyle->trackingRight = $this->parseLength($value, -1000, 1000);
+					$tlfStyle->trackingRight = $this->parseLength($textProperties->letterSpacing, -1000, 1000);
 				}
 			}
 			
@@ -500,11 +501,24 @@ class SWFTextObjectUpdaterODT extends SWFTextObjectUpdater {
 		$tlfGraphic->width = $this->parseLength($odtDrawing->drawingProperties->width, 0, 4096);
 		$tlfGraphic->height = $this->parseLength($odtDrawing->drawingProperties->height, 0, 4096);
 		
-		// see which edge the image is closer to
-		$pageWidth = $this->parseLength($this->document->pageWidth, 0, 4096);
-		$left = $this->parseLength($odtDrawing->drawingProperties->x, 0, 4096);
-		$right = $pageWidth - ($left + $tlfGraphic->width);
-		$tlfGraphic->float = ($left < $right) ? 'left' : 'right';
+		// see if image should be position inline or not
+		if($odtDrawing->drawingProperties->anchorType != 'as-char') {
+			// see which edge the image is closer to
+			$pageWidth = $this->parseLength($this->document->documentProperties->pageWidth, 0, 4096);
+			$left = $this->parseLength($odtDrawing->drawingProperties->x, 0, 4096);
+			$right = $pageWidth - ($left + $tlfGraphic->width);
+			$tlfGraphic->float = ($left < $right) ? 'left' : 'right';
+		}
+		
+		// add padding
+		if($tlfGraphic->float != 'left') {
+			$tlfGraphic->paddingLeft = 8;
+		}
+		if($tlfGraphic->float != 'right') {
+			$tlfGraphic->paddingRight = 8;
+		}
+		$tlfGraphic->paddingTop = 0;
+		$tlfGraphic->paddingBottom = 0;
 	}
 }
 

@@ -23,6 +23,7 @@ class ODTParser {
 		}
 		
 		$document = $this->document = new ODTDocument;
+		$document->documentProperties = new ODTDocumentProperties;
 		$zipPath = StreamZipArchive::open($input);
 		$dir = opendir($zipPath);
 		$processed = array('content.xml' => false, 'styles.xml' => false );
@@ -160,7 +161,7 @@ class ODTParser {
 				}
 				break;
 			case 'page-layout-properties':
-				$this->copyProperties($this->document, $attributes);
+				$this->copyProperties($this->document->documentProperties, $attributes);
 				break;
 		}
 	}

@@ -1,14 +1,13 @@
 <?php
 
 class ODTDocument {
+	public $documentProperties;
 	public $automaticStyles = array();
 	public $commonStyles = array();
 	public $defaultStyles = array();
 	public $paragraphs = array();
 	public $fonts = array();
 	public $embeddedFiles = array();
-	public $pageWidth;
-	public $pageHeight;
 }
 
 class ODTParagraph {
@@ -49,6 +48,11 @@ class ODTStyle {
 	
 	public $textProperties;
 	public $paragraphProperties;
+}
+
+class ODTDocumentProperties {
+	public $pageWidth;
+	public $pageHeight;
 }
 
 class ODTParagraphProperties {

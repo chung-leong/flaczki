@@ -16,7 +16,9 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		foreach($this->document->paragraphs as $paragraph) {
 			$this->resolveParagraphProperties($paragraph->paragraphProperties);
 			foreach($paragraph->spans as $span) {
-				$this->resolveTextProperties($span->textProperties);
+				if($span instanceof DOCXSpan) {
+					$this->resolveTextProperties($span->textProperties);
+				}
 			}
 		}
 		
@@ -58,19 +60,14 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 			$docxHyperlink = null;
 			foreach($docxParagraph->spans as $docxSpan) {
 				if($docxSpan instanceof DOCXDrawing) {
-					$docxDrawing = $docxSpan;
-					$file = $this->document->embeddedFiles[$docxDrawing->embed];
-					$imageClass = new SWFImageClassInfo;
-					$imageClass->name = 'flaczki.image1';
-					$imageClass->imageData = $file->data;
-					$this->currentTextObject->referencedImageClasses['image1'] = $imageClass;
-					
 					$tlfGraphic = new TLFInlineGraphicElement;
-					$tlfGraphic->customSource = 'image1';
-					$tlfGraphic->float = 'left';
-					$tlfGraphic->width = '50%';
-					$tlfGraphic->height = '50%';
-					$tlfParagraph->spans[] = $tlfGraphic;
+					$this->translateImageProperties($tlfGraphic, $docxSpan);
+					if($tlfGraphic->float) {
+						// insert at beginning
+						array_unshift($tlfParagraph->spans, $tlfGraphic);
+					} else {
+						$tlfParagraph->spans[] = $tlfGraphic;
+					}
 				} else {
 					$tlfSpan = new TLFSpan;
 					$this->translateProperties($tlfSpan->style, null, $docxSpan->textProperties);
@@ -300,6 +297,17 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		}
 		return $value;
 	}
+	
+	protected function convertFromEMU($s, $min, $max) {		
+		$value = (float) $s / 9525;
+		if($value < $min) {
+			$value = $min;
+		}
+		if($value > $max) {
+			$value = $max;
+		}
+		return $value;
+	}
 
 	protected function resolveTextProperties(&$textProperties) {
 		if(!$textProperties) {
@@ -326,14 +334,8 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 		// copy properties of a referenced style 
 		if($paragraphProperties->pStyleVal) {
 			$style = $this->document->styles[$paragraphProperties->pStyleVal];
-			$this->copyMissingProperties($paragraphProperties, $style->paragraphProperties);
-			
-			// copy text properties as well
-			if($style->textProperties) {
-				if(!$paragraphProperties->textProperties) {
-					$paragraphProperties->textProperties = new DOCXTextProperties;
-				}
-				$this->copyMissingProperties($paragraphProperties->textProperties, $style->textProperties);
+			if($style->paragraphProperties) {
+				$this->copyMissingProperties($paragraphProperties, $style->paragraphProperties);
 			}
 		}
 			
@@ -344,6 +346,12 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 	}
 	
 	protected function copyMissingProperties($object1, $object2) {
+		if(!$object2) {
+			$backtrace = debug_backtrace();
+			foreach($backtrace as $entry) {
+				echo $entry['function'] . "<br>";
+			}
+		}
 		foreach($object1 as $name => &$value1) {
 			if($value1 === null) {
 				$value2 = $object2->$name;
@@ -357,9 +365,9 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 	protected function getFontPanose($fontFamilyName) {
 		// use the information in the document if available
 		foreach($this->document->fonts as $font) {
-			if($font->fontFamily == $fontFamilyName) {
-				if($font->panose1) {
-					$chunks = str_split($font->panose1, 2);
+			if($font->name == $fontFamilyName) {
+				if($font->panose1Val) {
+					$chunks = str_split($font->panose1Val, 2);
 					if(count($chunks) == 10) {
 						$panose = array();
 						for($i = 0; $i < 10; $i++) {
@@ -378,8 +386,35 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 				break;
 			}
 		}
-		return parent::getFontPanose($fontFamily);
+		return parent::getFontPanose($fontFamilyName);
 	}	
+	
+	protected function translateImageProperties($tlfGraphic, $docxDrawing) {
+		$embeddedFile = $this->document->embeddedFiles[$docxDrawing->embed];
+		$className = $this->insertImage($embeddedFile->data);
+		$tlfGraphic->className = $className;
+		$tlfGraphic->width = round($this->convertFromEMU($docxDrawing->drawingProperties->extentCx, 0, 4096));
+		$tlfGraphic->height = round($this->convertFromEMU($docxDrawing->drawingProperties->extentCy, 0, 4096));
+		
+		// see if image should be position inline or not
+		if($docxDrawing->drawingProperties->positionHRelativeFrom) {
+			$pageWidth = $this->convertFromTwip($this->document->documentProperties->pgSzW, 0, 4096);
+			$left = $this->convertFromEMU($docxDrawing->drawingProperties->positionHPosOffset, 0, 4096);
+			// see which edge the image is closer to
+			$right = $pageWidth - ($left + $tlfGraphic->width);
+			$tlfGraphic->float = ($left < $right) ? 'left' : 'right';
+		}
+		
+		// add padding
+		if($tlfGraphic->float != 'left') {
+			$tlfGraphic->paddingLeft = 8;
+		}
+		if($tlfGraphic->float != 'right') {
+			$tlfGraphic->paddingRight = 8;
+		}
+		$tlfGraphic->paddingTop = 0;
+		$tlfGraphic->paddingBottom = 0;
+	}
 }
 
 class SWFTextObjectUpdaterDOCXSection {

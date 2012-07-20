@@ -10,14 +10,16 @@ class DOCXParser {
 	protected $hyperlinks;
 	protected $drawing;
 	protected $style;
-	protected $font;
+	protected $font;	
 	protected $textProperties;
 	protected $paragraphProperties;
 	protected $drawingProperties;
+	protected $documentProperties;
 	protected $fontList;
 	protected $colorScheme;
 	protected $fontScheme;
 	protected $color;
+	protected $offsetRef;
 
 	protected $currentDirectory;
 	protected $currentFileName;
@@ -200,6 +202,19 @@ class DOCXParser {
 				$this->drawing->drawingProperties = $this->drawingProperties;				
 				$this->copyProperties($this->drawing, $attributes);
 				break;
+			case 'positionH':				
+				$this->offsetRef =& $this->drawingProperties->positionHPosOffset;
+				$this->offsetRef = '';
+				$this->copyProperties2($this->drawingProperties, $name, $attributes);
+				break;
+			case 'positionV':				
+				$this->offsetRef =& $this->drawingProperties->positionVPosOffset;
+				$this->offsetRef = '';
+				$this->copyProperties2($this->drawingProperties, $name, $attributes);
+				break;
+			case 'sectPr':
+				$this->documentProperties = new DOCXDocumentProperties;
+				break;
 			default:
 				if($this->textProperties) {
 					$this->copyProperties2($this->textProperties, $name, $attributes);
@@ -209,6 +224,8 @@ class DOCXParser {
 					$this->copyProperties2($this->style, $name, $attributes);
 				} else if($this->drawingProperties) {
 					$this->copyProperties2($this->drawingProperties, $name, $attributes);
+				} else if($this->documentProperties) {
+					$this->copyProperties2($this->documentProperties, $name, $attributes);
 				}
 		}
 	}
@@ -276,11 +293,23 @@ class DOCXParser {
 				$this->drawing = null;
 				$this->drawingProperties = null;
 				break;
+			case 'positionH':				
+				unset($this->offsetRef);
+				break;
+			case 'positionV':				
+				unset($this->offsetRef);
+				break;
+			case 'sectPr':
+				$this->document->documentProperties = $this->documentProperties;
+				$this->documentProperties = null;
+				break;
 		}
 	}
 
 	public function processDocumentCharacterData($parser, $text) {
-		if($this->span) {
+		if(isset($this->offsetRef)) {
+			$this->offsetRef = $text;
+		} else if($this->span) {
 			$this->span->text .= $text;
 		}
 	}
