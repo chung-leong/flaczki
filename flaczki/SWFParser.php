@@ -383,7 +383,6 @@ class SWFParser {
 			}
 		}
 		if($tag->flags & SWFDefineFont2Tag::HasLayout || $bytesAvailable) {
-			echo "Has layout<br>";
 			$tag->ascent = $this->readSI16($bytesAvailable);
 			$tag->descent = $this->readSI16($bytesAvailable);
 			$tag->leading = $this->readSI16($bytesAvailable);
@@ -1636,7 +1635,7 @@ class SWFParser {
 	
 	protected function readSB($count, &$bytesAvailable) {
 		$value = $this->readUB($count, $bytesAvailable);
-		if($value & (1 << $count)) {
+		if($value & (1 << $count - 1)) {
 			// negative
 			$value |= -1 << $count;
 		}
