@@ -609,7 +609,7 @@ class SWFAssembler {
 	}
 	
 	protected function writeMetaDataTag($tag) {
-		$this->writeBytes($tag->metadata);
+		$this->writeString($tag->metadata);
 	}
 	
 	protected function writePlaceObjectTag($tag) {
@@ -1448,7 +1448,8 @@ class SWFAssembler {
 	
 	protected function writeString($value) {
 		$this->alignToByte();
-		$this->writeBytes("$value\0");
+		$this->writeBytes($value);
+		$this->writeBytes("\0");
 	}
 	
 	protected function writeSB($value, $numBits) {

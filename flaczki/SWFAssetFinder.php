@@ -255,9 +255,6 @@ class SWFImage extends SWFCharacter {
 	}
 }
 
-class SWFSprite extends SWFCharacter {
-}
-
 class SWFFontFamily  {
 	public $name;
 	public $normal;

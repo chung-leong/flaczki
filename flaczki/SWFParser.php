@@ -507,7 +507,7 @@ class SWFParser {
 	
 	protected function readDefineSceneAndFrameLabelDataTag(&$bytesAvailable) {
 		$tag = new SWFDefineSceneAndFrameLabelDataTag;
-		$tag->names = $this->readEncodedStringTable(&$bytesAvailable);
+		$tag->sceneNames = $this->readEncodedStringTable(&$bytesAvailable);
 		$tag->frameLabels = $this->readEncodedStringTable(&$bytesAvailable);
 		return $tag;
 	}
@@ -691,7 +691,8 @@ class SWFParser {
 	
 	protected function readMetaDataTag(&$bytesAvailable) {
 		$tag = new SWFMetadataTag;
-		$tag->metadata = $this->readBytes($bytesAvailable, $bytesAvailable);
+		$tag->metadata = $this->readBytes($bytesAvailable - 1, $bytesAvailable);
+		$this->readbytes(1, $bytesAvailable);
 		return $tag;
 	}
 	

@@ -1,6 +1,6 @@
 <?php
 
-class SWFImageExporterFolder extends SWFImageExporter {
+class SWFImageExporterFolder {
 
 	public function export($folderPath, $assets) {
 		foreach($assets->images as $image) {
