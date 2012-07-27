@@ -53,11 +53,13 @@ class FLAAssembler {
 			foreach($node as $name => $value) {
 				if($value !== null) {
 					if(is_array($value)) {
-						fwrite($stream, "<$name>\n");
-						foreach($value as $child) {
-							$this->writeXMLNode($stream, $child);
+						if(count($value)) {
+							fwrite($stream, "<$name>\n");
+							foreach($value as $child) {
+								$this->writeXMLNode($stream, $child);
+							}
+							fwrite($stream, "</$name>\n");
 						}
-						fwrite($stream, "</$name>\n");
 					} else if(is_object($value)) {
 						$this->writeXMLNode($stream, $value);
 					}

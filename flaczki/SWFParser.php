@@ -1416,7 +1416,7 @@ class SWFParser {
 		$gradient->spreadMode = $this->readUB(2, $bytesAvailable);
 		$gradient->interpolationMode = $this->readUB(2, $bytesAvailable);
 		$gradient->controlPoints = $this->readGradientControlPoints($version, $bytesAvailable);
-		$gradient->focalPoint = $this->readUI16($bytesAvailable);
+		$gradient->focalPoint = $this->readSI16($bytesAvailable);
 		return $gradient;
 	}
 	
