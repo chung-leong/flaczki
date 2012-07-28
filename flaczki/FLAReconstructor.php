@@ -178,7 +178,7 @@ class FLAReconstructor {
 			$item->externalFileSize = strlen($object->data);
 			$item->originalCompressionType = ($object->mimeType == 'image/jpeg') ? 'losssly' : 'lossless';
 			$item->quality = 50;
-			$item->href = "./LIBRARY/{$object->path}";
+			$item->href = $object->path;
 			$item->frameRight = $object->width * 20;
 			$item->frameBottom = $object->height * 20;
 		}
@@ -592,7 +592,7 @@ class FLAReconstructor {
 			$bitmap = $this->getCharacter($bitmapId);
 			$fill = new FLABitmapFill;
 			$fill->matrix = $this->convertMatrix($matrixRecord);
-			$fill->bitmapPath = $bitmap->path;
+			$fill->bitmapPath = $bitmap->name;
 			$fill->bitmapIsClipped = ($type == 0x41 || $type == 0x43) ? 'true' : 'false';
 			return $fill;
 		}
