@@ -960,35 +960,35 @@ class SWFParser {
 		if($id == 0) {
 			$filter = new SWFDropShadowFilter;
 			$filter->shadowColor = $this->readRGBA($bytesAvailable);
-			$filter->blurX = $this->readUI32($bytesAvailable);
-			$filter->blurY = $this->readUI32($bytesAvailable);
-			$filter->angle = $this->readUI32($bytesAvailable);
-			$filter->distance = $this->readUI32($bytesAvailable);
-			$filter->strength = $this->readUI16($bytesAvailable);
+			$filter->blurX = $this->readSI32($bytesAvailable);
+			$filter->blurY = $this->readSI32($bytesAvailable);
+			$filter->angle = $this->readSI32($bytesAvailable);
+			$filter->distance = $this->readSI32($bytesAvailable);
+			$filter->strength = $this->readSI16($bytesAvailable);
 			$filter->flags = $this->readUB(3, $bytesAvailable);
 			$filter->passes = $this->readUB(5, $bytesAvailable);
 		} else if($id == 1) {
 			$filter = new SWFBlurFilter;
-			$filter->blurX = $this->readUI32($bytesAvailable);
-			$filter->blurY = $this->readUI32($bytesAvailable);
+			$filter->blurX = $this->readSI32($bytesAvailable);
+			$filter->blurY = $this->readSI32($bytesAvailable);
 			$filter->passes = $this->readUB(5, $bytesAvailable);
 		} else if($id == 2) {
 			$filter = new SWFGlowFilter;
 			$filter->color = $this->readRGBA($bytesAvailable);
-			$filter->blurX = $this->readUI32($bytesAvailable);
-			$filter->blurY = $this->readUI32($bytesAvailable);
-			$filter->strength = $this->readUI16($bytesAvailable);
+			$filter->blurX = $this->readSI32($bytesAvailable);
+			$filter->blurY = $this->readSI32($bytesAvailable);
+			$filter->strength = $this->readSI16($bytesAvailable);
 			$filter->flags = $this->readUB(3, $bytesAvailable);
 			$filter->passes = $this->readUB(5, $bytesAvailable);
 		} else if($id == 3) {
 			$filter = new SWFBevelFilter;
 			$filter->shadowColor = $this->readRGBA($bytesAvailable);
 			$filter->highlightColor = $this->readRGBA($bytesAvailable);
-			$filter->blurX = $this->readUI32($bytesAvailable);
-			$filter->blurY = $this->readUI32($bytesAvailable);
-			$filter->angle = $this->readUI32($bytesAvailable);
-			$filter->distance = $this->readUI32($bytesAvailable);
-			$filter->strength = $this->readUI16($bytesAvailable);
+			$filter->blurX = $this->readSI32($bytesAvailable);
+			$filter->blurY = $this->readSI32($bytesAvailable);
+			$filter->angle = $this->readSI32($bytesAvailable);
+			$filter->distance = $this->readSI32($bytesAvailable);
+			$filter->strength = $this->readSI16($bytesAvailable);
 			$filter->flags = $this->readUB(4, $bytesAvailable);
 			$filter->passes = $this->readUB(4, $bytesAvailable);
 		} else if($id == 4) {
@@ -1000,11 +1000,11 @@ class SWFParser {
 			for($i = 0; $i < $colorCount; $i++) {
 				$filter->ratios[] = $this->readUI8($bytesAvailable);
 			}
-			$filter->blurX = $this->readUI32($bytesAvailable);
-			$filter->blurY = $this->readUI32($bytesAvailable);
-			$filter->angle = $this->readUI32($bytesAvailable);
-			$filter->distance = $this->readUI32($bytesAvailable);
-			$filter->strength = $this->readUI16($bytesAvailable);
+			$filter->blurX = $this->readSI32($bytesAvailable);
+			$filter->blurY = $this->readSI32($bytesAvailable);
+			$filter->angle = $this->readSI32($bytesAvailable);
+			$filter->distance = $this->readSI32($bytesAvailable);
+			$filter->strength = $this->readSI16($bytesAvailable);
 			$filter->flags = $this->readUB(4, $bytesAvailable);
 			$filter->passes = $this->readUB(4, $bytesAvailable);
 		} else if($id == 5) {
@@ -1035,11 +1035,11 @@ class SWFParser {
 			for($i = 0; $i < $colorCount; $i++) {
 				$filter->ratios[] = $this->readUI8($bytesAvailable);
 			}
-			$filter->blurX = $this->readUI32($bytesAvailable);
-			$filter->blurY = $this->readUI32($bytesAvailable);
-			$filter->angle = $this->readUI32($bytesAvailable);
-			$filter->distance = $this->readUI32($bytesAvailable);
-			$filter->strength = $this->readUI16($bytesAvailable);
+			$filter->blurX = $this->readSI32($bytesAvailable);
+			$filter->blurY = $this->readSI32($bytesAvailable);
+			$filter->angle = $this->readSI32($bytesAvailable);
+			$filter->distance = $this->readSI32($bytesAvailable);
+			$filter->strength = $this->readSI16($bytesAvailable);
 			$filter->flags = $this->readUB(4, $bytesAvailable);
 			$filter->passes = $this->readUB(4, $bytesAvailable);
 		}
@@ -1590,6 +1590,14 @@ class SWFParser {
 			}
 		} while($byte & 0x80);
 		return $result;
+	}
+	
+	protected function readSI32(&$bytesAvailable) {
+		$value = $this->readUI32($bytesAvailable);
+		if($value & 0x80000000) {
+			$value |= -1 << 32;
+		}
+		return $value;
 	}
 	
 	protected function readFloat(&$bytesAvailable) {

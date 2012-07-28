@@ -296,7 +296,7 @@ class FLAReconstructor {
 		if($tag->colorTransform !== null) {
 			$instance->color = $this->convertColorTransform($tag->colorTransform);
 		}
-		if($instance instanceof processPlaceObject3Tag) {			
+		if($tag instanceof SWFPlaceObject3Tag) {			
 			if($tag->blendMode !== null) {
 				static $blendModes = array('normal', 'normal', 'layer', 'multiply', 'screen', 'lighten', 'darken', 'difference', 'add', 'subtract', 'invert', 'alpha', 'erase', 'overlay', 'hardlight');
 				$instance->blendMode = $blendModes[$instance->blendMode];
@@ -494,7 +494,117 @@ class FLAReconstructor {
 	}
 	
 	protected function convertFilters($records) {
-		
+		$list = array();
+		foreach($records as $record) {
+			print_r($record);
+			if($record instanceof SWFDropShadowFilter) {
+				$filter = new FLADropShadowFilter;
+				$filter->color = $this->convertRGB($record->shadowColor);
+				$filter->blurX = $record->blurX / 65536.0;
+				$filter->blurY = $record->blurY / 65536.0;
+				$filter->angle = $record->angle / 65536.0 * 57.2957795;
+				$filter->distance = $record->distance / 65536.0;
+				$filter->strength = ($record->strength != 256) ? $record->strength / 256.0 : null;
+				if(!($record->flags & 0x01)) {
+					$filter->hideObject = 'true';
+				}
+				if($record->flags & 0x02) {
+					$filter->knockout = 'true';
+				}
+				if($record->flags & 0x04) {
+					$filter->inner = 'true';
+				}
+				$filter->quality = $record->passes;
+			} else if($record instanceof SWFBlurFilter) {
+				$filter = new FLABlurFilter;
+				$filter->blurX = $record->blurX / 65536.0;
+				$filter->blurY = $record->blurY / 65536.0;
+				$filter->quality = $record->passes;
+			} else if($record instanceof SWFGlowFilter) {
+				$filter = new FLAGlowFilter;
+				$filter->blurX = $record->blurX / 65536.0;
+				$filter->blurY = $record->blurY / 65536.0;
+				$filter->color = $this->convertRGB($record->color);
+				$filter->strength = ($record->strength != 256) ? $record->strength / 256.0 : null;
+				if($record->flags & 0x02) {
+					$filter->knockout = 'true';
+				}
+				if($record->flags & 0x04) {
+					$filter->inner = 'true';
+				}
+				$filter->quality = $record->passes;
+			} else if($record instanceof SWFBevelFilter) {
+				$filter = new FLABevelFilter;
+				$filter->shadowColor = $this->convertRGB($record->shadowColor);
+				$filter->highlightColor = $this->convertRGB($record->highlightColor);
+				$filter->blurX = $record->blurX / 65536.0;
+				$filter->blurY = $record->blurY / 65536.0;
+				$filter->angle = $record->angle / 65536.0 * 57.2957795;
+				$filter->distance = $record->distance / 65536.0;
+				$filter->strength = ($record->strength != 256) ? $record->strength / 256.0 : null;
+				if($record->flags & 0x04) {
+					$filter->knockout = 'true';
+				}
+				switch($record->flags & ~0x04) {
+					case 2: $filter->type = 'outer'; break;
+					case 3: $filter->type = 'full'; break;
+				}
+				$filter->quality = $record->passes;
+			} else if($record instanceof SWFGradientGlowFilter) {
+				$filter = new FLAGradientGlowFilter;
+				foreach($record->colors as $index => $color) {
+					$ratio = $record->ratios[$index];
+					$entry = new FLAGradientEntry;
+					$entry->color = $this->convertRGB($color);
+					$entry->alpha = $this->convertAlpha($color);
+					$entry->ratio = $ratio / 255.0;
+					$name = "entry$index";
+					$filter->$name = $entry;
+				}
+				$filter->blurX = $record->blurX / 65536.0;
+				$filter->blurY = $record->blurY / 65536.0;
+				$filter->angle = $record->angle / 65536.0 * 57.2957795;
+				$filter->distance = $record->distance / 65536.0;
+				$filter->strength = ($record->strength != 256) ? $record->strength / 256.0 : null;
+				if($record->flags & 0x04) {
+					$filter->knockout = 'true';
+				}
+				switch($record->flags & ~0x04) {
+					case 2: $filter->type = 'outer'; break;
+					case 3: $filter->type = 'full'; break;
+				}
+				$filter->quality = $record->passes;
+			} else if($record instanceof SWFConvolutionFilter) {
+			} else if($record instanceof SWFColorMatrixFilter) {
+			} else if($record instanceof SWFGradientBevelFilter) {
+				$filter = new FLAGradientBevelFilter;
+				foreach($record->colors as $index => $color) {
+					$ratio = $record->ratios[$index];
+					$entry = new FLAGradientEntry;
+					$entry->color = $this->convertRGB($color);
+					$entry->alpha = $this->convertAlpha($color);
+					$entry->ratio = $ratio / 255.0;
+					$name = "entry$index";
+					$filter->$name = $entry;
+				}
+				$filter->blurX = $record->blurX / 65536.0;
+				$filter->blurY = $record->blurY / 65536.0;
+				$filter->angle = $record->angle / 65536.0 * 57.2957795;
+				$filter->distance = $record->distance / 65536.0;
+				$filter->strength = ($record->strength != 256) ? $record->strength / 256.0 : null;
+				if($record->flags & 0x04) {
+					$filter->knockout = 'true';
+				}
+				switch($record->flags & ~0x04) {
+					case 2: $filter->type = 'outer'; break;
+					case 3: $filter->type = 'full'; break;
+				}
+				$filter->quality = $record->passes;
+			}
+			print_r($filter);
+			$list[] = $filter;
+		}
+		return $list;
 	}
 				
 	protected function convertFills($records) {
@@ -583,6 +693,7 @@ class FLAReconstructor {
 	protected function convertGradientControlPoint($record) {
 		$entry = new FLAGradientEntry;
 		$entry->color = $this->convertRGB($record->color);
+		$entry->alpha = $this->convertAlpha($record->color);
 		$entry->ratio = $record->ratio / 255.0;
 		return $entry;
 	}
@@ -601,6 +712,12 @@ class FLAReconstructor {
 	protected function convertRGB($record) {
 		if($record->red || $record->green || $record->blue) {
 			return sprintf("#%02X%02X%02X", $record->red, $record->green, $record->blue);
+		}
+	}
+	
+	protected function convertAlpha($record) {
+		if($record->alpha != 255) {
+			return $record->alpha / 255.0;
 		}
 	}
 	
