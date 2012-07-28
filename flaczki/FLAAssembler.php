@@ -4,7 +4,7 @@ class FLAAssembler {
 
 	protected $folderPath;
 	
-	public function assemble($output, $flaFile) {
+	public function assemble($output, $movieName, $flaFile) {
 		if(gettype($output) == 'string') {
 			// output to folder
 			$this->folderPath = $output;
@@ -15,13 +15,58 @@ class FLAAssembler {
 			throw new Exception("Invalid output");
 		}
 		
-		$this->writeXMLFile("php://output", $flaFile->document);
+		
+		
+		$this->writeXMLFile("{$this->folderPath}/DOMDocument.xml", $flaFile->document);
+		if($flaFile->metadata) {
+			$this->writeFile("{$this->folderPath}/META-INF/metadata.xml", $flaFile->metadata);
+		}
+		$this->writeFile("{$this->folderPath}/{$movieName}.xfl", "PROXY-CS5");
+		
+		foreach($flaFile->library as $name => $item) {
+			if($item instanceof FLABitmap) {
+				$this->writeFile("{$this->folderPath}/LIBRARY/{$item->path}", $item->data);
+			} else if($item instanceof FLADOMSymbolItem) {
+				$this->writeXMLFile("{$this->folderPath}/LIBRARY/{$item->name}.xml", $item);
+			}
+		}		
+	}
+	
+	protected function createFolder($path) {
+		if($this->createParentFolder($path)) {
+			return mkdir($path);
+		} else {
+			return false;
+		}
+	}
+	
+	protected function createParentFolder($path) {
+		$parentPath = dirname($path);
+		if(!file_exists($parentPath)) {
+			if(!preg_match('/^\w+:$/', $parentPath)) {
+				return $this->createFolder($parentPath);
+			} else {
+				return false;
+			}
+		} else {
+			return true;
+		}
 	}
 	
 	protected function writeXMLFile($path, $rootNode) {
-		$stream = fopen($path, "wb");
-		$this->writeXMLNode($stream, $rootNode, true);
-		fclose($stream);
+		if($this->createParentFolder($path)) {
+			$stream = fopen($path, "wb");
+			$this->writeXMLNode($stream, $rootNode, true);
+			fclose($stream);
+		}
+	}
+	
+	protected function writeFile($path, $data) {
+		if($this->createParentFolder($path)) {
+			$stream = fopen($path, "wb");
+			fwrite($stream, $data);
+			fclose($stream);
+		}
 	}
 	
 	protected function writeXMLNode($stream, $node, $addNS = false) {

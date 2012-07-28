@@ -15,6 +15,7 @@ class FLAReconstructor {
 	protected $symbols;
 	protected $media;
 	protected $library;
+	protected $metadata;
 	
 	public function getRequiredTags() {
 		$methodNames = get_class_methods($this);
@@ -36,6 +37,8 @@ class FLAReconstructor {
 		
 		$flaFile = new FLAFile;
 		$flaFile->document = new FLADOMDocument;
+		$flaFile->document->width = ($swfFile->frameSize->right - $swfFile->frameSize->left) / 20;
+		$flaFile->document->height = ($swfFile->frameSize->bottom - $swfFile->frameSize->top) / 20;
 		$flaFile->document->currentTimeline = 1;
 		$flaFile->document->xflVersion = 2.1;
 		$flaFile->document->creatorInfo = "Adobe Flash Professional CS5.5";
@@ -53,6 +56,8 @@ class FLAReconstructor {
 		$flaFile->document->symbols = $this->symbols;
 		
 		$flaFile->library = $this->library;
+		$flaFile->metadata = $this->metadata;
+
 		return $flaFile;
 	}
 	
@@ -97,11 +102,6 @@ class FLAReconstructor {
 		$this->sceneNames = $previousSceneNames;
 		return $timelines;
 	}
-	
-	protected function createTimeline($tags) {
-		$timelines = $this->createTimelines($tags);
-		return $timelines[0];
-	}	
 	
 	protected function getNextItemID() {
 		return sprintf('%08x-%08x', ++$this->lastItemID, $this->fileID);
@@ -158,7 +158,7 @@ class FLAReconstructor {
 		$this->library[$object->name] = $object;
 		
 		$include = new FLAInclude;
-		$include->href = "LIBRARY/{$object->name}.xml";
+		$include->href = "{$object->name}.xml";
 		$include->loadImmediate = "false";
 		$include->itemID = $object->itemID;
 		$include->lastModified = $object->lastModified;
@@ -178,7 +178,7 @@ class FLAReconstructor {
 			$item->externalFileSize = strlen($object->data);
 			$item->originalCompressionType = ($object->mimeType == 'image/jpeg') ? 'losssly' : 'lossless';
 			$item->quality = 50;
-			$item->href = "LIBRARY/{$object->path}";
+			$item->href = "./LIBRARY/{$object->path}";
 			$item->frameRight = $object->width * 20;
 			$item->frameBottom = $object->height * 20;
 		}
@@ -190,7 +190,8 @@ class FLAReconstructor {
 		$movieClip->lastModified = $this->lastModified;
 		$movieClip->itemID = $this->getNextItemID();
 		$movieClip->name = $this->getNextLibraryName('Symbol');
-		$movieClip->timeline = $this->createTimeline($tags);
+		$movieClip->timeline = $this->createTimelines($tags);
+		$movieClip->timeline[0]->name = $movieClip->name;
 		$this->addCharacter($characterId, $movieClip);
 		$this->addSymbol($movieClip);
 	}
@@ -218,7 +219,7 @@ class FLAReconstructor {
 		$graphic = new FLADOMSymbolItem;
 		$graphic->symbolType = "graphic";
 		$graphic->itemID = $this->getNextItemID();
-		$graphic->name = $this->getNextLibraryName('Symbol');
+		$graphic->name = $timeline->name = $this->getNextLibraryName('Symbol');
 		$graphic->lastModified = $this->lastModified;
 		$graphic->timeline = array($timeline);
 		
@@ -257,6 +258,12 @@ class FLAReconstructor {
 				$this->$methodName($tag);
 			}
 		}
+	}
+	
+	protected function processMetadataTag($tag) {
+		$this->metadata = '<?xpacket begin="?" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.2-c003 61.141987, 2011/02/22-12:03:51 ">'
+				. $tag->metadata
+				. '</x:xmpmeta><?xpacket end="w"?>';
 	}
 		
 	protected function processDefineBinaryDataTag($tag) {
@@ -492,8 +499,9 @@ class FLAReconstructor {
 				
 	protected function convertFills($records) {
 		$list = array();
-		foreach($records as $record) {
+		foreach($records as $index => $record) {
 			$fillStyle = $list[] = new FLAFillStyle;
+			$fillStyle->index = $index + 1;
 			switch($record->type) {
 				case 0x00:
 					$fillStyle->solidColor = $this->convertSolidColor($record->color);
@@ -521,6 +529,7 @@ class FLAReconstructor {
 		$list = array();
 		foreach($records as $record) {
 			$lineStyle = $list[] = new FLALineStyle;
+			$lineStyle->index = $index + 1;
 			if($lineStyle->width !== null) {
 				$lineStyle->width = $record->width;
 			}
@@ -582,6 +591,7 @@ class FLAReconstructor {
 		if($bitmapId != 0xFFFF) {
 			$bitmap = $this->getCharacter($bitmapId);
 			$fill = new FLABitmapFill;
+			$fill->matrix = $this->convertMatrix($matrixRecord);
 			$fill->bitmapPath = $bitmap->path;
 			$fill->bitmapIsClipped = ($type == 0x41 || $type == 0x43) ? 'true' : 'false';
 			return $fill;
