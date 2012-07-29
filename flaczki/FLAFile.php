@@ -56,6 +56,7 @@ class FLADOMBitmapItem {
 	public $sourceExternalFilepath;
 	public $sourceLastImported;
 	public $externalFileSize;
+	public $allowSmoothing;
 	public $originalCompressionType;
 	public $quality;
 	public $href;
@@ -71,6 +72,7 @@ class FLABitmap {
 	public $data;
 	public $name;
 	public $filename;
+	public $allowSmoothing;
 }
 
 class FLAInclude {
@@ -114,6 +116,7 @@ class FLALineStyle {
 	public $index;
 	public $width;
 	public $color;
+	public $alpha;
 }
 
 class FLAFillStyle {
@@ -126,6 +129,7 @@ class FLAFillStyle {
 
 class FLASolidColor {
 	public $color;
+	public $alpha;
 }
 
 class FLAColor {
@@ -168,12 +172,13 @@ class FLABitmapFill {
 
 class FLAMatteColor {
 	public $color;
+	public $alpha;
 }
 
 class FLAEdge {
 	public $fillStyle0;
 	public $fillStyle1;
-	public $lineStyle;
+	public $strokeStyle;
 	public $edges;
 }
 
@@ -192,15 +197,16 @@ class FLAPoint {
 }
 
 class FLADropShadowFilter {
+	public $alpha;
 	public $angle;
 	public $blurX;
 	public $blurY;
-	public $quality;
 	public $color;
 	public $distance;
 	public $hideObject;
 	public $inner;
 	public $knockout;
+	public $quality;
 	public $strength;
 }
 
@@ -211,6 +217,7 @@ class FLABlurFilter {
 }
 
 class FLAGlowFilter {
+	public $alpha;
 	public $blurX;
 	public $blurY;
 	public $color;
@@ -226,8 +233,10 @@ class FLABevelFilter {
 	public $quality;
 	public $angle;
 	public $distance;
+	public $highlightAlpha;
 	public $highlightColor;
 	public $knockout;
+	public $shadowAlpha;
 	public $shadowColor;
 	public $strength;
 	public $type;

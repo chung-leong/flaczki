@@ -181,6 +181,7 @@ class FLAReconstructor {
 			$item->href = $object->path;
 			$item->frameRight = $object->width * 20;
 			$item->frameBottom = $object->height * 20;
+			$item->allowSmoothing =& $object->allowSmoothing;
 		}
 		$this->media[] = $item;
 	}
@@ -499,6 +500,7 @@ class FLAReconstructor {
 			if($record instanceof SWFDropShadowFilter) {
 				$filter = new FLADropShadowFilter;
 				$filter->color = $this->convertRGB($record->shadowColor);
+				$filter->alpha = $this->convertAlpha($record->shadowColor);
 				$filter->blurX = $record->blurX / 65536.0;
 				$filter->blurY = $record->blurY / 65536.0;
 				$filter->angle = $record->angle / 65536.0 * 57.2957795;
@@ -524,6 +526,7 @@ class FLAReconstructor {
 				$filter->blurX = $record->blurX / 65536.0;
 				$filter->blurY = $record->blurY / 65536.0;
 				$filter->color = $this->convertRGB($record->color);
+				$filter->alpha = $this->convertAlpha($record->color);
 				$filter->strength = ($record->strength != 256) ? $record->strength / 256.0 : null;
 				if($record->flags & 0x02) {
 					$filter->knockout = 'true';
@@ -535,7 +538,9 @@ class FLAReconstructor {
 			} else if($record instanceof SWFBevelFilter) {
 				$filter = new FLABevelFilter;
 				$filter->shadowColor = $this->convertRGB($record->shadowColor);
+				$filter->shadowAlpha = $this->convertAlpha($record->shadowColor);
 				$filter->highlightColor = $this->convertRGB($record->highlightColor);
+				$filter->highlightAlpha = $this->convertAlpha($record->highlightColor);
 				$filter->blurX = $record->blurX / 65536.0;
 				$filter->blurY = $record->blurY / 65536.0;
 				$filter->angle = $record->angle / 65536.0 * 57.2957795;
@@ -653,7 +658,7 @@ class FLAReconstructor {
 	
 	protected function convertStrokes($records) {
 		$list = array();
-		foreach($records as $record) {
+		foreach($records as $index => $record) {
 			$lineStyle = $list[] = new FLALineStyle;
 			$lineStyle->index = $index + 1;
 			if($lineStyle->width !== null) {
@@ -668,12 +673,14 @@ class FLAReconstructor {
 	protected function convertSolidColor($record) {
 		$solid = new FLASolidColor;
 		$solid->color = $this->convertRGB($record);
+		$solid->alpha = $this->convertAlpha($record);
 		return $solid;
 	}
 		
 	protected function convertMatteColor($record) {
 		$solid = new FLASMatteColor;
 		$solid->color = $this->convertRGB($record);
+		$solid->alpha = $this->convertAlpha($record);
 		return $solid;
 	}
 	
@@ -721,14 +728,15 @@ class FLAReconstructor {
 			$fill->matrix = $this->convertMatrix($matrixRecord);
 			$fill->bitmapPath = $bitmap->name;
 			$fill->bitmapIsClipped = ($type == 0x41 || $type == 0x43) ? 'true' : 'false';
+			if($type == 0x40 || $type == 0x41) {
+				$bitmap->allowSmoothing = 'true';
+			}
 			return $fill;
 		}
 	}
 	
 	protected function convertRGB($record) {
-		if($record->red || $record->green || $record->blue) {
-			return sprintf("#%02X%02X%02X", $record->red, $record->green, $record->blue);
-		}
+		return sprintf("#%02X%02X%02X", $record->red, $record->green, $record->blue);
 	}
 	
 	protected function convertAlpha($record) {
@@ -762,7 +770,7 @@ class FLAReconstructor {
 						$flags |= 0x02;
 					}
 					if($record->lineStyle !== null) {
-						$edge->lineStyle = $record->lineStyle;
+						$edge->strokeStyle = $record->lineStyle;
 						$flags |= 0x04;
 					}
 				}
