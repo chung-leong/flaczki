@@ -496,7 +496,6 @@ class FLAReconstructor {
 	protected function convertFilters($records) {
 		$list = array();
 		foreach($records as $record) {
-			print_r($record);
 			if($record instanceof SWFDropShadowFilter) {
 				$filter = new FLADropShadowFilter;
 				$filter->color = $this->convertRGB($record->shadowColor);
@@ -575,7 +574,23 @@ class FLAReconstructor {
 				}
 				$filter->quality = $record->passes;
 			} else if($record instanceof SWFConvolutionFilter) {
+				// there doesn't seem to be a way to create convolution filter in Flash professional
 			} else if($record instanceof SWFColorMatrixFilter) {
+				$filter = new FLAAdjustColorFilter;
+				$solver = new ColorMatrixSolver;
+				$solver->solve($record->matrix);
+				if($solver->brightness) {
+					$filter->brightness = $solver->brightness;
+				}
+				if($solver->contrast) {
+					$filter->contrast = $solver->contrast;
+				}
+				if($solver->saturation) {
+					$filter->saturation = $solver->saturation;
+				}
+				if($solver->hue) {
+					$filter->hue = $solver->hue;
+				}
 			} else if($record instanceof SWFGradientBevelFilter) {
 				$filter = new FLAGradientBevelFilter;
 				foreach($record->colors as $index => $color) {
@@ -601,8 +616,9 @@ class FLAReconstructor {
 				}
 				$filter->quality = $record->passes;
 			}
-			print_r($filter);
-			$list[] = $filter;
+			if($filter) {
+				$list[] = $filter;
+			}
 		}
 		return $list;
 	}
