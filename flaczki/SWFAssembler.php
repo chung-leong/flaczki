@@ -164,8 +164,8 @@ class SWFAssembler {
 		$this->writeUB($tag->renderer, 2);
 		$this->writeUB($tag->gridFit, 3);
 		$this->writeUB($tag->reserved1, 3);
-		$this->writeUI32($tag->thinkness);
-		$this->writeUI32($tag->sharpness);
+		$this->writeFloat($tag->thickness);
+		$this->writeFloat($tag->sharpness);
 		$this->writeUI8($tag->reserved2);
 	}
 	

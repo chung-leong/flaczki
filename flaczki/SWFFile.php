@@ -31,7 +31,7 @@ class SWFCSMTextSettingsTag {
 	public $characterId;
 	public $renderer;
 	public $gridFit;
-	public $thinkness;
+	public $thickness;
 	public $sharpness;
 	public $reserved1;
 	public $reserved2;

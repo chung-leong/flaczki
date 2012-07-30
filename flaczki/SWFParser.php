@@ -165,8 +165,8 @@ class SWFParser {
 		$tag->renderer = $this->readUB(2, $bytesAvailable);
 		$tag->gridFit = $this->readUB(3, $bytesAvailable);
 		$tag->reserved1 = $this->readUB(3, $bytesAvailable);
-		$tag->thinkness = $this->readUI32($bytesAvailable);
-		$tag->sharpness = $this->readUI32($bytesAvailable);
+		$tag->thickness = $this->readFloat($bytesAvailable);
+		$tag->sharpness = $this->readFloat($bytesAvailable);
 		$tag->reserved2 = $this->readUI8($bytesAvailable);
 		return $tag;
 	}

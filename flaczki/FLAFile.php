@@ -271,4 +271,54 @@ class FLAAdjustColorFilter {
 	public $hue;
 }
 
+class FLADOMDynamicText {
+	public $fontRenderingMode;
+	public $width;
+	public $height;
+	public $antiAliasSharpness;
+	public $antiAliasThickness;
+	public $autoExpand;
+	public $maxCharacters;
+	public $isSelectable;
+	public $renderAsHTML;
+	public $border;
+	public $lineType;
+	public $matrix;
+	public $textRuns;
+	public $filters;
+}
+
+class FLADOMInputText extends FLADOMDynamicText {
+}
+
+class FLADOMStaticText extends FLADOMDynamicText {
+}
+
+class FLADOMTextRun {
+	public $characters;
+	public $textAttrs;
+}
+
+class FLADOMTextAttrs {
+	public $alignment;
+	public $aliasText;
+	public $alpha;
+	public $indent;
+	public $leftMargin;
+	public $letterSpacing;
+	public $lineSpacing;
+	public $rightMargin;
+	public $size;
+	public $bitmapSize;
+	public $face;
+	public $fillColor;
+	public $target;
+	public $url;
+}
+
+class FLAFont {
+	public $name;
+	public $codeTable;
+}
+
 ?>

@@ -283,13 +283,17 @@ class FLAReconstructor {
 	protected function processPlaceObject2Tag($tag) {
 		if($tag->characterId !== null) {
 			$character = $this->getCharacter($tag->characterId);
-			$instance = new FLADOMSymbolInstance;
-			$instance->libraryItemName = $character->name;
+			if(!$character) {
+				return;
+			}
+			if($character instanceof FLADOMSymbolItem) {
+				$instance = new FLADOMSymbolInstance;
+				$instance->libraryItemName = $character->name;
+			} else {
+				$instance = $character;
+			}
 			$frame = $this->addFrame($tag->depth);
 			$frame->elements[] = $instance;
-			
-			$instance->centerPoint3DX;
-			$instance->centerPoint3DY;
 		} 
 		if($tag->matrix !== null) {
 			$instance->matrix = $this->convertMatrix($tag->matrix);
@@ -391,6 +395,104 @@ class FLAReconstructor {
 	
 	protected function processDefineBitsLossless2Tag($tag) {
 		$this->processDefineBitsLosslessTag($tag);
+	}
+	
+	protected function processDefineEditTextTag($tag) {
+		$textAttrs = new FLADOMTextAttrs;
+		static $alignments = array('left', 'right', 'center', 'justify');
+		$textAttrs->alignment = $alignments[$tag->align];
+		$textAttrs->fillColor = $this->convertRGB($tag->textColor);
+		$textAttrs->alpha = $this->convertAlpha($tag->textColor);
+		$textAttrs->indent = $tag->indent / 20;
+		$textAttrs->leftMargin = $tag->leftMargin / 20;
+		$textAttrs->rightMargin = $tag->rightMargin / 20;
+		$textAttrs->size = $tag->fontHeight / 20;
+		$textAttrs->lineSpacing = $tag->leading / 20;
+		if($tag->fontId) {
+			$font = $this->getCharacter($tag->fontId);
+			$textAttrs->face = $font->name;
+		}
+		
+		if($tag->flags & SWFDefineEditTextTag::WasStatic) {
+			$text = new FLADOMStaticText;
+		} else if($tag->flags & SWFDefineEditTextTag::ReadOnly) {
+			$text = new FLADOMDynamicText;
+		} else {
+			$text = new FLADOMInputText;
+		}
+		$text->width = ($tag->bounds->right - $tag->bounds->left) / 20 - 4;
+		$text->height = ($tag->bounds->bottom - $tag->bounds->top) / 20 - 4;
+		$text->maxCharacters = $tag->maxLength;
+		if($tag->flags & SWFDefineEditTextTag::NoSelect) {
+			$text->isSelectable = 'false';
+		}
+		if($tag->flags & SWFDefineEditTextTag::AutoSize) {
+			$text->autoExpand = 'true';
+		}
+		if($tag->flags & SWFDefineEditTextTag::Border) {
+			$text->border = 'true';
+		}
+		if($tag->flags & SWFDefineEditTextTag::Multiline) {
+			if($tag->flags & SWFDefineEditTextTag::WordWrap) {
+				$text->lineType = 'multiline';
+			} else {
+				$text->lineType = 'multiline no wrap';
+			}
+		} else if($tag->flags & SWFDefineEditTextTag::Password) {
+			$text->lineType = 'password';
+		}
+		if($tag->flags & SWFDefineEditTextTag::UseOutlines) {
+			$text->fontRenderingMode = 'device';
+		} else {
+			$text->fontRenderingMode = 'standard';
+		}
+		if($tag->flags & SWFDefineEditTextTag::HTML) {
+			$text->renderAsHTML = 'true';
+			$reconstructor = new FLADynamicTextReconstructor;
+			$text->textRuns = $reconstructor->reconstruct($tag->initialText, $textAttrs);
+		} else {
+			$run = new FLADOMTextRun;
+			$run->characters = $text;
+			$run->textAttrs = array($defaultTextAttrs);
+			$text->textRuns = array($run);
+		}
+		
+		$this->addCharacter($tag->characterId, $text);
+	}
+	
+	protected function processCSMTextSettingsTag($tag) {
+		$text = $this->getCharacter($tag->characterId);
+		if($tag->renderer == SWFCSMTextSettingsTag::RendererAdvanced && $tag->gridFit == SWFCSMTextSettingsTag::GridFitSubpixel) {
+			$text->fontRenderingMode = null;
+			if($tag->sharpness) {
+				$text->antiAliasSharpness = $tag->sharpness;
+			}
+			if($tag->thickness) {
+				$text->antiAliasThickness = $tag->thickness;
+			}
+		}
+	}	
+	
+	protected function processDefineFontTag($tag) {
+		$font = new FLAFont;
+		$this->addCharacter($tag->characterId, $font);
+	}
+	
+	protected function processDefineFontInfoTag($tag) {
+		$font = $this->getCharacter($tag->characterId);
+		$font->name = trim($tag->name);
+		$font->codeTable = $tag->codeTable;
+	}
+	
+	protected function processDefineFont2Tag($tag) {
+		$font = new FLAFont;
+		$font->name = trim($tag->name);
+		$font->codeTable = $tag->codeTable;
+		$this->addCharacter($tag->characterId, $font);
+	}
+	
+	protected function processDefineFont3Tag($tag) {
+		$this->processDefineFont2Tag($tag);
 	}
 	
 	protected function processDefineFont4Tag($tag) {
