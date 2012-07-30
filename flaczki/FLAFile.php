@@ -299,6 +299,17 @@ class FLADOMTextRun {
 	public $textAttrs;
 }
 
+class FLACharacters {
+	public $data;
+	
+	public function write($stream, $name) {
+		static $entities = array('"' => '&quot;', "'" => '&apos;', '&' => '&amp;', '<' => '&lt;', '>' => '&gt;', "\x0d" => '&#xD;');
+		fwrite($stream, "<$name>");
+		fwrite($stream, strtr($this->data, $entities));
+		fwrite($stream, "</$name>");
+	}
+}
+
 class FLADOMTextAttrs {
 	public $alignment;
 	public $aliasText;

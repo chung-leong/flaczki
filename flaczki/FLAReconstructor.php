@@ -410,7 +410,7 @@ class FLAReconstructor {
 		$textAttrs->lineSpacing = $tag->leading / 20;
 		if($tag->fontId) {
 			$font = $this->getCharacter($tag->fontId);
-			$textAttrs->face = $font->name;
+			$textAttrs->face = str_replace(' ', '-', $font->name);
 		}
 		
 		if($tag->flags & SWFDefineEditTextTag::WasStatic) {
@@ -448,16 +448,100 @@ class FLAReconstructor {
 		}
 		if($tag->flags & SWFDefineEditTextTag::HTML) {
 			$text->renderAsHTML = 'true';
-			$reconstructor = new FLADynamicTextReconstructor;
-			$text->textRuns = $reconstructor->reconstruct($tag->initialText, $textAttrs);
+			$html = $tag->initialText;
+			
+			$text->textRuns = array();
+			$textAttrStack = array();
+			$currentTextRun = null;
+	
+			$endIndex = -1;
+			while(($startIndex = strpos($html, '<', $endIndex + 1)) !== false) {
+				if($endIndex + 1 < $startIndex) {
+			   		// body text
+					$characters = html_entity_decode(substr($html, $endIndex + 1, $startIndex - $endIndex - 1), ENT_COMPAT, 'UTF-8');
+					$currentTextRun = new FLADOMTextRun;
+					$currentTextRun->characters = new FLACharacters;
+					$currentTextRun->characters->data = $characters;
+					$currentTextRun->textAttrs = array($textAttrs);
+					$text->textRuns[] = $currentTextRun;
+				}
+				if(($endIndex = strpos($html, '>', $startIndex + 1)) !== false) {			
+				   	if($html[$startIndex + 1] != '/') {
+				   		// start tag
+				   		$tagContents = substr($html, $startIndex + 1, $endIndex - $startIndex - 1);
+				   		if(($spaceIndex = strpos($tagContents, ' ')) !== false) {
+				   			$tagName = substr($tagContents, 0, $spaceIndex);
+				   			$attributes = substr($tagContents, $spaceIndex + 1);
+				   		} else {
+				   			$tagName = $tagContents;
+				   			$attributes = null;
+				   		}
+				   		switch($tagName) {
+							case 'p':
+								if($currentTextRun) {
+									$currentTextRun->characters->data .= "\r";
+								}
+							case 'b':
+								$textAttrs->face = preg_replace('/(?:-(Italic)|)$/i', '-Bold$1', $textAttrs->face, 1);
+								break;
+							case 'i':
+								$textAttrs->face = preg_replace('/(?:-(Bold)|)$/i', '-$1Italic', $textAttrs->face, 1);
+								break;
+				   		}
+				   		
+						array_push($textAttrStack, $textAttrs);
+						$textAttrs = clone $textAttrs;
+				   		if($attributes && preg_match_all('/(\w+)="(.*?)"/', $attributes, $m, PREG_SET_ORDER)) {
+					   		foreach($m as $match) {
+					   			$name = $match[1];
+					   			$value = html_entity_decode($match[2], ENT_COMPAT, 'UTF-8');
+								switch($name) {
+									case 'align':
+										$textAttrs->alignment = $value;
+										break;
+									case 'face':
+										$textAttrs->face = str_replace(' ', '-', $value);
+										break;
+									case 'size':
+										$textAttrs->size = $value;
+										break;
+									case 'color':
+										$textAttrs->fillColor = $value;
+										break;
+									case 'letterSpacing':
+										$textAttrs->letterSpacing = $value;
+										break;
+									case 'letterSpacing':
+										$textAttrs->letterSpacing = $value;
+										break;
+									case 'href':
+										$textAttrs->url = $value;
+										break;
+									case 'target':
+										$textAttrs->target = $value;
+										break;
+								}
+					   		}
+				   		}
+				   	} else {
+				   		// end tag
+						$textAttrs = array_pop($textAttrStack);
+					}
+				} else {
+					break;
+				}
+			}
 		} else {
 			$run = new FLADOMTextRun;
 			$run->characters = $text;
 			$run->textAttrs = array($defaultTextAttrs);
 			$text->textRuns = array($run);
 		}
-		
 		$this->addCharacter($tag->characterId, $text);
+	}
+	
+	protected function processDefineText2Tag($tag) {
+		$this->processDefineTextTag($tag);
 	}
 	
 	protected function processCSMTextSettingsTag($tag) {

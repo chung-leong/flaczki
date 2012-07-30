@@ -106,7 +106,11 @@ class FLAAssembler {
 							fwrite($stream, "</$name>\n");
 						}
 					} else if(is_object($value)) {
-						$this->writeXMLNode($stream, $value);
+						if(method_exists($value, 'write')) {
+							$value->write($stream, $name);
+						} else {
+							$this->writeXMLNode($stream, $value);
+						}
 					}
 				}
 			}
