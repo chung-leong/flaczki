@@ -534,9 +534,198 @@ class FLAReconstructor {
 		} else {
 			$run = new FLADOMTextRun;
 			$run->characters = $text;
-			$run->textAttrs = array($defaultTextAttrs);
+			$run->textAttrs = array($textAttrs);
 			$text->textRuns = array($run);
 		}
+		$this->addCharacter($tag->characterId, $text);
+	}
+	
+	protected function processDefineTextTag($tag) {
+		$text = new FLADOMStaticText;
+		$text->isSelectable = "false";
+		
+		$x = 0;
+		$y = 0;
+		$leftMost = 4096;
+		$rightMost = 0;
+		$textHeight = 0;
+		$codeTable = null;
+		$textAttrs = new FLADOMTextAttrs;
+		$characters = '';
+		$fragments = array();
+		foreach($tag->textRecords as $record) {
+			if($record->fontId !== null || $record->textColor !== null || $record->textHeight !== null) {
+				$textAttrs = clone $textAttrs;
+				if($record->fontId !== null) {
+					$font = $this->getCharacter($record->fontId);
+					$textAttrs->face = str_replace(' ', '-', $font->name);
+					$codeTable = $font->codeTable;
+				}
+				if($record->textColor !== null) {
+					$textAttrs->fillColor = $this->convertRGB($record->textColor);
+					$textAttrs->alpha = $this->convertAlpha($record->textColor);
+				}
+				if($record->textHeight !== null) {
+					$textHeight = $record->textHeight;
+					$textAttrs->size = $record->textHeight / 20;
+				}
+			}
+			if($record->xOffset !== null) {
+				$x = $record->xOffset;
+			}
+			if($record->yOffset !== null) {
+				$y = $record->yOffset;
+			}
+
+			if($codeTable) {
+				$fragment = new stdClass;			
+				$fragment->top = $y - $textHeight;
+				$fragment->left = $x;
+				$fragment->bottom = $y;
+				$fragment->right = 0;
+				$fragment->characters = '';
+				$fragment->textAttrs = $textAttrs;
+				$leftMost = min($x, $leftMost);
+				$firstWordWidth = null;
+				
+				foreach($record->glyphs as $glyph) {
+					$code = $codeTable[$glyph->index];					
+					$fragment->characters .= chr($code);
+					if($code == 32) {
+						if($firstWordWidth === null) {
+							$firstWordWidth = $x;
+						}
+					}
+					$x += $glyph->advance;
+				}
+				$rightMost = max($rightMost, $x);
+				$fragment->right = $x;
+				$fragment->width = $fragment->right - $fragment->left;
+				$fragment->height = $textHeight;
+				$fragment->firstWordWidth = ($firstWordWidth) ? $firstWordWidth : $x;
+				$fragments[] = $fragment;
+			}			
+		}
+		
+		// group the fragments into lines and paragraphs
+		$textWidth = $rightMost - $leftMost;
+		$remainingWidth = $textWidth;
+		$paragraphs = array();
+		$paragraph = $paragraphs[] = new stdClass;
+		$paragraph->leftMost = 4096;
+		$paragraph->rightMost = 0;
+		$paragraph->lineCount = 1;
+		$paragraph->lines = array();
+		$line = $paragraph->lines[] = new stdClass;
+		$line->fragments = array();
+		$baseline = $fragments[0]->bottom;
+		$textHeight = 0;
+		foreach($fragments as $fragment) {
+			if($fragment->width > $remainingWidth || $fragment->top >= $baseline) {
+				// a new line
+				$gap = $fragment->top - $baseline;
+				if($fragment->firstWordWidth < $remainingWidth || $gap > $textHeight) {
+					// a hard return
+					$paragraph = $paragraphs[] = new stdClass;
+					$paragraph->leftMost = 4096;
+					$paragraph->rightMost = 0;
+					$paragraph->lineCount = 0;
+					$paragraph->fragments = array();
+					
+					while($gap > $textHeight) {
+						$paragraphs[] = new stdClass;
+						$gap -= $textHeight;
+					}
+				}
+				$line = $paragraph->lines[] = new stdClass;
+				$line->fragments = array();
+				$paragraph->lineCount++;
+				$remainingWidth = $textWidth;
+				$baseline = $fragment->bottom;
+			}
+			$line->fragments[] = $fragment;
+			if(!isset($line->left)) {
+				$line->left = $fragment->left;
+			}
+			$line->right = $fragment->right;
+			$paragraph->leftMost = min($fragment->left, $paragraph->leftMost);
+			$paragraph->rightMost = max($fragment->right, $paragraph->rightMost);
+			$remainingWidth -= $fragment->width;
+			$textHeight = $fragment->height;
+			$baseline = $fragment->bottom;
+		}
+		
+		// determine the alignment
+		if(count($paragraphs) == 1 && $paragraphs[0]->lineCount == 1) {
+			// point text			
+			$point = true;
+			$paragraphs[0]->align = null;
+		} else {
+			$point = false;
+			
+			$leftAlign = true;
+			$rightAlign = true;
+			foreach($paragraphs as $paragraph)  {
+				if(isset($paragraph->lines)) {
+					// check each line
+					foreach($paragraph->lines as $index => $line) {
+						if($line->left != $paragraph->leftMost) {
+							if($index != 0) {
+								$leftAlign = false;
+							}
+						}
+						if($line->right != $paragraph->rightMost) {
+							if($index + 1 != $paragraph->lineCount) {
+								$rightAlign = false;
+							}
+						}
+					}
+					if($leftAlign) {
+						if($rightAlign) {
+							$paragraph->align = 'justify';
+						} else {
+							$paragraph->align = 'left';
+						}
+					} else if($rightAlign) {
+						$paragraph->align = 'right';
+					} else {
+						$paragraph->align = 'center';
+					}
+				}
+			}		
+		}
+		
+		
+		// TODO: this is not quite so accurate
+		$text->width = ($rightMost + 40) / 20;
+		$text->height = ($baseline + $tag->bounds->top * 2) / 20;
+		
+		// create the runs
+		$text->textRuns = array();
+		$currentTextRun = null;
+		foreach($paragraphs as $paragraph) {
+			if($currentTextRun) {
+				$currentTextRun->characters->data .= "\r";
+			}
+			if(isset($paragraph->lines)) {
+				foreach($paragraph->lines as $line) {
+					foreach($line->fragments as $fragment) {
+						if(!$currentTextRun || $currentTextRun->textAttrs !== $fragment->textAttrs) {
+							$fragment->textAttrs->alignment = $paragraph->align;
+							
+							$currentTextRun = new FLADOMTextRun;
+							$currentTextRun->characters = new FLACharacters;
+							$currentTextRun->characters->data = $fragment->characters;
+							$currentTextRun->textAttrs = array($fragment->textAttrs);
+							$text->textRuns[] = $currentTextRun;
+						} else {
+							$currentTextRun->characters->data .= $fragment->characters;
+						}
+					}
+				}
+			} 
+		}
+		
 		$this->addCharacter($tag->characterId, $text);
 	}
 	
