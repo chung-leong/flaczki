@@ -37,7 +37,7 @@ class FLADOMSymbolItem {
 
 class FLADOMSymbolInstance {
 	public $libraryItemName;
-	public $selected;
+	public $name;
 	public $blendMode;
 	public $cacheAsBitmap;
 	public $bits32;
@@ -86,6 +86,7 @@ class FLAInclude {
 class FLADOMTimeline {
 	public $name;
 	public $currentFrame;
+	public $layers;
 }
 
 class FLADOMLayer {
@@ -272,6 +273,7 @@ class FLAAdjustColorFilter {
 }
 
 class FLADOMDynamicText {
+	public $name;
 	public $fontRenderingMode;
 	public $width;
 	public $height;
@@ -327,9 +329,40 @@ class FLADOMTextAttrs {
 	public $url;
 }
 
+class FLADOMTLFText {
+	public $name;
+	public $left;
+	public $top;
+	public $right;
+	public $bottom;
+	public $blendMode;
+	public $cacheAsBitmap;
+	public $matrix;
+	public $filters;
+	public $tlfFonts;
+	public $markup;
+	
+}
+
+class FLAMarkup {
+	public $data;
+	
+	public function write($stream, $name) {
+		fwrite($stream, "<$name>");
+		fwrite($stream, $this->data);
+		fwrite($stream, "</$name>");
+	}
+}
+
 class FLAFont {
 	public $name;
+	public $fullName;
 	public $codeTable;
+}
+
+class FLATLFFont  {
+	public $platformName;
+	public $psName;
 }
 
 ?>

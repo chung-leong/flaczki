@@ -72,10 +72,15 @@ class ABCTextObjectFinder {
 
 					// scan the AS3 bytecodes
 					if($method->body && preg_match_all("/$pattern/s", $method->body->byteCodes, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+						$containClassName = $this->getMultinameString($abcFile, $instance->nameIndex);
+						
 						foreach($matches as $match) {
 							list($instanceNameOp, $instanceNameOpOffset) = $match[1];
+							list($rectangleOp, $rectangleOffset) = $match[2];
 							list($xmlOp, $xmlOpOffset) = $match[3];
 							list($extraInfoOp, $extraInfoOpOffset) = $match[5];
+							
+							$bounds = $this->interpretOps($abcFile, $rectangleOp);
 							
 							$textObject = new ABCTextObjectInfo;
 							$textObject->nameIndex = $this->decodeU32($instanceNameOp);
@@ -84,10 +89,15 @@ class ABCTextObjectFinder {
 							$textObject->xml = $abcFile->stringTable[$textObject->xmlIndex];
 							$textObject->xmlOpOffset = $xmlOpOffset;
 							$textObject->xmlOpLength = strlen($xmlOp);
+							$textObject->rectangleOpOffset = $rectangleOffset;
+							$textObject->rectangleOpLength = strlen($rectangleOp);
 							$textObject->extraInfoOpOffset = $extraInfoOpOffset;
 							$textObject->extraInfoOpLength = strlen($extraInfoOp);
 							$textObject->methodBody = $method->body;
 							$textObject->extraInfo = array();
+							$textObject->containerClassName = $containClassName;
+							$textObject->width = $bounds[2];
+							$textObject->height = $bounds[3];
 							$textObjects[] = $textObject;
 						}
 					}
@@ -127,6 +137,48 @@ class ABCTextObjectFinder {
 		return false;
 	}
 	
+	protected function getMultinameString($abcFile, $nameIndex) {
+		$multiname = $abcFile->multinameTable[$nameIndex];
+		$nameString = $abcFile->stringTable[$multiname->stringIndex];
+		$namespace = $abcFile->namespaceTable[$multiname->namespaceIndex];
+		$namespaceString = $abcFile->stringTable[$namespace->stringIndex];
+		return "$namespaceString.$nameString";
+	}
+	
+	protected function interpretOps($abcFile, $bc) {
+		$stack = array();
+		$p = 0;
+		$len = strlen($bc);
+		while($p < $len) {
+			switch($bc[$p++]) {
+				case "\x2a": // dup
+					$stack[] = $stack[count($stack) - 1];
+					break;
+				case "\x24": // pushbyte (byte)
+					$stack[] = ord($bc[$p++]);
+					break;
+				case "\x2f": // pushdouble (double_index)
+					$index = $this->decodeU32($bc, $p);
+					$stack[] = $abcFile->doubleTable[$index];
+					break;
+				case "\x2d": // pushint (int_index)
+					$index = $this->decodeU32($bc, $p);
+					$stack[] = $abcFile->intTable[$index];
+					break;
+				case "\x25": // pushshort (value)
+					$stack[] = $this->decodeU32($bc, $p);
+					break;
+				case "\x2e": // pushuint (uint_index)
+					$index = $this->decodeU32($bc, $p);
+					$stack[] = $abcFile->uintTable[$index];
+					break;
+			}
+			
+		}
+		return $stack;
+	
+	}
+	
 	protected function decodeU32($bc, &$p = 1) {
 		$s = 0;
 		$v = 0;
@@ -136,7 +188,7 @@ class ABCTextObjectFinder {
 			$s += 7;
 		} while($b & 0x80);
 		return $v;
-	}	
+	}
 	
 	protected function packU32($v) {
 		if(!($v & 0xFFFFFF80)) {
@@ -164,13 +216,18 @@ class ABCTextObjectFinder {
 }
 
 class ABCTextObjectInfo {
+	public $containerClassName;
 	public $name;
 	public $nameIndex;
 	public $xml;
 	public $xmlIndex;
+	public $rectangleOpOffset;
+	public $rectangleOpLength;
 	public $methodBody;
 	public $copyOnWrite;
 	public $extraInfo;
+	public $width;
+	public $height;
 }
 
 class ABCImageClassInfo {

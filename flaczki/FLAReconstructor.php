@@ -16,6 +16,8 @@ class FLAReconstructor {
 	protected $media;
 	protected $library;
 	protected $metadata;
+	protected $tlfTextObjects;
+	protected $tlfTextObjectSymbol;
 	
 	public function getRequiredTags() {
 		$methodNames = get_class_methods($this);
@@ -34,9 +36,12 @@ class FLAReconstructor {
 		$this->lastItemID = 0x50000000;
 		$this->symbols = array();
 		$this->library = array();
+		$this->dictionary = array();
+		$this->tlfTextObjects = array();
+		$this->tlfTextObjectSymbol = null;
 		
 		$flaFile = new FLAFile;
-		$flaFile->document = new FLADOMDocument;
+		$flaFile->document = $this->dictionary[0] = new FLADOMDocument;
 		$flaFile->document->width = ($swfFile->frameSize->right - $swfFile->frameSize->left) / 20;
 		$flaFile->document->height = ($swfFile->frameSize->bottom - $swfFile->frameSize->top) / 20;
 		$flaFile->document->currentTimeline = 1;
@@ -70,6 +75,7 @@ class FLAReconstructor {
 		
 		// add frames to timeline
 		$this->timeline = new FLADOMTimeline;
+		$this->timeline->layers = array();
 		$this->frameIndex = 0;
 		$this->frameLabels = null;
 		$this->sceneNames = null;
@@ -251,6 +257,16 @@ class FLAReconstructor {
 		$this->addMedia($bitmap);
 	}
 	
+	protected function findFont($name) {
+		foreach($this->dictionary as $object) {
+			if($object instanceof FLAFont) {
+				if($object->name == $name) {
+					return $object;
+				}
+			}
+		}
+	}
+	
 	protected function processTags($tags) {
 		foreach($tags as $tag) {
 			$tagName = substr(get_class($tag), 3, -3);
@@ -300,6 +316,9 @@ class FLAReconstructor {
 		}
 		if($tag->colorTransform !== null) {
 			$instance->color = $this->convertColorTransform($tag->colorTransform);
+		}
+		if($tag->name !== null) {
+			$instance->name = $tag->name;
 		}
 		if($tag instanceof SWFPlaceObject3Tag) {			
 			if($tag->blendMode !== null) {
@@ -410,7 +429,7 @@ class FLAReconstructor {
 		$textAttrs->lineSpacing = $tag->leading / 20;
 		if($tag->fontId) {
 			$font = $this->getCharacter($tag->fontId);
-			$textAttrs->face = str_replace(' ', '-', $font->name);
+			$textAttrs->face = $font->fullName;
 		}
 		
 		if($tag->flags & SWFDefineEditTextTag::WasStatic) {
@@ -500,7 +519,8 @@ class FLAReconstructor {
 										$textAttrs->alignment = $value;
 										break;
 									case 'face':
-										$textAttrs->face = str_replace(' ', '-', $value);
+										$font = $this->findFont($value);
+										$textAttrs->face = ($font) ? $font->fullName : $value;
 										break;
 									case 'size':
 										$textAttrs->size = $value;
@@ -558,7 +578,7 @@ class FLAReconstructor {
 				$textAttrs = clone $textAttrs;
 				if($record->fontId !== null) {
 					$font = $this->getCharacter($record->fontId);
-					$textAttrs->face = str_replace(' ', '-', $font->name);
+					$textAttrs->face = $font->fullName;
 					$codeTable = $font->codeTable;
 				}
 				if($record->textColor !== null) {
@@ -753,13 +773,13 @@ class FLAReconstructor {
 	
 	protected function processDefineFontInfoTag($tag) {
 		$font = $this->getCharacter($tag->characterId);
-		$font->name = trim($tag->name);
+		$font->name = $font->fullName = trim($tag->name);
 		$font->codeTable = $tag->codeTable;
 	}
 	
 	protected function processDefineFont2Tag($tag) {
 		$font = new FLAFont;
-		$font->name = trim($tag->name);
+		$font->name = $font->fullName = trim($tag->name);
 		$font->codeTable = $tag->codeTable;
 		$this->addCharacter($tag->characterId, $font);
 	}
@@ -771,11 +791,61 @@ class FLAReconstructor {
 	protected function processDefineFont4Tag($tag) {
 	}
 	
+	protected function processDefineFontNameTag($tag) {
+		$font = $this->getCharacter($tag->characterId);
+		$font->fullName = $tag->name;
+	}
+	
 	protected function processDoABCTag($tag) {
+		if($tag->abcFile) {
+			$finder = new ABCTextObjectFinder;
+			$this->tlfTextObjects = array_merge($this->tlfTextObjects, $finder->find($tag->abcFile));
+		}
 	}
 	
 	protected function processSymbolClassTag($tag) {
 		foreach($tag->names as $characterId => $className) {
+			if($className == 'fl.text.TLFTextField') {
+				$this->tlfTextObjectSymbol = $this->getCharacter($characterId);
+			}
+		}
+		
+		foreach($this->tlfTextObjects as $textObjectIndex => $textObject) {
+			foreach($tag->names as $characterId => $className) {
+				if($textObject->containerClassName == $className) {
+					$object = $this->getCharacter($characterId);
+					
+					// look for the instance on the timeline
+					$timeline = ($object instanceof FLADOMDocument) ? $this->timeline : $object->timeline[0];
+					foreach($timeline->layers as $layer) {
+						foreach($layer->frames as $frame) {
+							foreach($frame->elements as &$element) {
+								if($element instanceof FLADOMSymbolInstance) {
+									if($element->name == $textObject->name && $element->libraryItemName == $this->tlfTextObjectSymbol->name) {
+										// replace it with TLF object
+										$markup = new FLAMarkup;
+										$markup->data = $textObject->xml;
+										
+										$text = new FLADOMTLFText;
+										$text->name = $textObject->name;
+										$text->right = $text->left + $textObject->width * 20;
+										$text->bottom = $text->top + $textObject->height * 20;
+										$text->tlfFonts = array();
+										$text->markup = $markup;
+										$text->blendMode = $element->blendMode;
+										$text->cacheAsBitmap = $element->cacheAsBitmap;
+										$text->matrix = $element->matrix;
+										$text->filters = $element->filters;
+										
+										$element = $text;
+										unset($this->tlfTextObjects[$textObjectIndex]);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 	
