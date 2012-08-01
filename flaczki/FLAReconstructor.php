@@ -21,7 +21,7 @@ class FLAReconstructor {
 	
 	public function getRequiredTags() {
 		$methodNames = get_class_methods($this);
-		$tags = array();
+		$tags = array('DefineBinaryData');
 		foreach($methodNames as $methodName) {
 			if(preg_match('/^process(\w+?)Tag$/', $methodName, $m)) {
 				$tags[] = $m[1];
@@ -39,6 +39,22 @@ class FLAReconstructor {
 		$this->dictionary = array();
 		$this->tlfTextObjects = array();
 		$this->tlfTextObjectSymbol = null;
+		
+		// look for an embedded swf file		
+		$embeddedSWFFiles = array();
+		$hasPreloader = false;
+		foreach($swfFile->tags as $tag) {
+			if($tag instanceof SWFDefineBinaryDataTag) {
+				$embeddedSWFFiles[$tag->characterId] = $tag->swfFile;
+			} else if($tag instanceof SWFSymbolClassTag) {
+				foreach($tag->names as $characterId => $name) {
+					if(preg_match('/MainTimeline__Content__$/', $name)) {
+						$swfFile = $embeddedSWFFiles[$characterId];
+						break;
+					}
+				}
+			}
+		}
 		
 		$flaFile = new FLAFile;
 		$flaFile->document = $this->dictionary[0] = new FLADOMDocument;
@@ -283,12 +299,6 @@ class FLAReconstructor {
 				. '</x:xmpmeta><?xpacket end="w"?>';
 	}
 		
-	protected function processDefineBinaryDataTag($tag) {
-		if($tag->swfFile) {
-			$this->processTags($tag->swfFile->tags);
-		}
-	}
-	
 	protected function processDefineSpriteTag($tag) {
 		$this->addMovieClip($tag->characterId, $tag->tags);
 	}
