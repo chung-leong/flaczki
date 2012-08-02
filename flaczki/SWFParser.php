@@ -982,8 +982,9 @@ class SWFParser {
 			$filter->passes = $this->readUB(5, $bytesAvailable);
 		} else if($id == 3) {
 			$filter = new SWFBevelFilter;
-			$filter->shadowColor = $this->readRGBA($bytesAvailable);
+			// the spec incorrectly states that shadowColor comes first
 			$filter->highlightColor = $this->readRGBA($bytesAvailable);
+			$filter->shadowColor = $this->readRGBA($bytesAvailable);
 			$filter->blurX = $this->readSI32($bytesAvailable);
 			$filter->blurY = $this->readSI32($bytesAvailable);
 			$filter->angle = $this->readSI32($bytesAvailable);

@@ -3,6 +3,7 @@
 class FLAFile {
 	public $document;
 	public $library;
+	public $metadata;
 }
 
 class FLADOMDocument {
@@ -103,6 +104,7 @@ class FLADOMFrame {
 	public $index;
 	public $duration;
 	public $keyMode;
+	public $morphShape;
 	
 	public $elements;
 }
@@ -111,6 +113,32 @@ class FLADOMShape {
 	public $fills;
 	public $strokes;
 	public $edges;
+}
+
+class FLAMorphShape  {
+	public $morphSegments;
+	
+	public $startShape;
+	public $endShape;
+}
+
+class FLAMorphSegment {
+	public $startPointA;
+	public $startPointB;
+	public $strokeIndex1;
+	public $strokeIndex2;
+	public $fillIndex1;
+	public $fillIndex2;
+	
+	public $morphCurves0;
+}
+
+class FLAMorphCurves {
+	public $controlPointA;
+	public $anchorPointA;
+	public $controlPointB;
+	public $anchorPointB;
+	public $isLine;
 }
 
 class FLALineStyle {

@@ -9,6 +9,7 @@ class FLAReconstructor {
 	protected $timeline;
 	protected $frameIndex;
 	protected $frameLabels;
+	protected $removedFrames;
 	protected $sceneNames;
 	protected $jpegTables;
 	protected $dictionary;
@@ -18,10 +19,11 @@ class FLAReconstructor {
 	protected $metadata;
 	protected $tlfTextObjects;
 	protected $tlfTextObjectSymbol;
+	protected $embeddedFLAFile;
 	
 	public function getRequiredTags() {
 		$methodNames = get_class_methods($this);
-		$tags = array('DefineBinaryData');
+		$tags = array();
 		foreach($methodNames as $methodName) {
 			if(preg_match('/^process(\w+?)Tag$/', $methodName, $m)) {
 				$tags[] = $m[1];
@@ -31,7 +33,7 @@ class FLAReconstructor {
 	}
 	
 	public function reconstruct($swfFile, $lastModified = 0) {
-		$this->lastModified = ($lastModified) ? $lastModified : gmtime();
+		$this->lastModified = ($lastModified) ? $lastModified : time();
 		$this->fileID = rand(1, 0xFF);
 		$this->lastItemID = 0x50000000;
 		$this->symbols = array();
@@ -39,22 +41,7 @@ class FLAReconstructor {
 		$this->dictionary = array();
 		$this->tlfTextObjects = array();
 		$this->tlfTextObjectSymbol = null;
-		
-		// look for an embedded swf file		
-		$embeddedSWFFiles = array();
-		$hasPreloader = false;
-		foreach($swfFile->tags as $tag) {
-			if($tag instanceof SWFDefineBinaryDataTag) {
-				$embeddedSWFFiles[$tag->characterId] = $tag->swfFile;
-			} else if($tag instanceof SWFSymbolClassTag) {
-				foreach($tag->names as $characterId => $name) {
-					if(preg_match('/MainTimeline__Content__$/', $name)) {
-						$swfFile = $embeddedSWFFiles[$characterId];
-						break;
-					}
-				}
-			}
-		}
+		$this->embeddedFLAFiles = array();
 		
 		$flaFile = new FLAFile;
 		$flaFile->document = $this->dictionary[0] = new FLADOMDocument;
@@ -78,8 +65,8 @@ class FLAReconstructor {
 		
 		$flaFile->library = $this->library;
 		$flaFile->metadata = $this->metadata;
-
-		return $flaFile;
+		
+		return ($this->embeddedFLAFile) ? $this->embeddedFLAFile : $flaFile;
 	}
 	
 	protected function createTimelines($tags) {
@@ -88,6 +75,7 @@ class FLAReconstructor {
 		$previousFrameIndex = $this->frameIndex;
 		$previousFrameLabels = $this->frameLabels;
 		$previousSceneNames = $this->sceneNames;
+		$previousRemovedFrames = $this->removedFrames;
 		
 		// add frames to timeline
 		$this->timeline = new FLADOMTimeline;
@@ -95,9 +83,16 @@ class FLAReconstructor {
 		$this->frameIndex = 0;
 		$this->frameLabels = null;
 		$this->sceneNames = null;
+		$this->removedFrames = array();
 		
 		// process the tags
-		$this->processTags($tags);
+		foreach($tags as $tag) {
+			$tagName = substr(get_class($tag), 3, -3);
+			$methodName = "process{$tagName}Tag";
+			if(method_exists($this, $methodName)) {
+				$this->$methodName($tag);
+			}
+		}
 
 		// attach frame lables
 		if($this->frameLabels) {
@@ -122,6 +117,7 @@ class FLAReconstructor {
 		$this->frameIndex = $previousFrameIndex;
 		$this->frameLabels = $previousFrameLabels;
 		$this->sceneNames = $previousSceneNames;
+		$this->removedFrames = $previousRemovedFrames;
 		return $timelines;
 	}
 	
@@ -161,8 +157,19 @@ class FLAReconstructor {
 	
 	protected function getFrame($depth) {
 		$layer = $this->getLayer($depth);
-		$frame = $layer->frames[count($layer->frames) - 1];
-		return $frame;
+		if($layer->frames) {
+			$frame = $layer->frames[count($layer->frames) - 1];
+			return $frame;
+		}
+	}
+	
+	protected function getPreviousFrame($depth) {
+		$frame = $this->getFrame($depth);
+		if($frame) {
+			if($frame->index + $frame->duration == $this->frameIndex) {
+				return $frame;
+			}
+		}
 	}
 	
 	protected function addFrame($depth) {
@@ -188,6 +195,10 @@ class FLAReconstructor {
 			$include->itemIcon = "1";
 		}
 		$this->symbols[] = $include;
+	}
+	
+	protected function removeSymbol($object) {
+		unset($this->library[$object->name]);
 	}
 	
 	protected function addMedia($object) {
@@ -226,7 +237,7 @@ class FLAReconstructor {
 		$shape->edges = $this->convertEdges($shapeRecord->edges);
 
 		// put a wrapper around the shape		
-		$frame = new FLADOMFrame;
+		/*$frame = new FLADOMFrame;
 		$frame->index = 0;
 		$frame->keyMode = 9728;
 		$frame->elements = array($shape);
@@ -244,10 +255,23 @@ class FLAReconstructor {
 		$graphic->itemID = $this->getNextItemID();
 		$graphic->name = $timeline->name = $this->getNextLibraryName('Symbol');
 		$graphic->lastModified = $this->lastModified;
-		$graphic->timeline = array($timeline);
+		$graphic->timeline = array($timeline);*/
 		
-		$this->addCharacter($characterId, $graphic);
-		$this->addSymbol($graphic);
+		$this->addCharacter($characterId, $shape);
+		//$this->addSymbol($graphic);
+	}
+		
+	protected function addMorphShape($characterId, $morphRecord) {
+		$morph = new FLAMorphShape;
+		$morph->startShape = new FLADOMShape;
+		$morph->endShape = new FLADOMShape;
+		$morph->morphSegments = $this->convertMorphSegments($morphRecord->startEdges, $morphRecord->endEdges);
+		list($morph->startShape->fills, $morph->endShape->fills) = $this->convertMorphFills($morphRecord->fillStyles);
+		list($morph->startShape->strokes, $morph->endShape->strokes) = $this->convertMorphStrokes($morphRecord->lineStyles);
+		$morph->startShape->edges = $this->convertEdges($morphRecord->startEdges);
+		$morph->endShape->edges = $this->convertEdges($morphRecord->endEdges);
+		
+		$this->addCharacter($characterId, $morph);
 	}
 		
 	protected function addBitmap($characterId, $imageData, $deblocking = false) {
@@ -283,22 +307,16 @@ class FLAReconstructor {
 		}
 	}
 	
-	protected function processTags($tags) {
-		foreach($tags as $tag) {
-			$tagName = substr(get_class($tag), 3, -3);
-			$methodName = "process{$tagName}Tag";
-			if(method_exists($this, $methodName)) {
-				$this->$methodName($tag);
-			}
-		}
-	}
-	
 	protected function processMetadataTag($tag) {
 		$this->metadata = '<?xpacket begin="?" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.2-c003 61.141987, 2011/02/22-12:03:51 ">'
 				. $tag->metadata
 				. '</x:xmpmeta><?xpacket end="w"?>';
 	}
 		
+	protected function processDefineBinaryDataTag($tag) {
+		$this->addCharacter($tag->characterId, ($tag->swfFile) ? $tag->swfFile : $tag->data);
+	}
+	
 	protected function processDefineSpriteTag($tag) {
 		$this->addMovieClip($tag->characterId, $tag->tags);
 	}
@@ -307,7 +325,10 @@ class FLAReconstructor {
 	}
 
 	protected function processPlaceObject2Tag($tag) {
-		if($tag->characterId !== null) {
+		$previousFrame = $this->getPreviousFrame($tag->depth);
+		$previousInstance = ($previousFrame) ? $previousFrame->elements[0] : null;
+		$instance = null;
+		if($tag->characterId !== null) {		
 			$character = $this->getCharacter($tag->characterId);
 			if(!$character) {
 				return;
@@ -315,39 +336,59 @@ class FLAReconstructor {
 			if($character instanceof FLADOMSymbolItem) {
 				$instance = new FLADOMSymbolInstance;
 				$instance->libraryItemName = $character->name;
+				$frame = $this->addFrame($tag->depth);
+				$frame->elements[] = $instance;
+			} else if($character instanceof FLAMorphShape) {
+				if($character->startShape) {
+					$frame = $this->addFrame($tag->depth);
+					$frame->morphShape = $character;
+					
+					$instance = $character->startShape;
+					$character->startShape = null;
+					$character->endShape = null;
+					$frame->elements[] = $instance;
+				}
 			} else {
 				$instance = $character;
+				$frame = $this->addFrame($tag->depth);
+				$frame->elements[] = $instance;
 			}
-			$frame = $this->addFrame($tag->depth);
-			$frame->elements[] = $instance;
-		} 
-		if($tag->matrix !== null) {
-			$instance->matrix = $this->convertMatrix($tag->matrix);
+		} else {
+			if($previousFrame && !$previousFrame->morphShape) {
+				$frame = $this->addFrame($tag->depth);
+				$instance = clone $previousInstance;
+				$frame->elements[] = $instance;
+			}
 		}
-		if($tag->colorTransform !== null) {
-			$instance->color = $this->convertColorTransform($tag->colorTransform);
+		if($instance) {
+			if($tag->matrix !== null) {
+				$instance->matrix = $this->convertMatrix($tag->matrix);
+			}
+			if($tag->colorTransform !== null) {
+				$instance->color = $this->convertColorTransform($tag->colorTransform);
+			}
+			if($tag->name !== null) {
+				$instance->name = $tag->name;
+			}
+			if($tag instanceof SWFPlaceObject3Tag) {			
+				if($tag->blendMode !== null) {
+					static $blendModes = array('normal', 'normal', 'layer', 'multiply', 'screen', 'lighten', 'darken', 'difference', 'add', 'subtract', 'invert', 'alpha', 'erase', 'overlay', 'hardlight');
+					$instance->blendMode = $blendModes[$instance->blendMode];
+				}
+				if($tag->bitmapCache !== null) {
+					$instance->cacheAsBitmap = ($tag->bitmapCache) ? 'true' : 'false';
+				}
+				if($tag->bitmapCacheBackgroundColor !== null) {
+					$instance->matteColor = $this->convertMatteColor($tag->bitmapCacheBackgroundColor);
+				}
+				if($tag->visibility !== null) {
+					$instance->bits32 = ($tag->visibility) ? 'true' : 'false';
+				}
+				if($tag->filters !== null) {
+					$instance->filters = $this->convertFilters($tag->filters);
+				}
+			}
 		}
-		if($tag->name !== null) {
-			$instance->name = $tag->name;
-		}
-		if($tag instanceof SWFPlaceObject3Tag) {			
-			if($tag->blendMode !== null) {
-				static $blendModes = array('normal', 'normal', 'layer', 'multiply', 'screen', 'lighten', 'darken', 'difference', 'add', 'subtract', 'invert', 'alpha', 'erase', 'overlay', 'hardlight');
-				$instance->blendMode = $blendModes[$instance->blendMode];
-			}
-			if($tag->bitmapCache !== null) {
-				$instance->cacheAsBitmap = ($tag->bitmapCache) ? 'true' : 'false';
-			}
-			if($tag->bitmapCacheBackgroundColor !== null) {
-				$instance->matteColor = $this->convertMatteColor($tag->bitmapCacheBackgroundColor);
-			}
-			if($tag->visibility !== null) {
-				$instance->bits32 = ($tag->visibility) ? 'true' : 'false';
-			}
-			if($tag->filters !== null) {
-				$instance->filters = $this->convertFilters($tag->filters);
-			}
-		}		
 	}
 	
 	protected function processPlaceObject3Tag($tag) {
@@ -356,7 +397,7 @@ class FLAReconstructor {
 	
 	protected function processRemoveObjectTag($tag) {
 		$frame = $this->getFrame($tag->depth);
-		$frame->duration = (string) $frame->duration;
+		$this->removedFrame[] = $frame;
 	}
 	
 	protected function processRemoveObject2Tag($tag) {
@@ -379,13 +420,24 @@ class FLAReconstructor {
 		$this->processDefineShapeTag($tag);
 	}
 	
+	protected function processDefineMorphShapeTag($tag) {
+		$this->addMorphShape($tag->characterId, $tag->morphShape);
+	}
+	
+	protected function processDefineMorphShape2Tag($tag) {
+		$this->processDefineMorphShapeTag($tag);
+	}
+	
 	protected function processShowFrameTag($tag) {
 		foreach($this->timeline->layers as $depth => $layer) {
 			$frame = $layer->frames[count($layer->frames) - 1];
-			if(is_int($frame->duration)) {
-				$frame->duration++;
+			if($frame->index + $frame->duration == $this->frameIndex) {
+				if(!in_array($frame, $this->removedFrames)) {
+					$frame->duration++;
+				}
 			}
 		}
+		$this->removedFrames = array();
 		$this->frameIndex++;
 	}
 	
@@ -815,8 +867,17 @@ class FLAReconstructor {
 	
 	protected function processSymbolClassTag($tag) {
 		foreach($tag->names as $characterId => $className) {
-			if($className == 'fl.text.TLFTextField') {
-				$this->tlfTextObjectSymbol = $this->getCharacter($characterId);
+			$object = $this->getCharacter($characterId);
+			if($object instanceof SWFFile) {
+				if(!preg_match('/LoadingAnimation__$/', $className)) {
+					$reconstructor = clone $this;
+					$this->embeddedFLAFile = $reconstructor->reconstruct($object, $this->lastModified);
+				}
+			} else if($className == 'fl.text.TLFTextField') {
+				// remove it from the library
+				$this->tlfTextObjectSymbol = $object;
+				$this->removeSymbol($object);
+			} else {
 			}
 		}
 		
@@ -1111,18 +1172,77 @@ class FLAReconstructor {
 		return $list;
 	}
 	
+	protected function convertMorphFills($records) {
+		$startList = array();
+		$endList = array();
+		foreach($records as $index => $record) {
+			$startFillStyle = $startList[] = new FLAFillStyle;
+			$endFillStyle = $endList[] = new FLAFillStyle;
+			$startFillStyle->index = $endFillStyle->index = $index + 1;
+			switch($record->type) {
+				case 0x00:
+					$startFillStyle->solidColor = $this->convertSolidColor($record->startColor);
+					$endFillStyle->solidColor = $this->convertSolidColor($record->endColor);
+					break;
+				case 0x10:
+					list($startFillStyle->linearGradient, $endFillStyle->linearGradient) = $this->convertLinearMorphGradient($record->gradient, $record->startGradientMatrix, $record->endGradientMatrix);
+					break;
+				case 0x12:
+				case 0x13:
+					list($startFillStyle->radialGradient, $endFillStyle->radialGradient) = $this->convertRadialMorphGradient($record->gradient, $record->startGradientMatrix, $record->endGradientMatrix);
+					break;
+				case 0x40:
+				case 0x41:
+				case 0x42:
+				case 0x43:
+					$fillStyle->bitmapFill = $this->convertBitmapFill($record->type, $record->bitmapId, $record->startBitmapMatrix);
+					$fillStyle->bitmapFill = $this->convertBitmapFill($record->type, $record->bitmapId, $record->endBitmapMatrix);
+					break;
+					
+			}
+		}
+		return array($startList, $endList);
+	}
+	
 	protected function convertStrokes($records) {
 		$list = array();
 		foreach($records as $index => $record) {
 			$lineStyle = $list[] = new FLALineStyle;
 			$lineStyle->index = $index + 1;
-			if($lineStyle->width !== null) {
+			if($record->width !== null) {
 				$lineStyle->width = $record->width;
 			}
-			if($lineStyle instanceof SWFLineStyle2) {
+			if($record instanceof SWFLineStyle2) {
 			}
 		}
 		return $list;
+	}
+	
+	protected function convertMorphStrokes($records) {
+		$startList = array();
+		$endList = array();
+		foreach($records as $index => $record) {
+			$startLineStyle = $startList[] = new FLALineStyle;
+			$endLineStyle = $endList[] = new FLALineStyle;
+			$startLineStyle->index = $endLineStyle->index = $index + 1;			
+			if($record->startWidth !== null) {
+				$startLineStyle->width = $record->startWidth;
+			}
+			if($record->startColor !== null) {
+				$startLineStyle->color = $this->convertRGB($record->startColor);
+				$startLineStyle->width = $this->convertAlpha($record->startColor);
+			}
+			if($record->endWidth !== null) {
+				$endLineStyle->width = $record->endWidth;
+			}
+			if($record->endColor !== null) {
+				$endLineStyle->color = $this->convertRGB($record->endColor);
+				$endLineStyle->width = $this->convertAlpha($record->endColor);
+			}
+			if($record instanceof SWFLineStyle2) {
+			}
+		}
+		return array($startList, $endList);
 	}
 	
 	protected function convertSolidColor($record) {
@@ -1261,6 +1381,110 @@ class FLAReconstructor {
 		$edge->edges = implode($tokens);
 		return $list;
 	}
+	
+	public function convertPoint($x, $y) {
+		return sprintf('#%X.%02X, #%X.%02X', ($x >> 8) & 0xFFFFFF, $x & 0xFF, ($y >> 8) & 0xFFFFFF, $y & 0xFF);
+	}
+	
+	public function convertMorphSegments($startRecords, $endRecords) {
+		$list = array();
+		$startX = 0;
+		$startY = 0;
+		$endX = 0;
+		$endY = 0;
+		foreach($startRecords as $index => $startRecord) {
+			$endRecord = $endRecords[$index];
+			if($startRecord instanceof SWFStyleChange) {
+				if($startRecord->fillStyle0 !== null || $startRecord->fillStyle1 !== null || $startRecord->lineStyle !== null) {
+					$segment = $list[] = new FLAMorphSegment;
+					$curveCount = 0;
+					
+					if($startRecord->fillStyle1 !== null) {
+						$segment->fillIndex1 = $startRecord->fillStyle1 * 2 - 1;
+					}
+					if($startRecord->lineStyle !== null) {
+						$segment->strokeIndex1 = $startRecord->lineStyle * 2 - 1;
+					}
+					if($endRecord->fillStyle1 !== null) {
+						$segment->fillIndex2 = $endRecord->fillStyle1 * 2 - 1;
+					}
+					if($endRecord->lineStyle !== null) {
+						$segment->strokeIndex2 = $endRecord->lineStyle * 2 - 1;
+					}
+				}
+				if($startRecord->moveDeltaX !== null) {
+					$startX = $startRecord->moveDeltaX;
+					$startY = $startRecord->moveDeltaY;
+					$endX = $endRecord->moveDeltaX;
+					$endY = $endRecord->moveDeltaY;
+				}
+				$segment->startPointA = $this->convertPoint($startX, $startY);
+				$segment->startPointB = $this->convertPoint($endX, $endY);
+			} else {
+				$curves = new FLAMorphCurves;
+				$isLine = true;
+				if($startRecord instanceof SWFStraightEdge) {
+					$ax = $startX;
+					$ay = $startY;
+					if($startRecord->deltaX && $startRecord->deltaY) {
+						$ax += $startRecord->deltaX;
+						$ay += $startRecord->deltaY;
+					} else if($startRecord->deltaX) {
+						$ax += $startRecord->deltaX;
+					} else {
+						$ay += $startRecord->deltaY;
+					}
+					$acx = $ax + ($ax - $startX) / 2; 
+					$acy = $ay + ($ay - $startY) / 2; 
+				} else if($startRecord instanceof SWFQuadraticCurve) {
+					$acx = $startX + $startRecord->controlDeltaX;
+					$acy = $startY + $startRecord->controlDeltaY;
+					$ax = $acx + $startRecord->anchorDeltaX;
+					$ay = $acy + $startRecord->anchorDeltaY;
+					$isLine = false;
+				}
+				if($endRecord instanceof SWFStraightEdge) {
+					$bx = $endX;
+					$by = $endY;
+					if($endRecord->deltaX && $endRecord->deltaY) {
+						$bx += $endRecord->deltaX;
+						$by += $endRecord->deltaY;
+					} else if($endRecord->deltaX) {
+						$bx += $endRecord->deltaX;
+					} else {
+						$by += $endRecord->deltaY;
+					}
+					$bcx = $bx + ($bx - $endX) / 2; 
+					$bcy = $by + ($by - $endY) / 2;
+					$curves->isLine = 'true';
+				} else if($endRecord instanceof SWFQuadraticCurve) {
+					$bcx = $endX + $endRecord->controlDeltaX;
+					$bcy = $endY + $endRecord->controlDeltaY;
+					$bx = $bcx + $endRecord->anchorDeltaX;
+					$by = $bcy + $endRecord->anchorDeltaY;
+					$isLine = false;
+				}
+				
+				$curves = new FLAMorphCurves;
+				$curves->controlPointA = $this->convertPoint($acx, $acy);
+				$curves->controlPointB = $this->convertPoint($bcx, $bcy);
+				$curves->anchorPointA = $this->convertPoint($ax, $ay);
+				$curves->anchorPointB = $this->convertPoint($bx, $by);
+				if($isLine) {
+					$curves->isLine = 'true';
+				}
+				$name = "morphCurves$curveCount";
+				$segment->$name = $curves;
+				$startX = $ax;
+				$startY = $ay;
+				$endX = $bx;
+				$endY = $by;
+				$curveCount++;
+			}
+		}
+		return $list;
+	}
+	
 }
 
 ?>

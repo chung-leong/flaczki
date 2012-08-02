@@ -105,7 +105,7 @@ class FLAAssembler {
 							}
 							fwrite($stream, "</$name>\n");
 						}
-					} else if(is_object($value)) {
+					} else if(is_object($value) && $value) {
 						if(method_exists($value, 'write')) {
 							$value->write($stream, $name);
 						} else {
