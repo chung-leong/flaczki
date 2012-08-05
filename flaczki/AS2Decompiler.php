@@ -4,62 +4,64 @@ class AS2Decompiler {
 	protected static $undefined;
 
 	public function decompile($byteCodes) {
-		// set up execution environment
-		$cxt = new AS2DecompilerContext;
-		$cxt->stack = array();
-		$cxt->registers = array();
-		$cxt->byteCodes = $byteCodes;
-		$cxt->byteCodeLength = strlen($byteCodes);
-		$cxt->nextPosition = 0;
-		
 		if(!self::$undefined) {
 			self::$undefined = new AS2Variable;
 			self::$undefined->name = 'undefined';
 		}
 			
-		// decompile the ops into expressions
-		$expressions = $this->decompileInstructions($cxt);
-		
-		// divide ops into basic blocks
-		$blocks = $this->createBasicBlocks($expressions);
-		unset($expressions);
-		
-		// recreate loops and conditional statements
-		$this->structureLoops($blocks);
+		$cxt = $this->createContext($byteCodes);
+		$function = new AS2Function;
+		$this->decompileFunctionBody($cxt, $function);
+		return $function->expressions;
 	}
 	
-	protected function decompileInstructions($cxt) {
+	protected function createContext($byteCodes, $preloadedVariables = array()) {
+		$cxt = new AS2DecompilerContext;
+		$cxt->byteCodes = $byteCodes;
+		$cxt->byteCodeLength = strlen($byteCodes);
+		$cxt->nextPosition = 0;
+		
+		foreach($preloadedVariables as $index => $name) {
+			$var = new AS2Variable;
+			$var->name = $name;
+			$cxt->registers[$index] = $var;
+		}
+		return $cxt;
+	}
+	
+	protected function decompileFunctionBody($cxt, $function) {
+		// decompile the ops into expressions
 		$expressions = array();	
 		$contexts = array($cxt);
 		while($contexts) {
 			$cxt = array_shift($contexts);
-			while(($expr = $this->decompileNextInstruction($cxt)) !== false) {
+			while(($expr = $this->decompileNextInstruction($cxt)) !== false) {				
 				if($expr) {
-					if($expr instanceof AS2FlowControl) {
-						if($expr instanceof AS2ConditionalBranch) {
-							// look for ternary conditional operator
-							if($this->decompileTernaryOperator($cxt, $expr)) {
-								// the result is on the stack
-								continue;
-							}
-						
-							// look ahead find any logical statements that should be part of 
-							// the branch's condition
-							$this->decompileBranch($cxt, $expr);
-						
-							// clone the context and add it to the list
-							$cxtT = clone $cxt;
-							$cxtT->nextPosition = $expr->positionIfTrue;
-							$contexts[] = $cxtT;
-							
-							$cxt->nextPosition = $expr->positionIfFalse;
-						} else if($expr instanceof AS2UnconditionalBranch) {
-							// jump to the location and continue
-							$cxt->nextPosition = $expr->position;
-						}
-					}
-					
 					if(!isset($expressions[$cxt->lastPosition])) {
+						if($expr instanceof AS2FlowControl) {
+							if($expr instanceof AS2ConditionalBranch) {
+								// look for ternary conditional operator
+								if($this->decompileTernaryOperator($cxt, $expr)) {
+									// the result is on the stack
+									continue;
+								}
+							
+								// look ahead find any logical statements that should be part of 
+								// the branch's condition							
+								$this->decompileBranch($cxt, $expr);
+							
+								// clone the context and add it to the list
+								$cxtT = clone $cxt;
+								$cxtT->nextPosition = $expr->positionIfTrue;
+								$contexts[] = $cxtT;
+								
+								$cxt->nextPosition = $expr->positionIfFalse;
+							} else if($expr instanceof AS2UnconditionalBranch) {
+								// jump to the location and continue
+								$cxt->nextPosition = $expr->position;
+							}
+						}
+					
 						$expressions[$cxt->lastPosition] = $expr;
 					} else {
 						// we've been here already
@@ -68,7 +70,21 @@ class AS2Decompiler {
 				}
 			}
 		}
-		return $expressions;
+		
+		// create basic blocks
+		$blocks = $this->createBasicBlocks($expressions);
+		unset($expressions);
+		
+		// look for loops, from the innermost to the outermost
+		$loops = $this->createLoops($blocks, $function);
+		
+		// recreate loops and conditional statements
+		$this->structureLoops($loops, $blocks, $function);
+		
+		// assign names to unnamed variables
+		foreach($cxt->unnamedLocalVariables as $index => $var) {
+			$var->name = "lv" . ($index + 1);
+		}
 	}
 
 	protected function decompileBranch($cxt, $branch) {
@@ -84,8 +100,10 @@ class AS2Decompiler {
 			$cxtF->branchOnTrue = false;
 			$contexts = array($cxtT, $cxtF);
 			$count = 0;
+			$scanned = array();
 			while($contexts) {
 				$cxt = array_shift($contexts);
+				$scanned[$cxt->nextPosition] = true;
 				while(($expr = $this->decompileNextInstruction($cxt)) !== false) {
 					if($expr) {
 						if($expr instanceof AS2ConditionalBranch) {
@@ -94,14 +112,19 @@ class AS2Decompiler {
 							} else {
 								$cxt->relatedBranch->branchIfFalse = $expr;
 							}
-							$cxtT = clone $cxt;
-							$cxtT->nextPosition = $expr->positionIfTrue;
-							$cxtT->relatedBranch = $expr;
-							$cxtT->branchOnTrue = true;
-							$contexts[] = $cxtT;
-							$cxt->nextPosition = $expr->positionIfFalse;
-							$cxt->relatedBranch = $expr;
-							$cxt->branchOnTrue = false;
+							
+							if(!isset($scanned[$expr->positionIfTrue]) && !isset($scanned[$expr->positionIfFalse])) {
+								$cxtT = clone $cxt;
+								$cxtT->nextPosition = $expr->positionIfTrue;
+								$cxtT->relatedBranch = $expr;
+								$cxtT->branchOnTrue = true;
+								$contexts[] = $cxtT;
+								$cxt->nextPosition = $expr->positionIfFalse;
+								$cxt->relatedBranch = $expr;
+								$cxt->branchOnTrue = false;
+							} else {
+								break;
+							}
 						} else {
 							break;
 						}
@@ -256,6 +279,128 @@ class AS2Decompiler {
 		return false;
 	}
 	
+	public function decompileNextInstruction($cxt) {
+		static $handlers = array(
+			0x0A => 'doAdd',
+			0x47 => 'doAdd2',
+			0x10 => 'doAnd',
+			0x33 => 'doAsciiToChar',
+			0x60 => 'doBitAnd',
+			0x63 => 'doBitLShift',
+			0x61 => 'doBitOr',
+			0x64 => 'doBitRShift',
+			0x65 => 'doBitURShift',
+			0x62 => 'doBitXor',
+			0x9E => 'doCall',
+			0x3D => 'doCallFunction',
+			0x52 => 'doCallMethod',
+			0x2B => 'doCastOp',
+			0x32 => 'doCharToAscii',
+			0x24 => 'doCloneSprite',
+			0x88 => 'doConstantPool',
+			0x51 => 'doDecrement',
+			0x9B => 'doDefineFunction',
+			0x8E => 'doDefineFunction2',
+			0x3C => 'doDefineLocal',
+			0x41 => 'doDefineLocal2',
+			0x3A => 'doDelete',
+			0x3B => 'doDelete2',
+			0x0D => 'doDivide',
+			0x28 => 'doEndDrag',
+			0x46 => 'doEnumerate',
+			0x55 => 'doEnumerate2',
+			0x0E => 'doEquals',
+			0x49 => 'doEquals2',
+			0x69 => 'doExtends',
+			0x4E => 'doGetMember',
+			0x22 => 'doGetProperty',
+			0x34 => 'doGetTime',
+			0x83 => 'doGetURL',
+			0x9A => 'doGetURL2',
+			0x1C => 'doGetVariable',
+			0x81 => 'doGotoFrame',
+			0x9F => 'doGotoFrame2',
+			0x8C => 'doGoToLabel',
+			0x67 => 'doGreater',
+			0x9D => 'doIf',
+			0x2C => 'doImplementsOp',
+			0x50 => 'doIncrement',
+			0x42 => 'doInitArray',
+			0x43 => 'doInitObject',
+			0x54 => 'doInstanceOf',
+			0x99 => 'doJump',
+			0x0F => 'doLess',
+			0x48 => 'doLess2',
+			0x37 => 'doMBAsciiToChar',
+			0x36 => 'doMBCharToAscii',
+			0x35 => 'doMBStringExtract',
+			0x31 => 'doMBStringLength',
+			0x3F => 'doModulo',
+			0x0C => 'doMultiply',
+			0x53 => 'doNewMethod',
+			0x40 => 'doNewObject',
+			0x04 => 'doNextFrame',
+			0x00 => 'doNoOp',
+			0x12 => 'doNot',
+			0x11 => 'doOr',
+			0x06 => 'doPlay',
+			0x17 => 'doPop',
+			0x05 => 'doPrevFrame',
+			0x96 => 'doPush',
+			0x4C => 'doPushDuplicate',
+			0x30 => 'doRandomNumber',
+			0x25 => 'doRemoveSprite',
+			0x3E => 'doReturn',
+			0x4F => 'doSetMember',
+			0x23 => 'doSetProperty',
+			0x8B => 'doSetTarget',
+			0x20 => 'doSetTarget2',
+			0x1D => 'doSetVariable',
+			0x4D => 'doStackSwap',
+			0x27 => 'doStartDrag',
+			0x07 => 'doStop',
+			0x09 => 'doStopSounds',
+			0x87 => 'doStoreRegister',
+			0x66 => 'doStrictEquals',
+			0x21 => 'doStringAdd',
+			0x13 => 'doStringEquals',
+			0x15 => 'doStringExtract',
+			0x68 => 'doStringGreater',
+			0x14 => 'doStringLength',
+			0x29 => 'doStringLess',
+			0x0B => 'doSubtract',
+			0x45 => 'doTargetPath',
+			0x08 => 'doToggleQualty',
+			0x18 => 'doToInteger',
+			0x4A => 'doToNumber',
+			0x4B => 'doToString',
+			0x26 => 'doTrace',
+			0x8F => 'doTry',
+			0x44 => 'doTypeOf',
+			0x8A => 'doWaitForFrame',
+			0x8D => 'doWaitForFrame2',
+			0x94 => 'doWith',
+		);
+		
+		if($cxt->nextPosition < $cxt->byteCodeLength) {
+			$cxt->lastPosition = $cxt->nextPosition;
+			$cxt->dataRemaining = 1;
+			$code = $this->readUI8($cxt);
+			$method = $handlers[$code];
+			if($code >= 0x80) {
+				$cxt->dataRemaining = 2;
+				$cxt->dataRemaining = $this->readUI16($cxt);
+			} 
+			$expr = $this->$method($cxt);
+			if($cxt->dataRemaining) {
+				$cxt->nextPosition += $cxt->dataRemaining;
+			}
+			return $expr;
+		} else {
+			return false;
+		}
+	}
+	
 	protected function createBasicBlocks($expressions) {
 		// find block entry positions
 		$isEntry = array(0 => true);
@@ -317,6 +462,115 @@ class AS2Decompiler {
 		return $blocks;
 	}
 
+	protected function structureLoops($loops, $blocks, $function) {
+		// convert the loops into either while or do-while
+		foreach($loops as $loop) {
+			if($loop->headerPosition !== null) {
+				// header is the block containing the conditional statement
+				// it is not the first block
+				$headerBlock = $blocks[$loop->headerPosition];
+				$headerBlock->structured = true;
+				
+				// see if there's an unconditional branch into the loop
+				$entryBlock = $blocks[$loop->entrancePosition];
+				if($entryBlock->lastExpression instanceof AS2UnconditionalBranch) {
+					if($entryBlock->lastExpression->position == $headerBlock->lastExpression->position) {
+						// it goes to the beginning of the loop so it must be a do-while
+						$expr = new AS2DoWhile;
+					} else {			
+						$expr = new AS2While;
+					}
+					$entryBlock->lastExpression = $expr;
+				} else {
+					// we just fall into the loop
+					if($loop->headerPosition == $loop->continuePosition) {
+						// the conditional statement is at the "bottom" of the loop so it's a do-while
+						$expr = new AS2DoWhile;
+					} else {
+						$expr = new AS2While;
+					}
+					$entryBlock->expressions[] = $expr;
+				}
+
+				if($headerBlock->lastExpression->positionIfFalse == $loop->continuePosition) {
+					// if the loop continues only when the condition is false
+					// then we need to invert the condition
+					$expr->condition = $this->invertCondition($headerBlock->lastExpression->condition);
+				} else {
+					$expr->condition = $headerBlock->lastExpression->condition;
+				}
+			} else {
+				// no header--the "loop" is the function itself
+				$expr = $function;
+			}
+
+			// convert jumps to breaks and continues
+			foreach($loop->contentPositions as $blockPosition) {
+				$block = $blocks[$blockPosition];
+				$this->structureBreakContinue($block, $loop->continuePosition, $loop->breakPosition);
+			}
+
+			// recreate if statements
+			foreach($loop->contentPositions as $blockPosition) {
+				$block = $blocks[$blockPosition];
+				$this->structureIf($block, $blocks);
+			}
+
+			// mark remaining blocks that hasn't been marked as belonging to the loop
+			foreach($loop->contentPositions as $blockPosition) {
+				$block = $blocks[$blockPosition];
+				if($block->destination === null) {
+					$block->destination =& $expr->expressions;
+				}
+			}
+		}
+		
+		// copy expressions to where they belong
+		foreach($blocks as $ip => $block) {
+			if(is_array($block->destination)) {
+				foreach($block->expressions as $expr) {
+					if($expr instanceof AS2Expression) {
+						$block->destination[] = $expr;
+					}
+				}
+			}
+		}
+	}
+	
+	protected function structureBreakContinue($block, $continuePosition, $breakPosition) {
+		if($block->lastExpression instanceof AS2UnconditionalBranch && !$block->structured) {
+			// if it's a jump to the break position (i.e. to the block right after the while loop) then it's a break 
+			// if it's a jump to the continue position (i.e. the tail block containing the backward jump) then it's a continue 
+			if($block->lastExpression->position === $breakPosition) {
+				$block->lastExpression = new AS2Break;
+				$block->structured;
+			} else if($block->lastExpression->position === $continuePosition) {
+				$block->lastExpression = new AS2Continue;
+				$block->structured;
+			}
+		}
+	}
+		
+	protected function structureIf($block, $blocks) {
+		if($block->lastExpression instanceof AS2ConditionalBranch && !$block->structured) {
+			$tBlock = $blocks[$block->lastExpression->positionIfTrue];
+			$fBlock = $blocks[$block->lastExpression->positionIfFalse];
+			
+			$if = new AS2IfElse;
+			// the false block contains the expressions inside the if statement (the conditional jump is there to skip over it)
+			// the condition for the if statement is thus the invert
+			$if->condition = $this->invertCondition($block->lastExpression->condition);
+			$fBlock->destination =& $if->expressionsIfTrue;
+			
+			// if there's not other way to enter the true block, then its statements must be in an else block
+			if(count($tBlock->from) == 1) {
+				$tBlock->destination =& $if->expressionsIfFalse;
+			}
+			$block->lastExpression = $if;
+			$block->structured = true;
+		}
+	}
+	
 	protected function createLoops($blocks) {
 		// see which blocks dominates
 		$dominators = array();		
@@ -359,7 +613,11 @@ class AS2Decompiler {
 							$loop->headerPosition = $to;
 							$loop->continuePosition = $blockPosition;
 							$loop->breakPosition = $headerBlock->lastExpression->positionIfFalse;
-							$loop->contentPositions = array($loop->headerPosition, $loop->continuePosition);
+							$loop->entrancePosition = $headerBlock->from[0];
+							$loop->contentPositions = array($loop->headerPosition);
+							if($loop->continuePosition != $loop->headerPosition) {
+								$loop->contentPositions[] = $loop->continuePosition;
+							}
 							
 							// all blocks that leads to the continue block are in the loop
 							// we won't catch blocks whose last statement is return, but that's okay
@@ -367,8 +625,8 @@ class AS2Decompiler {
 							while($stack) {
 								$fromPosition = array_pop($stack);
 								$fromBlock = $blocks[$fromPosition];
-								foreach($fromBlock->from as $fromPosition) {
-									if(!in_array($fromPosition, $loop->contentPositions)) {
+								foreach($fromBlock->from as $fromPosition) {									
+									if($fromPosition != $loop->entrancePosition && !in_array($fromPosition, $loop->contentPositions)) {
 										$loop->contentPositions[] = $fromPosition;
 										array_push($stack, $fromPosition);
 									}
@@ -376,7 +634,6 @@ class AS2Decompiler {
 							}
 							
 							sort($loop->contentPositions);
-							$loop->entrancePosition = $headerBlock->from[0];
 							$loops[$blockPosition] = $loop;
 							$block->structured = true;
 						}
@@ -388,7 +645,7 @@ class AS2Decompiler {
 		// sort the loops, moving innermost ones to the beginning
 		usort($loops, array($this, 'compareLoops'));
 		
-		// add outter loop encompassing the method body
+		// add outer loop encompassing the function body
 		$loop = new AS2Loop;
 		$loop->contentPositions = array_keys($blocks);
 		$loops[] = $loop;
@@ -405,126 +662,37 @@ class AS2Decompiler {
 		return 0;
 	}
 	
-	public function decompileNextInstruction($cxt) {
-		static $opNames = array(
-			0x0A => 'Add',
-			0x47 => 'Add2',
-			0x10 => 'And',
-			0x33 => 'AsciiToChar',
-			0x60 => 'BitAnd',
-			0x63 => 'BitLShift',
-			0x61 => 'BitOr',
-			0x64 => 'BitRShift',
-			0x65 => 'BitURShift',
-			0x62 => 'BitXor',
-			0x9E => 'Call',
-			0x3D => 'CallFunction',
-			0x52 => 'CallMethod',
-			0x2B => 'CastOp',
-			0x32 => 'CharToAscii',
-			0x24 => 'CloneSprite',
-			0x88 => 'ConstantPool',
-			0x51 => 'Decrement',
-			0x9B => 'DefineFunction',
-			0x8E => 'DefineFunction2',
-			0x3C => 'DefineLocal',
-			0x41 => 'DefineLocal2',
-			0x3A => 'Delete',
-			0x3B => 'Delete2',
-			0x0D => 'Divide',
-			0x28 => 'EndDrag',
-			0x46 => 'Enumerate',
-			0x55 => 'Enumerate2',
-			0x0E => 'Equals',
-			0x49 => 'Equals2',
-			0x69 => 'Extends',
-			0x4E => 'GetMember',
-			0x22 => 'GetProperty',
-			0x34 => 'GetTime',
-			0x83 => 'GetURL',
-			0x9A => 'GetURL2',
-			0x1C => 'GetVariable',
-			0x81 => 'GotoFrame',
-			0x9F => 'GotoFrame2',
-			0x8C => 'GoToLabel',
-			0x67 => 'Greater',
-			0x9D => 'If',
-			0x2C => 'ImplementsOp',
-			0x50 => 'Increment',
-			0x42 => 'InitArray',
-			0x43 => 'InitObject',
-			0x54 => 'InstanceOf',
-			0x99 => 'Jump',
-			0x0F => 'Less',
-			0x48 => 'Less2',
-			0x37 => 'MBAsciiToChar',
-			0x36 => 'MBCharToAscii',
-			0x35 => 'MBStringExtract',
-			0x31 => 'MBStringLength',
-			0x3F => 'Modulo',
-			0x0C => 'Multiply',
-			0x53 => 'NewMethod',
-			0x40 => 'NewObject',
-			0x04 => 'NextFrame',
-			0x00 => 'NoOp',
-			0x12 => 'Not',
-			0x11 => 'Or',
-			0x06 => 'Play',
-			0x17 => 'Pop',
-			0x05 => 'PrevFrame',
-			0x96 => 'Push',
-			0x4C => 'PushDuplicate',
-			0x30 => 'RandomNumber',
-			0x25 => 'RemoveSprite',
-			0x3E => 'Return',
-			0x4F => 'SetMember',
-			0x23 => 'SetProperty',
-			0x8B => 'SetTarget',
-			0x20 => 'SetTarget2',
-			0x1D => 'SetVariable',
-			0x4D => 'StackSwap',
-			0x27 => 'StartDrag',
-			0x07 => 'Stop',
-			0x09 => 'StopSounds',
-			0x87 => 'StoreRegister',
-			0x66 => 'StrictEquals',
-			0x21 => 'StringAdd',
-			0x13 => 'StringEquals',
-			0x15 => 'StringExtract',
-			0x68 => 'StringGreater',
-			0x14 => 'StringLength',
-			0x29 => 'StringLess',
-			0x0B => 'Subtract',
-			0x45 => 'TargetPath',
-			0x08 => 'ToggleQualty',
-			0x18 => 'ToInteger',
-			0x4A => 'ToNumber',
-			0x4B => 'ToString',
-			0x26 => 'Trace',
-			0x8F => 'Try',
-			0x44 => 'TypeOf',
-			0x8A => 'WaitForFrame',
-			0x8D => 'WaitForFrame2',
-			0x94 => 'With',
-		);
-		
-		if($cxt->nextPosition < $cxt->byteCodeLength) {
-			$cxt->lastPosition = $cxt->nextPosition;
-			$code = ord($cxt->byteCodes[$cxt->nextPosition++]);
-			$name = $opNames[$code];
-			$method = "do$name";
-			if($code >= 0x80) {
-				$count = $this->extractUI16($cxt->byteCodes, $cxt->nextPosition);
-				$data = substr($cxt->byteCodes, $cxt->nextPosition, $count);
-				$cxt->nextPosition += $count;
-				$expr = $this->$method($cxt, $data);
-			} else {
-				$expr = $this->$method($cxt);
-			}
-			return $expr;
-		} else {
-			return false;
+	protected function invertBinaryOperator($operator) {
+		switch($operator) {
+			case '==': return '!='; 
+			case '!=': return '==';
+			case '===': return '!==';
+			case '!==': return '===';
+			case '!==': return '===';
+			case '>': return '<=';
+			case '<': return '>=';
+			case '>=': return '<';
+			case '<=': return '>';
 		}
+	}
+	
+	protected function invertCondition($expr) {
+		if($expr instanceof AS2UnaryOperation) {
+			if($expr->operator == '!') {
+				return $expr->operand;
+			}
+		} else if($expr instanceof AS2BinaryOperation) {
+			if($newOperator = $this->invertBinaryOperator($expr->operator)) {
+				$newExpr = clone $expr;
+				$newExpr->operator = $newOperator;
+				return $newExpr;
+			}
+		}
+		$newExpr = new AS2UnaryOperation;
+		$newExpr->operator = '!';
+		$newExpr->operand = $expr;
+		$newExpr->precedence = 3;
+		return $newExpr;
 	}
 	
 	protected function doBinaryOp($cxt, $operator, $precedence) {
@@ -598,14 +766,13 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '^', 10);
 	}
 
-	protected function doCall($cxt, $data) {
+	protected function doCall($cxt) {
 	}
 
 	protected function doCallFunction($cxt) {
 		$expr = new AS2FunctionCall;
 		$expr->name = array_pop($cxt->stack);
 		$argumentCount = array_pop($cxt->stack);
-		$expr->arguments = array();
 		for($i = 0; $i < $argumentCount; $i++) {
 			$expr->arguments[] = array_pop($cxt->stack);
 		}
@@ -619,7 +786,7 @@ class AS2Decompiler {
 		$this->doCallFunction($cxt);
 	}
 
-	protected function doCastOp($cxt, $data) {
+	protected function doCastOp($cxt) {
 	}
 
 	protected function doCharToAscii($cxt) {
@@ -628,15 +795,14 @@ class AS2Decompiler {
 		$this->doCallFunction($cxt);
 	}
 
-	protected function doCloneSprite($cxt, $data) {
+	protected function doCloneSprite($cxt) {
 	}
 
-	protected function doConstantPool($cxt, $data) {
-		$p = 0;
-		$count = $this->extractUI16($data, $p);
+	protected function doConstantPool($cxt) {
+		$count = $this->readUI16($cxt);
 		$cxt->constantPool = array();
 		for($i = 0; $i < $count; $i++) {
-			$cxt->constantPool[] = $this->extractString($data, $p);
+			$cxt->constantPool[] = $this->readString($cxt);
 		}
 	}
 
@@ -644,10 +810,71 @@ class AS2Decompiler {
 		$this->doUnaryOp($cxt, '--', 3);
 	}
 
-	protected function doDefineFunction($cxt, $data) {
+	protected function doDefineFunction($cxt) {
+		$expr = new AS2Function;
+		$expr->name = $this->readString($cxt);
+		$argumentCount = $this->readUI16($cxt);
+		for($i = 0; $i < $argumentCount; $i++) {
+			$argument = new AS2Variable;
+			$argument->name = $this->readString($cxt);
+			$expr->arguments[] = $argument;
+		}
+		$codeSize = $this->readUI16($cxt);
+		$byteCodes = $this->readBytes($codeSize);
+		$cxt = $this->createContext($byteCodes);
+		$this->decompileFunctionBody($cxt, $expr);
+		if($expr->name) {
+			return $expr;
+		} else {
+			array_push($cxt->stack, $expr);
+		}
 	}
 
-	protected function doDefineFunction2($cxt, $data) {
+	protected function doDefineFunction2($cxt) {
+		$expr = new AS2Function;
+		$expr->name = $this->readString($cxt);
+		$argumentCount = $this->readUI16($cxt);
+		$registerCount = $this->readUI8($cxt);
+		$flags = $this->readUI16($cxt);
+		$preloadedVariables = array();
+		for($i = 0; $i < $argumentCount; $i++) {
+			$registerIndex = $this->readUI8($cxt);
+			$argument = new AS2Variable;
+			$argument->name = $this->readString($cxt);
+			$expr->arguments[] = $argument;
+			if($registerIndex) {
+				$preloadedVariables[$registerIndex] = $argument->name;
+			}
+		}
+		$registerIndex = 1;
+		if($flags & 0x0001) {	// PreloadThis
+			$preloadedVariables[$registerIndex++] = 'this';
+		}
+		if($flags & 0x0004) {	// PreloadArguments
+			$preloadedVariables[$registerIndex++] = 'arguments';
+		}
+		if($flags & 0x0010) {	// PreloadSuper
+			$preloadedVariables[$registerIndex++] = 'super';
+		}
+		if($flags & 0x0040) {	// PreloadRoot
+			$preloadedVariables[$registerIndex++] = '_root';
+		}
+		if($flags & 0x0080) {	// PreloadParent
+			$preloadedVariables[$registerIndex++] = '_parent';
+		}
+		if($flags & 0x0100) {	// PreloadGlobal
+			$preloadedVariables[$registerIndex++] = '_global';
+		}
+		$codeSize = $this->readUI16($cxt);
+		$cxt->dataRemaining = $codeSize;
+		$byteCodes = $this->readBytes($cxt, $codeSize);
+		$cxt = $this->createContext($byteCodes, $preloadedVariables);
+		$this->decompileFunctionBody($cxt, $expr);
+		if($expr->name) {
+			return $expr;
+		} else {
+			array_push($cxt->stack, $expr);
+		}
 	}
 
 	protected function doDefineLocal($cxt) {
@@ -675,13 +902,13 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '/', 4);
 	}
 
-	protected function doEndDrag($cxt, $data) {
+	protected function doEndDrag($cxt) {
 	}
 
-	protected function doEnumerate($cxt, $data) {
+	protected function doEnumerate($cxt) {
 	}
 
-	protected function doEnumerate2($cxt, $data) {
+	protected function doEnumerate2($cxt) {
 	}
 
 	protected function doEquals($cxt) {
@@ -692,17 +919,17 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '==', 8);
 	}
 
-	protected function doExtends($cxt, $data) {
+	protected function doExtends($cxt) {
 	}
 
-	protected function doGetMember($cxt, $data) {
+	protected function doGetMember($cxt) {
 		$expr = new AS2Variable;
 		$expr->name = array_pop($cxt->stack);
 		array_push($expr);
 		$this->doBinaryOp($cxt, '.', 1);
 	}
 
-	protected function doGetProperty($cxt, $data) {
+	protected function doGetProperty($cxt) {
 		static $propertyNames = array('_x', '_y', '_xscale', '_yscale', '_currentframe', '_totalframes', '_alpha', '_visible', '_width', '_height', '_rotation', '_target', '_framesloaded', '_name', '_droptarget', '_url', '_highquality', '_focusrect', '_soundbuftime', '_quality', '_xmouse', '_ymouse' );
 		$index = array_pop($cxt->stack);
 		$expr = new AS2Variable;
@@ -711,24 +938,23 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '.', 1);
 	}
 
-	protected function doGetTime($cxt, $data) {
+	protected function doGetTime($cxt) {
 		array_push($cxt->stack, 0);
 		array_push($cxt->stack, 'getTimer');
 		$this->doCallFunction($cxt);
 	}
 
-	protected function doGetURL($cxt, $data) {
-		$p = 0;
-		$target = $this->extractString($data, $p);
-		$url = $this->extractString($data, $p);
+	protected function doGetURL($cxt) {
+		$target = $this->readString($cxt);
+		$url = $this->readString($cxt);
 		$flags = ($target == '_level0' || $target == '_level1') ? 0x02 : 0;
 		array_push($cxt->stack, $url);
 		array_push($cxt->stack, $target);
 		$this->doGetURL2($cxt, chr($flags));
 	}
 
-	protected function doGetURL2($cxt, $data) {
-		$flags = ord($data[0]);
+	protected function doGetURL2($cxt) {
+		$flags = $this->readUI8($cxt);
 		$method = $flags >> 6;
 		$target = array_pop($cxt->stack);
 		$url = array_pop($cxt->stack);
@@ -774,17 +1000,17 @@ class AS2Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 
-	protected function doGotoFrame($cxt, $data) {
-		$index = $this->extractUI16($data);
+	protected function doGotoFrame($cxt) {
+		$index = $this->readUI16($cxt);
 		array_push($cxt->stack, $index);
 		array_push($cxt->stack, 'gotoAndPlay');
 		return $this->doCallTargetMethod($cxt);
 	}
 
-	protected function doGotoFrame2($cxt, $data) {
-		$flags = $this->extractUI16($data);
+	protected function doGotoFrame2($cxt) {
+		$flags = $this->readUI16($cxt);
 		if($flags & 0x02) {
-			$sceneBias = $this->extractUI16($data, 1);
+			$sceneBias = $this->readUI16($cxt);
 			$frame = array_pop($cxt->stack);
 			array_push($cxt->stack, $frame + $sceneBias);
 		}
@@ -797,8 +1023,9 @@ class AS2Decompiler {
 		return $this->doCallTargetMethod($cxt);
 	}
 
-	protected function doGoToLabel($cxt, $data) {
-		array_push($cxt->stack, $data);
+	protected function doGoToLabel($cxt) {
+		$label = $this->readString($cxt);
+		array_push($cxt->stack, $label);
 		array_push($cxt->stack, 'gotoAndPlay');
 		return $this->doCallTargetMethod($cxt);
 	}
@@ -807,8 +1034,8 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '>', 7);
 	}
 
-	protected function doIf($cxt, $data) {
-		$offset = $this->extractSI16($data);
+	protected function doIf($cxt) {
+		$offset = $this->readSI16($cxt);
 		$ctrl = new AS2ConditionalBranch;
 		$ctrl->condition = array_pop($cxt->stack);
 		$ctrl->position = $ctrl->positionIfTrue = $cxt->nextPosition + $offset;
@@ -816,25 +1043,27 @@ class AS2Decompiler {
 		return $ctrl;
 	}
 
-	protected function doImplementsOp($cxt, $data) {
+	protected function doImplementsOp($cxt) {
 	}
 
 	protected function doIncrement($cxt) {
 		$this->doUnaryOp($cxt, '++', 3);
 	}
 
-	protected function doInitArray($cxt, $data) {
+	protected function doInitArray($cxt) {
+		$count = array_pop($cxt->stack);
+		
 	}
 
-	protected function doInitObject($cxt, $data) {
+	protected function doInitObject($cxt) {
 	}
 
 	protected function doInstanceOf($cxt) {
 		$this->doBinaryOp($cxt, 'instanceof', 7);
 	}
 
-	protected function doJump($cxt, $data) {
-		$offset = $this->extractSI16($data);
+	protected function doJump($cxt) {
+		$offset = $this->readSI16($cxt);
 		$ctrl = new AS2UnconditionalBranch;
 		$ctrl->position = $cxt->nextPosition + $offset;
 		return $ctrl;
@@ -880,10 +1109,10 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '*', 4);
 	}
 
-	protected function doNewMethod($cxt, $data) {
+	protected function doNewMethod($cxt) {
 	}
 
-	protected function doNewObject($cxt, $data) {
+	protected function doNewObject($cxt) {
 	}
 
 	protected function doNextFrame($cxt) {
@@ -912,7 +1141,9 @@ class AS2Decompiler {
 	protected function doPop($cxt) {
 		$expr = array_pop($cxt->stack);
 		if(!$cxt->stack) {
-			return $expr;
+			if($expr instanceof AS2Expression && !($expr instanceof AS2Variable)) {
+				return $expr;
+			}
 		}
 	}
 
@@ -922,24 +1153,23 @@ class AS2Decompiler {
 		return $this->doCallTargetMethod($cxt);
 	}
 
-	protected function doPush($cxt, $data) {
-		$p = 0;
-		$len = strlen($data);
+	protected function doPush($cxt) {
 		do {
-			switch(ord($data[$p++])) {
-				case 0: $value = $this->extractString($data, $p); break;
-				case 1: $value = $this->extractF32($data, $p); break;
+			$type = $this->readUI8($cxt);
+			switch($type) {
+				case 0: $value = $this->readString($cxt); break;
+				case 1: $value = $this->readF32($cxt); break;
 				case 2: $value = null; break;
-				case 3: $value = $this->undefined; break;
-				case 4: $value = $cxt->registers[ ord($data[$p++]) ]; break;
-				case 5: $value = ord($data[$p++]); break;
-				case 6: $value = $this->extractF64($data, $p); break;
-				case 7: $value = $this->extractUI32($data, $p); break;
-				case 8: $value = $cxt->constantPool[ ord($data[$p++]) ]; break;
-				case 9: $index = $value = $cxt->constantPool[ $this->extractUI16($data, $p) ]; break;
+				case 3: $value = self::$undefined; break;
+				case 4: $value = $cxt->registers[ $this->readUI8($cxt) ]; break;
+				case 5: $value = $this->readUI8($cxt); break;
+				case 6: $value = $this->readF64($cxt); break;
+				case 7: $value = $this->readUI32($cxt); break;
+				case 8: $value = $cxt->constantPool[ $this->readUI8($cxt) ]; break;
+				case 9: $index = $value = $cxt->constantPool[ $this->readUI16($cxt) ]; break;
 			}
 			array_push($cxt->stack, $value);
-		} while($p < $len);
+		} while($cxt->dataRemaining);
 	}
 
 	protected function doPushDuplicate($cxt) {
@@ -953,7 +1183,7 @@ class AS2Decompiler {
 		$this->doCallFunction($cxt);
 	}
 
-	protected function doRemoveSprite($cxt, $data) {
+	protected function doRemoveSprite($cxt) {
 	}
 
 	protected function doReturn($cxt) {
@@ -976,8 +1206,9 @@ class AS2Decompiler {
 		$this->doSetVariable($cxt->stack);
 	}
 
-	protected function doSetTarget($cxt, $data) {
-		array_push($cxt->stack, $data);
+	protected function doSetTarget($cxt) {
+		$name = $this->readString($cxt);
+		array_push($cxt->stack, $name);
 		$this->doSetTarget2($cxt);
 	}
 
@@ -1006,7 +1237,7 @@ class AS2Decompiler {
 		array_push($cxt->stack, $op2);
 	}
 
-	protected function doStartDrag($cxt, $data) {
+	protected function doStartDrag($cxt) {
 	}
 
 	protected function doStop($cxt) {
@@ -1015,13 +1246,25 @@ class AS2Decompiler {
 		return $this->doCallTargetMethod($cxt);
 	}
 
-	protected function doStopSounds($cxt, $data) {
+	protected function doStopSounds($cxt) {
 	}
 
-	protected function doStoreRegister($cxt, $data) {
-		$regIndex = ord($data[0]);
-		$stackIndex = count($cxt->stack) - 1;
-		$cxt->registers[$regIndex] = $cxt->stack[$stackIndex];
+	protected function doStoreRegister($cxt) {
+		$regIndex = $this->readUI8($cxt);
+		$value = array_pop($cxt->stack);
+		if($value instanceof AS2Variable) {
+			$cxt->registers[$regIndex] = $value;
+			array_push($cxt->stack, $value);
+		} else {
+			$var = new AS2Variable;
+			$decl = new AS2VariableDeclaration;
+			$decl->value = $value;
+			$decl->name =& $var->name;
+			$cxt->registers[$regIndex] = $var;
+			$cxt->unnamedLocalVariables[] = $var;
+			array_push($cxt->stack, $var);
+			return $decl;
+		}
 	}
 
 	protected function doStrictEquals($cxt) {
@@ -1060,20 +1303,20 @@ class AS2Decompiler {
 		$this->doBinaryOp($cxt, '-', 5);
 	}
 
-	protected function doTargetPath($cxt, $data) {
+	protected function doTargetPath($cxt) {
 		// do nothing
 	}
 
-	protected function doToggleQualty($cxt, $data) {
+	protected function doToggleQualty($cxt) {
 	}
 
-	protected function doToInteger($cxt, $data) {
+	protected function doToInteger($cxt) {
 		array_push($cxt->stack, 1);
 		array_push($cxt->stack, 'int');
 		$this->doCallFunction($cxt);
 	}
 
-	protected function doToNumber($cxt, $data) {
+	protected function doToNumber($cxt) {
 		$value = array_pop($cxt->stack);
 		if(is_scalar($value)) {
 			switch(gettype($value)) {
@@ -1083,7 +1326,7 @@ class AS2Decompiler {
 				case 'string': $value = is_numeric($value) ? (double) $value : NAN; break;
 			}
 			array_push($cxt->stack, $value);
-		} else if($value == $this->undefined) {
+		} else if($value == self::$undefined) {
 			$value = 'undefined';
 			array_push($cxt->stack, $value);
 		} else {
@@ -1095,7 +1338,7 @@ class AS2Decompiler {
 		}
 	}
 
-	protected function doToString($cxt, $data) {
+	protected function doToString($cxt) {
 		$value = array_pop($cxt->stack);
 		if(is_scalar($value)) {
 			switch(gettype($value)) {
@@ -1105,7 +1348,7 @@ class AS2Decompiler {
 				case 'string': break;
 			}
 			array_push($cxt->stack, $value);
-		} else if($value == $this->undefined) {
+		} else if($value == self::$undefined) {
 			$value = 'undefined';
 			array_push($cxt->stack, $value);
 		} else {
@@ -1121,74 +1364,113 @@ class AS2Decompiler {
 		return $this->doPop($cxt);
 	}
 
-	protected function doTry($cxt, $data) {
+	protected function doTry($cxt) {
 	}
 
 	protected function doTypeOf($cxt) {
 		$this->doUnaryOp($cxt, 'typeof', 3);
 	}
 
-	protected function doWaitForFrame($cxt, $data) {
+	protected function doWaitForFrame($cxt) {
 	}
 
-	protected function doWaitForFrame2($cxt, $data) {
+	protected function doWaitForFrame2($cxt) {
 	}
 
-	protected function doWith($cxt, $data) {
+	protected function doWith($cxt) {
 	}
 	
-	protected function extractString($data, &$offset = 0) {
-		$zeroPos = strpos($data, "\x00", $offset);
+	protected function readString($cxt) {
+		$zeroPos = strpos($cxt->byteCodes, "\x00", $cxt->nextPosition);
 		if($zeroPos === false) {
-			$zeroPos = strlen($data);
+			$zeroPos = strlen($cxt->byteCodes);
 		}
-		$string = substr($data, $offset, $zeroPos - $offset);
-		$offset = $zeroPos + 1;
-		return $string;
+		$length = $zeroPos - $cxt->nextPosition;
+		if($length < $cxt->dataRemaining) {
+			$string = substr($cxt->byteCodes, $cxt->nextPosition, $length);
+			$cxt->nextPosition += $length + 1;
+			$cxt->dataRemaining -= $length + 1;
+			return $string;
+		} else {
+			$cxt->dataRemaining = 0;
+		}
 	}
 	
-	protected function extractUI16($data, &$offset = 0) {
-		if($offset) {
-			$data = substr($data, $offset, 2);
+	protected function readBytes($cxt, $count) {
+		if($count <= $cxt->dataRemaining) {
+			$data = substr($cxt->byteCodes, $cxt->nextPosition, $count);
+			$cxt->nextPosition += $count;
+			$cxt->dataRemaining -= $count;
+			return $data;
+		} else {
+			$cxt->dataRemaining = 0;
 		}
-		$array = unpack('v', $data);
-		$offset += 2;
-		return $array[1];
 	}
 	
-	protected function extractSI16($data, &$offset = 0) {
-		$value = $this->extractUI16($data, $offset);
-		if($value & 0x00008000) {
-			$value |= -1 << 16;
+	protected function readUI8($cxt) {
+		if($cxt->dataRemaining >= 1) {
+			$value = ord($cxt->byteCodes[$cxt->nextPosition++]);
+			$cxt->dataRemaining--;
+			return $value;
 		}
-		return $value;
 	}
 	
-	protected function extractUI32($data, &$offset = 0) {
-		if($offset) {
-			$data = substr($data, $offset, 4);
+	protected function readUI16($cxt) {
+		if($cxt->dataRemaining >= 2) {
+			$data = substr($cxt->byteCodes, $cxt->nextPosition, 2);
+			$array = unpack('v', $data);
+			$cxt->nextPosition += 2;
+			$cxt->dataRemaining -= 2;
+			return $array[1];
+		} else {
+			$cxt->dataRemaining = 0;
 		}
-		$array = unpack('V', $data);
-		$offset += 4;
-		return $array[1];
 	}
 	
-	protected function extractF32($data, &$offset = 0) {
-		if($offset) {
-			$data = substr($data, $offset, 4);
+	protected function readSI16($cxt) {
+		$value = $this->readUI16($cxt);
+		if($value !== null) {
+			if($value & 0x00008000) {
+				$value |= -1 << 16;
+			}
+			return $value;
 		}
-		$array = unpack('f', $data);
-		$offset += 4;
-		return $array[1];
 	}
 	
-	protected function extractF64($data, &$offset = 0) {
-		if($offset) {
-			$data = substr($data, $offset, 8);
+	protected function readUI32($cxt) {
+		if($cxt->dataRemaining >= 4) {
+			$data = substr($cxt->byteCodes, $cxt->nextPosition, 4);
+			$array = unpack('V', $data);
+			$cxt->nextPosition += 4;
+			$cxt->dataRemaining -= 4;
+			return $array[1];
+		} else {
+			$cxt->dataRemaining = 0;
 		}
-		$array = unpack('d', $data);
-		$offset += 8;
-		return $array[1];
+	}
+	
+	protected function readF32($cxt) {
+		if($cxt->dataRemaining >= 4) {
+			$data = substr($cxt->byteCodes, $cxt->nextPosition, 4);
+			$array = unpack('f', $data);
+			$cxt->nextPosition += 4;
+			$cxt->dataRemaining -= 4;
+			return $array[1];
+		} else {
+			$cxt->dataRemaining = 0;
+		}
+	}
+	
+	protected function readF64($cxt) {
+		if($cxt->dataRemaining >= 8) {
+			$data = substr($cxt->byteCodes, $cxt->nextPosition, 8);
+			$array = unpack('d', $data);
+			$cxt->nextPosition += 8;
+			$cxt->dataRemaining -= 8;
+			return $array[1];
+		} else {
+			$cxt->dataRemaining = 0;
+		}
 	}
 }
 
@@ -1197,8 +1479,11 @@ class AS2DecompilerContext {
 	public $byteCodeLength;
 	public $lastPosition;
 	public $nextPosition;
+	public $dataRemaining;
+
 	public $stack = array();
 	public $registers = array();
+	public $unnamedLocalVariables = array();
 	public $constantPool = array();
 	public $target;
 	
@@ -1239,13 +1524,42 @@ class AS2TernaryConditional extends AS2Operation {
 	public $valueIfFalse;
 }
 
-class AS2Return {
+class AS2Return extends AS2Expression {
 	public $operand;
 }
 
 class AS2FunctionCall extends AS2Expression {
 	public $name;
-	public $arguments;
+	public $arguments = array();
+}
+
+class AS2Break extends AS2Expression {
+}
+
+class AS2Continue extends AS2Expression {
+}
+
+class AS2IfElse extends AS2Expression {
+	public $condition;
+	public $expressionsIfTrue = array();
+	public $expressionsIfFalse = array();
+}
+
+class AS2DoWhile extends AS2Expression {
+	public $condition;
+	public $expressions = array();
+}
+
+class AS2While extends AS2DoWhile {
+}
+
+class AS2ForIn extends AS2DoWhile {
+}
+
+class AS2Function extends AS2Expression {
+	public $name;
+	public $arguments = array();
+	public $expressions = array();
 }
 
 class AS2FlowControl {
@@ -1258,8 +1572,8 @@ class AS2UnconditionalBranch extends AS2FlowControl {
 class AS2ConditionalBranch extends AS2FlowControl {
 	public $condition;
 	public $position;
-	public $positionIfTrue;
-	public $positionIfFalse;
+	public $positionIfTrue = array();
+	public $positionIfFalse = array();
 }
 
 class AS2BasicBlock {
@@ -1274,7 +1588,7 @@ class AS2BasicBlock {
 }
 
 class AS2Loop {
-	public $contentPositions;
+	public $contentPositions = array();
 	public $headerPosition;
 	public $continuePosition;
 	public $breakPosition;
