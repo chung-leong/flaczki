@@ -2,12 +2,15 @@
 
 class AS2Decompiler {
 	protected static $undefined;
+	
+	protected $constantPool;
 
 	public function decompile($byteCodes) {
 		if(!self::$undefined) {
 			self::$undefined = new AS2Variable;
 			self::$undefined->name = 'undefined';
 		}
+		$this->constantPool = array();
 			
 		$cxt = $this->createContext($byteCodes);
 		$function = new AS2Function;
@@ -340,7 +343,6 @@ class AS2Decompiler {
 			0x53 => 'doNewMethod',
 			0x40 => 'doNewObject',
 			0x04 => 'doNextFrame',
-			0x00 => 'doNoOp',
 			0x12 => 'doNot',
 			0x11 => 'doOr',
 			0x06 => 'doPlay',
@@ -386,19 +388,20 @@ class AS2Decompiler {
 			$cxt->lastPosition = $cxt->nextPosition;
 			$cxt->dataRemaining = 1;
 			$code = $this->readUI8($cxt);
-			$method = $handlers[$code];
-			if($code >= 0x80) {
-				$cxt->dataRemaining = 2;
-				$cxt->dataRemaining = $this->readUI16($cxt);
+			if($code) {
+				$method = $handlers[$code];
+				if($code >= 0x80) {
+					$cxt->dataRemaining = 2;
+					$cxt->dataRemaining = $this->readUI16($cxt);
+				} 
+				$expr = $this->$method($cxt);
+				if($cxt->dataRemaining) {
+					$cxt->nextPosition += $cxt->dataRemaining;
+				}
+				return $expr;
 			} 
-			$expr = $this->$method($cxt);
-			if($cxt->dataRemaining) {
-				$cxt->nextPosition += $cxt->dataRemaining;
-			}
-			return $expr;
-		} else {
-			return false;
 		}
+		return false;
 	}
 	
 	protected function createBasicBlocks($expressions) {
@@ -767,6 +770,10 @@ class AS2Decompiler {
 	}
 
 	protected function doCall($cxt) {
+		array_push($cxt->stack, 1);
+		array_push($cxt->stack, 'call');
+		$this->doCallFunction($cxt);
+		return $this->doPop($cxt);
 	}
 
 	protected function doCallFunction($cxt) {
@@ -780,9 +787,7 @@ class AS2Decompiler {
 	}
 
 	protected function doCallMethod($cxt) {
-		$name = array_pop($cxt->stack);
-		$object = array_pop($cxt->stack);
-		$this->doGetMember($cxt->stack);
+		$this->doGetMember($cxt);
 		$this->doCallFunction($cxt);
 	}
 
@@ -796,13 +801,17 @@ class AS2Decompiler {
 	}
 
 	protected function doCloneSprite($cxt) {
+		array_push($cxt->stack, 3);
+		array_push($cxt->stack, 'duplicateMovieClip');
+		$this->doCallFunction($cxt);
+		return $this->doPop($cxt);
 	}
 
 	protected function doConstantPool($cxt) {
 		$count = $this->readUI16($cxt);
-		$cxt->constantPool = array();
+		$this->constantPool = array();
 		for($i = 0; $i < $count; $i++) {
-			$cxt->constantPool[] = $this->readString($cxt);
+			$this->constantPool[] = $this->readString($cxt);
 		}
 	}
 
@@ -820,7 +829,8 @@ class AS2Decompiler {
 			$expr->arguments[] = $argument;
 		}
 		$codeSize = $this->readUI16($cxt);
-		$byteCodes = $this->readBytes($codeSize);
+		$cxt->dataRemaining = $codeSize;
+		$byteCodes = $this->readBytes($cxt, $codeSize);
 		$cxt = $this->createContext($byteCodes);
 		$this->decompileFunctionBody($cxt, $expr);
 		if($expr->name) {
@@ -903,6 +913,10 @@ class AS2Decompiler {
 	}
 
 	protected function doEndDrag($cxt) {
+		array_push($cxt->stack, 0);
+		array_push($cxt->stack, 'stopDrag');
+		$this->doCallFunction($cxt);
+		return $this->doPop($cxt);
 	}
 
 	protected function doEnumerate($cxt) {
@@ -925,7 +939,7 @@ class AS2Decompiler {
 	protected function doGetMember($cxt) {
 		$expr = new AS2Variable;
 		$expr->name = array_pop($cxt->stack);
-		array_push($expr);
+		array_push($cxt->stack, $expr);
 		$this->doBinaryOp($cxt, '.', 1);
 	}
 
@@ -1051,11 +1065,23 @@ class AS2Decompiler {
 	}
 
 	protected function doInitArray($cxt) {
+		$expr = new AS2ArrayInitializer;
 		$count = array_pop($cxt->stack);
-		
+		for($i = 0; $i < $count; $i++) {
+			$expr->items[] = array_pop($cxt->stack);
+		}
+		array_push($cxt->stack, $expr);
 	}
 
 	protected function doInitObject($cxt) {
+		$expr = new AS2ObjectInitializer;
+		$count = array_pop($cxt->stack);
+		for($i = 0; $i < $count; $i++) {
+			$value = array_pop($cxt->stack);
+			$name = array_pop($cxt->stack);
+			$expr->items[$name] = $value;
+		}
+		array_push($cxt->stack, $expr);
 	}
 
 	protected function doInstanceOf($cxt) {
@@ -1121,9 +1147,6 @@ class AS2Decompiler {
 		return $this->doCallTargetMethod($cxt);
 	}
 
-	protected function doNoOp($cxt) {
-	}
-
 	protected function doNot($cxt) {
 		$this->doUnaryOp($cxt, '!', 3);
 	}
@@ -1165,8 +1188,8 @@ class AS2Decompiler {
 				case 5: $value = $this->readUI8($cxt); break;
 				case 6: $value = $this->readF64($cxt); break;
 				case 7: $value = $this->readUI32($cxt); break;
-				case 8: $value = $cxt->constantPool[ $this->readUI8($cxt) ]; break;
-				case 9: $index = $value = $cxt->constantPool[ $this->readUI16($cxt) ]; break;
+				case 8: $value = $this->constantPool[ $this->readUI8($cxt) ]; break;
+				case 9: $index = $value = $this->constantPool[ $this->readUI16($cxt) ]; break;
 			}
 			array_push($cxt->stack, $value);
 		} while($cxt->dataRemaining);
@@ -1184,6 +1207,10 @@ class AS2Decompiler {
 	}
 
 	protected function doRemoveSprite($cxt) {
+		array_push($cxt->stack, 1);
+		array_push($cxt->stack, 'removeMovieClip');
+		$this->doCallFunction($cxt);
+		return $this->doPop($cxt);
 	}
 
 	protected function doReturn($cxt) {
@@ -1238,6 +1265,32 @@ class AS2Decompiler {
 	}
 
 	protected function doStartDrag($cxt) {
+		$object = array_pop($cxt->stack);
+		$lockCenter = array_pop($cxt->stack);
+		$constrain = array_pop($cxt->stack);
+		$argumentCount = 0;
+		if($constrain) {
+			$y2 = array_pop($cxt->stack);
+			$x2 = array_pop($cxt->stack);
+			$y1 = array_pop($cxt->stack);
+			$x1 = array_pop($cxt->stack);
+			
+			array_push($cxt->stack, $y2);
+			array_push($cxt->stack, $x2);
+			array_push($cxt->stack, $y1);
+			array_push($cxt->stack, $x1);
+			$argumentCount += 4;
+		}
+		if($lockCenter || $constrain) {
+			array_push($cxt->stack, $lockCenter);
+			$argumentCount++;
+		}
+		array_push($cxt->stack, $object);
+		$argumentCount++;
+		array_push($cxt->stack, $argumentCount);
+		array_push($cxt->stack, 'startDrag');
+		$this->doCallFunction($cxt);
+		return $this->doPop($cxt);
 	}
 
 	protected function doStop($cxt) {
@@ -1247,6 +1300,9 @@ class AS2Decompiler {
 	}
 
 	protected function doStopSounds($cxt) {
+		array_push($cxt->stack, 0);
+		array_push($cxt->stack, 'stopAllSounds');
+		return $this->doCallFunction($cxt);
 	}
 
 	protected function doStoreRegister($cxt) {
@@ -1308,6 +1364,10 @@ class AS2Decompiler {
 	}
 
 	protected function doToggleQualty($cxt) {
+		array_push($cxt->stack, 0);
+		array_push($cxt->stack, 'toggleHighQuality');
+		$this->doCallFunction($cxt);
+		return $this->doPop($cxt);
 	}
 
 	protected function doToInteger($cxt) {
@@ -1372,12 +1432,43 @@ class AS2Decompiler {
 	}
 
 	protected function doWaitForFrame($cxt) {
+		$frame = $this->readUI16($cxt);
+		array_push($cxt->stack, $frame);
+		return $this->doWaitForFrame2($cxt);
 	}
 
 	protected function doWaitForFrame2($cxt) {
+		$expr = new AS2IfFrameLoaded;
+		$expr->frame = array_pop($cxt->stack);
+		$skipCount = $this->readUI8($cxt);
+		// calculate the length of the bytecodes based on skipCount
+		$startIndex = $cxt->nextPosition;
+		while($skipCount-- > 0 && $cxt->nextPosition < $cxt->byteCodeLength) {
+			$cxt->dataRemaining = 1;
+			$code = $this->readUI8($cxt);
+			if($code >= 0x80) {
+				$cxt->dataRemaining = 2;
+				$cxt->nextPosition += $this->readUI16($cxt);
+			} 
+		}
+		$size = $cxt->nextPosition - $startIndex;		
+		$cxt->nextPosition = $startIndex;		
+		$cxt->dataRemaining = $size;
+		$byteCodes = $this->readBytes($cxt, $size);
+		$cxt = $this->createContext($byteCodes);
+		$this->decompileFunctionBody($cxt, $expr);
+		return $expr;
 	}
 
 	protected function doWith($cxt) {
+		$expr = new AS2With;
+		$expr->object = array_pop($cxt->stack);
+		$size = $this->readUI16($cxt);
+		$cxt->dataRemaining = $size;
+		$byteCodes = $this->readBytes($cxt, $size);
+		$cxt = $this->createContext($byteCodes);
+		$this->decompileFunctionBody($cxt, $expr);
+		return $expr;
 	}
 	
 	protected function readString($cxt) {
@@ -1484,7 +1575,6 @@ class AS2DecompilerContext {
 	public $stack = array();
 	public $registers = array();
 	public $unnamedLocalVariables = array();
-	public $constantPool = array();
 	public $target;
 	
 	public $relatedBranch;
@@ -1533,6 +1623,14 @@ class AS2FunctionCall extends AS2Expression {
 	public $arguments = array();
 }
 
+class AS2ArrayInitializer extends AS2Expression {
+	public $items = array();
+}
+
+class AS2ObjectInitializer extends AS2Expression {
+	public $items = array();
+}
+
 class AS2Break extends AS2Expression {
 }
 
@@ -1554,6 +1652,16 @@ class AS2While extends AS2DoWhile {
 }
 
 class AS2ForIn extends AS2DoWhile {
+}
+
+class AS2With extends AS2Expression {
+	public $object;
+	public $expressions = array();
+}
+
+class AS2IfFrameLoaded extends AS2Expression {
+	public $frame;
+	public $expressions = array();
 }
 
 class AS2Function extends AS2Expression {
