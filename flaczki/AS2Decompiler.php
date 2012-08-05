@@ -831,8 +831,8 @@ class AS2Decompiler {
 		$codeSize = $this->readUI16($cxt);
 		$cxt->dataRemaining = $codeSize;
 		$byteCodes = $this->readBytes($cxt, $codeSize);
-		$cxt = $this->createContext($byteCodes);
-		$this->decompileFunctionBody($cxt, $expr);
+		$cxtF = $this->createContext($byteCodes);
+		$this->decompileFunctionBody($cxtF, $expr);
 		if($expr->name) {
 			return $expr;
 		} else {
@@ -878,8 +878,8 @@ class AS2Decompiler {
 		$codeSize = $this->readUI16($cxt);
 		$cxt->dataRemaining = $codeSize;
 		$byteCodes = $this->readBytes($cxt, $codeSize);
-		$cxt = $this->createContext($byteCodes, $preloadedVariables);
-		$this->decompileFunctionBody($cxt, $expr);
+		$cxtF = $this->createContext($byteCodes, $preloadedVariables);
+		$this->decompileFunctionBody($cxtF, $expr);
 		if($expr->name) {
 			return $expr;
 		} else {
@@ -1425,6 +1425,75 @@ class AS2Decompiler {
 	}
 
 	protected function doTry($cxt) {
+		$expr = new AS2Try;
+		$flags = $this->readUI8($cxt);
+		$trySize = $this->readUI16($cxt);
+		$catchSize = $this->readUI16($cxt);
+		$finallySize = $this->readUI16($cxt);
+		if($flags & 0x04) {	// CatchInRegister
+			$catchName = null;
+			$catchRegister = $this->readUI8($cxt);
+		} else {
+			$catchName = $this->readString($cxt);
+			$catchRegister = null;
+		}
+		$cxt->dataRemaining = $trySize + $catchSize + $finallySize;
+		
+		$tryByteCodes = $this->readBytes($cxt, $trySize);
+		$catchByteCodes = ($flags & 0x01) ? $this->readBytes($cxt, $catchSize) : null;
+		$finallyByteCodes = ($flags & 0x02) ? $this->readBytes($cxt, $finallySize) : null;
+		
+		// save the context
+		$cxtS = clone $cxt;
+		
+		// decompile try block
+		$function = new AS2Function;
+		$cxt->byteCodes = $tryByteCodes;
+		$cxt->byteCodeLength = $trySize;
+		$cxt->lastPosition = $cxt->nextPosition = 0;
+		$this->decompileFunctionBody($cxt, $function);
+		$expr->tryExpressions = $function->expressions;
+		
+		if($flags & 0x01) {
+			// decompile catch block
+			$function = new AS2Function;
+			if($catchRegister) {
+				if(!isset($cxt->registers[$catchRegister])) {
+					$var = new AS2Variable;
+					$var->name = 'error';
+					$cxt->registers[$catchRegister] = $var;
+				}
+				$expr->catchObject = $cxt->registers[$catchRegister];
+			} else {
+				$var = new AS2Variable;
+				$var->name = $catchName;
+				$expr->catchObject = $var;
+			}
+			$cxt->byteCodes = $catchByteCodes;
+			$cxt->byteCodeLength = $catchSize;
+			$cxt->lastPosition = $cxt->nextPosition = 0;
+			$this->decompileFunctionBody($cxt, $function);
+			$expr->catchExpressions = $function->expressions;
+		}
+		if($flags & 0x02) {
+			// decompile finally block
+			$function = new AS2Function;
+			$byteCodes = $this->readBytes($cxt, $finallySize);
+			$cxt->byteCodes = $finallyByteCodes;
+			$cxt->byteCodeLength = $finallySize;
+			$cxt->lastPosition = $cxt->nextPosition = 0;
+			$this->decompileFunctionBody($cxt, $function);
+			$expr->finallyExpressions = $function->expressions;
+		}
+		
+		// restore context
+		$cxt->byteCodes = $cxtS->byteCodes;
+		$cxt->byteCodeLength = $cxtS->byteCodeLength;
+		$cxt->lastPosition = $cxtS->lastPosition;
+		$cxt->nextPosition = $cxtS->nextPosition;
+		$cxt->stack = $cxtS->stack;
+		
+		return $expr;
 	}
 
 	protected function doTypeOf($cxt) {
@@ -1652,6 +1721,16 @@ class AS2While extends AS2DoWhile {
 }
 
 class AS2ForIn extends AS2DoWhile {
+}
+
+class AS2Try extends AS2Expression {
+	public $tryExpressions;
+	public $catchObject;
+	public $catchExpressions;
+	public $finallyExpressions;
+}
+
+class AS2Throw extends AS2Expression {
 }
 
 class AS2With extends AS2Expression {
