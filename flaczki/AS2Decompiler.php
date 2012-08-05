@@ -1308,19 +1308,24 @@ class AS2Decompiler {
 	protected function doStoreRegister($cxt) {
 		$regIndex = $this->readUI8($cxt);
 		$value = array_pop($cxt->stack);
-		if($value instanceof AS2Variable) {
-			$cxt->registers[$regIndex] = $value;
-			array_push($cxt->stack, $value);
+		if(isset($cxt->registers[$regIndex])) {
+			$var = $cxt->registers[$regIndex];
+			$expr = new AS2BinaryOperation;
+			$expr->operator = '=';
+			$expr->operand1 = $var;
+			$expr->operand2 = $value;
+			$expr->precedence = 15;
+			array_push($cxt->stack, $var);
 		} else {
 			$var = new AS2Variable;
-			$decl = new AS2VariableDeclaration;
-			$decl->value = $value;
-			$decl->name =& $var->name;
+			$expr = new AS2VariableDeclaration;
+			$expr->value = $value;
+			$expr->name =& $var->name;
 			$cxt->registers[$regIndex] = $var;
 			$cxt->unnamedLocalVariables[] = $var;
 			array_push($cxt->stack, $var);
-			return $decl;
 		}
+		return $expr;
 	}
 
 	protected function doStrictEquals($cxt) {
