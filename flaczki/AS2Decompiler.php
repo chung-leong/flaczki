@@ -958,10 +958,18 @@ class AS2Decompiler {
 	}
 
 	protected function doGetMember($cxt) {
-		$expr = new AS2Variable;
-		$expr->name = array_pop($cxt->stack);
-		array_push($cxt->stack, $expr);
-		$this->doBinaryOp($cxt, '.', 1);
+		$name = array_pop($cxt->stack);
+		if(is_string($name) && preg_match('/^\w+$/', $name)) {
+			$expr = new AS2Variable;
+			$expr->name = $name;
+			array_push($cxt->stack, $expr);
+			$this->doBinaryOp($cxt, '.', 1);
+		} else {
+			$expr = new AS2ArrayAssessor;
+			$expr->array = array_pop($cxt->stack);
+			$expr->index = $name;
+			array_push($cxt->stack, $expr);
+		}
 	}
 
 	protected function doGetProperty($cxt) {
@@ -1158,9 +1166,12 @@ class AS2Decompiler {
 	}
 
 	protected function doNewMethod($cxt) {
+		
 	}
 
 	protected function doNewObject($cxt) {
+		$this->doCallFunction($cxt);
+		$this->doUnaryOp($cxt, 'new', 1);
 	}
 
 	protected function doNextFrame($cxt) {
@@ -1721,6 +1732,11 @@ class AS2FunctionCall extends AS2Expression {
 
 class AS2ArrayInitializer extends AS2Expression {
 	public $items = array();
+}
+
+class AS2ArrayAssessor extends AS2Expression {
+	public $array;
+	public $index;
 }
 
 class AS2ObjectInitializer extends AS2Expression {

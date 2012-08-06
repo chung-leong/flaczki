@@ -165,6 +165,13 @@ class AS2SourceReconstructor {
 		$this->addToken(']');
 	}
 	
+	protected function addArrayAssessor($assessor) {
+		$this->addExpression($assessor->array);
+		$this->addToken('[', false);
+		$this->addExpression($assessor->index);
+		$this->addToken(']', false);
+	}
+	
 	protected function addObjectInitializer($array) {
 		$this->addToken('{');
 		$index = 0;
@@ -193,21 +200,23 @@ class AS2SourceReconstructor {
 		}
 	}
 	
-	protected function addToken($token) {
+	protected function addToken($token, $needSpace = null) {
 		if($this->lastToken) {
-			$needSpace = true;
-			switch($this->lastToken) {
-				case '.':
-				case '!':
-				case '(':
-				case '[': $needSpace = false; break;
-			}
-			switch($token) {
-				case '.':
-				case ',':
-				case '(':
-				case ')':
-				case ']': $needSpace = false; break;
+			if($needSpace === null) {
+				$needSpace = true;
+				switch($this->lastToken) {
+					case '.':
+					case '!':
+					case '(':
+					case '[': $needSpace = false; break;
+				}
+				switch($token) {
+					case '.':
+					case ',':
+					case '(':
+					case ')':
+					case ']': $needSpace = false; break;
+				}
 			}
 			if($needSpace) {
 				$this->line .= ' ';
