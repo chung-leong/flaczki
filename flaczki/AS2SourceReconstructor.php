@@ -31,7 +31,17 @@ class AS2SourceReconstructor {
 	}
 	
 	protected function addExpression($expr, $precedence = null) {
-		if(is_scalar($expr)) {
+		if($expr instanceof AS2Expression) {
+			$name = substr(get_class($expr), 3);
+			$method = "add$name";
+			if($precedence !== null && $expr instanceof AS2Operation && $precedence < $expr->precedence) {
+				$this->addToken("(");
+				$this->$method($expr);
+				$this->addToken(")");
+			} else {
+				$this->$method($expr);
+			}
+		} else {
 			switch(gettype($expr)) {
 				case 'boolean':
 					$this->addToken($expr ? 'true' : 'false');
@@ -50,23 +60,18 @@ class AS2SourceReconstructor {
 				case 'integer':
 					$this->addToken((string) $expr);
 					break;
-			}
-		} else {
-			$name = substr(get_class($expr), 3);
-			$method = "add$name";
-			if($precedence !== null && $expr instanceof AS2Operation && $precedence < $expr->precedence) {
-				$this->addToken("(");
-				$this->$method($expr);
-				$this->addToken(")");
-			} else {
-				$this->$method($expr);
+				case 'NULL':
+					$this->addToken('null');
+					break;
 			}
 		}
 	}
 	
 	protected function addFunction($function) {
 		$this->addToken('function');
-		$this->addExpression($function->name);
+		if($function->name) {
+			$this->addExpression($function->name);
+		}
 		$this->addToken('(');
 		foreach($function->arguments as $index => $argument) {
 			if($index != 0) {
@@ -179,7 +184,12 @@ class AS2SourceReconstructor {
 			if($index != 0) {
 				$this->addToken(',');
 			}
-			$this->addExpression($name);
+			if(preg_match('/^\w+$/', $name)) {
+				// doesn't need escaping
+				$this->addToken($name);
+			} else {
+				$this->addExpression($name);
+			}
 			$this->addToken(':');
 			$this->addExpression($item);
 			$index++;
@@ -208,6 +218,7 @@ class AS2SourceReconstructor {
 					case '.':
 					case '!':
 					case '(':
+					case '{':
 					case '[': $needSpace = false; break;
 				}
 				switch($token) {
@@ -215,6 +226,7 @@ class AS2SourceReconstructor {
 					case ',':
 					case '(':
 					case ')':
+					case '}':
 					case ']': $needSpace = false; break;
 				}
 			}
@@ -223,7 +235,7 @@ class AS2SourceReconstructor {
 			}
 		}
 		$this->line .= $token;
-		$this->lastToken = $token;
+		$this->lastToken = $token;		
 	}
 	
 	protected function startLine() {

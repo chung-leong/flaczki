@@ -16,9 +16,9 @@ class AS2Decompiler {
 		$function = new AS2Function;
 		$this->decompileFunctionBody($cxt, $function);
 		
-		$reconstructor = new AS2SourceReconstructor;
-		print_r($reconstructor->reconstruct($function->expressions));
-		
+		$r = new AS2SourceReconstructor;
+		print_r($r->reconstruct($function->expressions));
+
 		return $function->expressions;
 	}
 	
@@ -87,7 +87,7 @@ class AS2Decompiler {
 		
 		// recreate loops and conditional statements
 		$this->structureLoops($loops, $blocks, $function);
-		
+
 		// assign names to unnamed variables
 		foreach($cxt->unnamedLocalVariables as $index => $var) {
 			$var->name = "lv" . ($index + 1);
@@ -799,11 +799,22 @@ class AS2Decompiler {
 	}
 
 	protected function doCallMethod($cxt) {
-		$this->doGetMember($cxt);
+		$name = array_pop($cxt->stack);
+		if($name && $name !== self::$undefined) {
+			$object = array_pop($cxt->stack);
+			if(!($object instanceof AS2Variable) || $object->name != 'this') {
+				array_push($cxt->stack, $object);
+				array_push($cxt->stack, $name);
+				$this->doGetMember($cxt);
+			} else {
+				array_push($cxt->stack, $name);
+			}
+		}
 		$this->doCallFunction($cxt);
 	}
 
 	protected function doCastOp($cxt) {
+		echo "doCastOp\n";
 	}
 
 	protected function doCharToAscii($cxt) {
@@ -941,9 +952,11 @@ class AS2Decompiler {
 	}
 
 	protected function doEnumerate($cxt) {
+		echo "doEnumerate\n";
 	}
 
 	protected function doEnumerate2($cxt) {
+		echo "doEnumerate2\n";
 	}
 
 	protected function doEquals($cxt) {
@@ -955,6 +968,24 @@ class AS2Decompiler {
 	}
 
 	protected function doExtends($cxt) {
+		$superclass = array_pop($cxt->stack);
+		$subclass = array_pop($cxt->stack);
+		
+		// Subclass.prototype = { __proto__: Superclass.prototype, __constructor__: Superclass };
+		$prototype = new AS2Variable;
+		$prototype->name = 'prototype';
+		$superclassPrototype = new AS2BinaryOperation;
+		$superclassPrototype->operator = '.';
+		$superclassPrototype->operand1 = $superclass;
+		$superclassPrototype->operand2 = $prototype;
+		$superclassPrototype->precedence = 1;
+		$prototypeObject = new AS2ObjectInitializer;
+		$prototypeObject->items = array( '__proto__' => $superclassPrototype, '__constructor__' => $superclass );
+		
+		array_push($cxt->stack, $subclass);
+		array_push($cxt->stack, 'prototype');
+		array_push($cxt->stack, $prototypeObject);
+		return $this->doSetMember($cxt);
 	}
 
 	protected function doGetMember($cxt) {
@@ -1087,6 +1118,16 @@ class AS2Decompiler {
 	}
 
 	protected function doImplementsOp($cxt) {
+		$class = array_pop($cxt->stack);
+		$count = array_pop($cxt->stack);
+		$interfaces = new AS2ArrayInitializer;
+		for($i = 0; $i < $count; $i++) {
+			$interfaces->items[] = array_pop($cxt->stack);
+		}
+		array_push($cxt->stack, $class);
+		array_push($cxt->stack, 'interfaces');
+		array_push($cxt->stack, $interfaces);
+		return $this->doSetMember($cxt);
 	}
 
 	protected function doIncrement($cxt) {
@@ -1166,7 +1207,7 @@ class AS2Decompiler {
 	}
 
 	protected function doNewMethod($cxt) {
-		
+		echo "NewMethod\n";
 	}
 
 	protected function doNewObject($cxt) {
@@ -1255,15 +1296,19 @@ class AS2Decompiler {
 	protected function doSetMember($cxt) {
 		$value = array_pop($cxt->stack);
 		$this->doGetMember($cxt);
-		array_push($value);
-		$this->doSetVariable($cxt->stack);
+		array_push($cxt->stack, $value);
+		$this->doBinaryOp($cxt, '=', 15);
+		$expr = array_pop($cxt->stack);
+		return $expr;
 	}
 
 	protected function doSetProperty($cxt) {
 		$value = array_pop($cxt->stack);
 		$this->doGetProperty($cxt);
 		array_push($value);
-		$this->doSetVariable($cxt->stack);
+		$this->doBinaryOp($cxt, '=', 15);
+		$expr = array_pop($cxt->stack);
+		return $expr;
 	}
 
 	protected function doSetTarget($cxt) {
@@ -1288,6 +1333,8 @@ class AS2Decompiler {
 		$this->doGetVariable($cxt);
 		array_push($cxt->stack, $value);
 		$this->doBinaryOp($cxt, '=', 15);
+		$expr = array_pop($cxt->stack);
+		return $expr;
 	}
 
 	protected function doStackSwap($cxt) {
@@ -1340,23 +1387,20 @@ class AS2Decompiler {
 
 	protected function doStoreRegister($cxt) {
 		$regIndex = $this->readUI8($cxt);
-		$value = array_pop($cxt->stack);
+		$stackIndex = count($cxt->stack) - 1;
+		$value = $cxt->stack[$stackIndex];
 		if(isset($cxt->registers[$regIndex])) {
-			$var = $cxt->registers[$regIndex];
-			$expr = new AS2BinaryOperation;
-			$expr->operator = '=';
-			$expr->operand1 = $var;
-			$expr->operand2 = $value;
-			$expr->precedence = 15;
-			array_push($cxt->stack, $var);
+			array_push($cxt->stack, $cxt->registers[$regIndex]);
+			array_push($cxt->stack, $value);
+			$expr = $this->doSetVariable($cxt);
 		} else {
 			$var = new AS2Variable;
 			$expr = new AS2VariableDeclaration;
 			$expr->value = $value;
 			$expr->name =& $var->name;
+			$var->name = 'reg' . $regIndex;
 			$cxt->registers[$regIndex] = $var;
 			$cxt->unnamedLocalVariables[] = $var;
-			array_push($cxt->stack, $var);
 		}
 		return $expr;
 	}

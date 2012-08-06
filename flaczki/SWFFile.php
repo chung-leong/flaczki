@@ -314,6 +314,7 @@ class SWFDoActionTag {
 }
 
 class SWFDoInitActionTag {
+	public $characterId;
 	public $actions;
 }
 

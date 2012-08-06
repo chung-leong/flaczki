@@ -624,6 +624,7 @@ class SWFParser {
 	
 	protected function readDoInitActionTag(&$bytesAvailable) {
 		$tag = new SWFDoInitActionTag;
+		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->actions = $this->readBytes($bytesAvailable, $bytesAvailable);
 		return $tag;
 	}
