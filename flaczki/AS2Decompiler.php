@@ -15,6 +15,10 @@ class AS2Decompiler {
 		$cxt = $this->createContext($byteCodes);
 		$function = new AS2Function;
 		$this->decompileFunctionBody($cxt, $function);
+		
+		$reconstructor = new AS2SourceReconstructor;
+		print_r($reconstructor->reconstruct($function->expressions));
+		
 		return $function->expressions;
 	}
 	
@@ -565,9 +569,11 @@ class AS2Decompiler {
 			$if->condition = $this->invertCondition($block->lastExpression->condition);
 			$fBlock->destination =& $if->expressionsIfTrue;
 			
-			// if there's not other way to enter the true block, then its statements must be in an else block
+			// if there's no other way to enter the true block, then its statements must be in an else block
 			if(count($tBlock->from) == 1) {
 				$tBlock->destination =& $if->expressionsIfFalse;
+			} else {
+				$if->expressionsIfFalse = null;
 			}
 			$block->lastExpression = $if;
 			$block->structured = true;
@@ -778,7 +784,13 @@ class AS2Decompiler {
 
 	protected function doCallFunction($cxt) {
 		$expr = new AS2FunctionCall;
-		$expr->name = array_pop($cxt->stack);
+		$name = array_pop($cxt->stack);
+		if(is_scalar($name)) {
+			$expr->name = new AS2Variable;
+			$expr->name->name = $name;
+		} else {
+			$expr->name = $name;
+		}
 		$argumentCount = array_pop($cxt->stack);
 		for($i = 0; $i < $argumentCount; $i++) {
 			$expr->arguments[] = array_pop($cxt->stack);
@@ -816,12 +828,17 @@ class AS2Decompiler {
 	}
 
 	protected function doDecrement($cxt) {
-		$this->doUnaryOp($cxt, '--', 3);
+		array_push($cxt->stack, 1);
+		$this->doSubtract($cxt);
 	}
 
 	protected function doDefineFunction($cxt) {
 		$expr = new AS2Function;
-		$expr->name = $this->readString($cxt);
+		$name = $this->readString($cxt);
+		if($name) {
+			$expr->name = new AS2Variable;
+			$expr->name->name = $name;
+		}
 		$argumentCount = $this->readUI16($cxt);
 		for($i = 0; $i < $argumentCount; $i++) {
 			$argument = new AS2Variable;
@@ -842,7 +859,11 @@ class AS2Decompiler {
 
 	protected function doDefineFunction2($cxt) {
 		$expr = new AS2Function;
-		$expr->name = $this->readString($cxt);
+		$name = $this->readString($cxt);
+		if($name) {
+			$expr->name = new AS2Variable;
+			$expr->name->name = $name;
+		}
 		$argumentCount = $this->readUI16($cxt);
 		$registerCount = $this->readUI8($cxt);
 		$flags = $this->readUI16($cxt);
@@ -1061,7 +1082,8 @@ class AS2Decompiler {
 	}
 
 	protected function doIncrement($cxt) {
-		$this->doUnaryOp($cxt, '++', 3);
+		array_push($cxt->stack, 1);
+		$this->doAdd($cxt);
 	}
 
 	protected function doInitArray($cxt) {
