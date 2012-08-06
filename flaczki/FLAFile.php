@@ -318,6 +318,41 @@ class FLADOMDynamicText {
 	public $filters;
 }
 
+class FLADOMVideoInstance {
+	public $libraryItemName;
+	public $frameRight;
+	public $frameBottom;
+}
+
+class FLADOMVideoItem {
+	public $name;
+	public $itemID;
+	public $sourceExternalFilepath;
+	public $sourceLastImported;
+	public $videoDataHRef;
+	public $videoType;
+	public $fps;
+	public $rate;
+	public $bits; 
+	public $channels;
+	public $width;
+	public $height;
+	public $length;
+}
+
+class FLAVideo {
+	public $data;
+	public $filename;
+	public $frameCount;	
+	public $width;
+	public $height;
+	public $deblockingLevel;
+	public $smoothing;
+	public $codecId;
+	public $codec;
+	public $path;
+}
+
 class FLADOMInputText extends FLADOMDynamicText {
 }
 

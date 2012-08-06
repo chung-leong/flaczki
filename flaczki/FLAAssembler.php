@@ -24,7 +24,7 @@ class FLAAssembler {
 		$this->writeFile("{$this->folderPath}/{$movieName}.xfl", "PROXY-CS5");
 		
 		foreach($flaFile->library as $name => $item) {
-			if($item instanceof FLABitmap) {
+			if($item instanceof FLABitmap || $item instanceof FLAVideo) {
 				$this->writeFile("{$this->folderPath}/LIBRARY/{$item->path}", $item->data);
 			} else if($item instanceof FLADOMSymbolItem) {
 				$this->writeXMLFile("{$this->folderPath}/LIBRARY/{$item->name}.xml", $item);

@@ -215,6 +215,14 @@ class FLAReconstructor {
 			$item->frameRight = $object->width * 20;
 			$item->frameBottom = $object->height * 20;
 			$item->allowSmoothing =& $object->allowSmoothing;
+		} else if($object instanceof FLAVideo) {
+			$item = new FLADOMVideoItem;
+			$item->name = $object->name;
+			$item->itemID = $object->itemID;
+			$item->videoType = "$object->codec media";
+			$item->href = $object->path;
+			$item->width = $object->width;
+			$item->height = $object->height;
 		}
 		$this->media[] = $item;
 	}
@@ -297,6 +305,25 @@ class FLAReconstructor {
 		$this->addMedia($bitmap);
 	}
 	
+	protected function addVideo($characterId, $record) {
+		static $codes = array( 2 => 'h263', 3 => 'screen share', 4 => 'vp6', 5 => 'vp6 alpha' );
+		$video = new FLAVideo;
+		$video->data = "FLV\x01\x01\x00\x00\x00\x09\x00\x00\x00\x00";
+		$video->name = $this->getNextLibraryName('Video');
+		$video->itemID = $this->getNextItemID();
+		$video->width = $record->width;
+		$video->height = $record->height;
+		$video->deblockingLevel = ($record->flags >> 1) & 0x07;
+		$video->smoothing = $record->flags & 0x01;
+		$video->frameCount = $record->frameCount;
+		$video->codec = $codes[$record->codecId];
+		$video->codecId = $record->codecId;
+		$video->path = "{$video->name}.flv";
+		
+		$this->addCharacter($characterId, $video);
+		$this->addMedia($video);
+	}
+	
 	protected function findFont($name) {
 		foreach($this->dictionary as $object) {
 			if($object instanceof FLAFont) {
@@ -341,20 +368,26 @@ class FLAReconstructor {
 			} else if($character instanceof FLAMorphShape) {
 				if($character->startShape) {
 					$frame = $this->addFrame($tag->depth);
-					$frame->morphShape = $character;
 					
 					$instance = $character->startShape;
 					$character->startShape = null;
 					$character->endShape = null;
 					$frame->elements[] = $instance;
 				}
+			} else if($character instanceof FLAVideo) {
+				$instance = new FLADOMVideoInstance;
+				$instance->libraryItemName = $character->name;
+				$instance->frameRight = $character->width;
+				$instance->frameBottom = $character->height;
+				$frame = $this->addFrame($tag->depth);
+				$frame->elements[] = $instance;
 			} else {
 				$instance = $character;
 				$frame = $this->addFrame($tag->depth);
 				$frame->elements[] = $instance;
 			}
 		} else {
-			if($previousFrame && !$previousFrame->morphShape) {
+			if($previousFrame && !$previousFrame->morphShape && !($previousInstance instanceof FLADOMVideoInstance)) {
 				$frame = $this->addFrame($tag->depth);
 				$instance = clone $previousInstance;
 				$frame->elements[] = $instance;
@@ -863,6 +896,40 @@ class FLAReconstructor {
 			$finder = new ABCTextObjectFinder;
 			$this->tlfTextObjects = array_merge($this->tlfTextObjects, $finder->find($tag->abcFile));
 		}
+	}
+	
+	protected function processDoActionTag($tag) {
+		echo "DoAction\n";
+		$decompiler = new AS2Decompiler;
+		$expressions = $decompiler->decompile($tag->actions);
+		//print_r($expressions);
+	}
+	
+	protected function processDoInitActionTag($tag) {
+		echo "DoInitAction\n";
+		//print_r($tag);
+		$decompiler = new AS2Decompiler;
+		$expressions = $decompiler->decompile($tag->actions);
+	}
+	
+	protected function processDefineVideoStreamTag($tag) {
+		$this->addVideo($tag->characterId, $tag);
+	}
+	
+	protected function processVideoFrameTag($tag) {
+		$video = $this->getCharacter($tag->streamId);
+		$length = strlen($tag->data);
+		
+		$tagType = "\x09";
+		$dataSize = substr(pack("N", $length + 2), 1);
+		$timestamp = pack("N", $tag->frameNumber * 1000 / 24);
+		$timestamp = substr($timestamp, 1) . $timestamp[0];
+		$streamId = "\x00\x00\x00";
+		$videoHeader = chr((($tag->frameNumber > 0) ? 0x20 : 0x10) | $video->codecId) . "\x00";
+		$header = $tagType . $dataSize . $timestamp . $streamId . $videoHeader;
+		$trailer = pack("N", $length + 16);
+		
+		$video->data .= $header . $tag->data . $trailer;
 	}
 	
 	protected function processSymbolClassTag($tag) {
