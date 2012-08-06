@@ -87,11 +87,6 @@ class AS2Decompiler {
 		
 		// recreate loops and conditional statements
 		$this->structureLoops($loops, $blocks, $function);
-
-		// assign names to unnamed variables
-		foreach($cxt->unnamedLocalVariables as $index => $var) {
-			$var->name = "lv" . ($index + 1);
-		}
 	}
 
 	protected function decompileBranch($cxt, $branch) {
@@ -478,34 +473,56 @@ class AS2Decompiler {
 				$headerBlock = $blocks[$loop->headerPosition];
 				$headerBlock->structured = true;
 				
+				if($headerBlock->lastExpression->positionIfFalse == $loop->continuePosition) {
+					// if the loop continues only when the condition is false
+					// then we need to invert the condition
+					$condition = $this->invertCondition($headerBlock->lastExpression->condition);
+				} else {
+					$condition = $headerBlock->lastExpression->condition;
+				}
+				
 				// see if there's an unconditional branch into the loop
 				$entryBlock = $blocks[$loop->entrancePosition];
 				if($entryBlock->lastExpression instanceof AS2UnconditionalBranch) {
-					if($entryBlock->lastExpression->position == $headerBlock->lastExpression->position) {
-						// it goes to the beginning of the loop so it must be a do-while
-						$expr = new AS2DoWhile;
-					} else {			
-						$expr = new AS2While;
+					if($condition instanceof AS2BinaryOperation && $condition->operand1 instanceof AS2Enumeration) {
+						// a for in loop						
+						$expr = new AS2ForIn;
+						$enumeration = $condition->operand1;
+						$condition = new AS2binaryOperation;
+						$condition->operator = 'in';
+						$condition->operand1 = $enumeration->variable;
+						$condition->operand2 = $enumeration->container;
+					} else {
+						if($entryBlock->lastExpression->position == $headerBlock->lastExpression->position) {
+							// it goes to the beginning of the loop so it must be a do-while
+							$expr = new AS2DoWhile;
+						} else {			
+							$expr = new AS2While;
+						}
 					}
 					$entryBlock->lastExpression = $expr;
 				} else {
 					// we just fall into the loop
-					if($loop->headerPosition == $loop->continuePosition) {
-						// the conditional statement is at the "bottom" of the loop so it's a do-while
-						$expr = new AS2DoWhile;
+					if($condition instanceof AS2BinaryOperation && $condition->operand1 instanceof AS2Enumeration) {
+						// a for in loop						
+						$expr = new AS2ForIn;
+						$enumeration = $condition->operand1;
+						$condition = new AS2binaryOperation;
+						$condition->operator = 'in';
+						$condition->operand1 = $enumeration->variable;
+						$condition->operand2 = $enumeration->container;
 					} else {
-						$expr = new AS2While;
+						if($loop->headerPosition == $loop->continuePosition) {
+							// the conditional statement is at the "bottom" of the loop so it's a do-while
+							$expr = new AS2DoWhile;
+						} else {
+							$expr = new AS2While;
+						}
 					}
 					$entryBlock->expressions[] = $expr;
 				}
+				$expr->condition = $condition;
 
-				if($headerBlock->lastExpression->positionIfFalse == $loop->continuePosition) {
-					// if the loop continues only when the condition is false
-					// then we need to invert the condition
-					$expr->condition = $this->invertCondition($headerBlock->lastExpression->condition);
-				} else {
-					$expr->condition = $headerBlock->lastExpression->condition;
-				}
 			} else {
 				// no header--the "loop" is the function itself
 				$expr = $function;
@@ -683,6 +700,20 @@ class AS2Decompiler {
 			case '>=': return '<';
 			case '<=': return '>';
 		}
+	}
+	
+	protected function checkSideEffect($expr) {
+		if($expr instanceof AS2Expression) {
+			if($expr instanceof AS2FunctionCall) {
+				return true;
+			}
+			if($expr instanceof AS2BinaryOperation) {
+				switch($expr->operator) {
+					case '=': return true;
+				}
+			}
+		}
+		return false;
 	}
 	
 	protected function invertCondition($expr) {
@@ -952,11 +983,15 @@ class AS2Decompiler {
 	}
 
 	protected function doEnumerate($cxt) {
-		echo "doEnumerate\n";
+		$this->doGetVariable($cxt);
+		$this->doEnumerate2($cxt);
 	}
 
 	protected function doEnumerate2($cxt) {
-		echo "doEnumerate2\n";
+		$object = array_pop($cxt->stack);
+		$expr = new AS2Enumeration;
+		$expr->container = $object;
+		array_push($cxt->stack, $expr);
 	}
 
 	protected function doEquals($cxt) {
@@ -1238,7 +1273,7 @@ class AS2Decompiler {
 	protected function doPop($cxt) {
 		$expr = array_pop($cxt->stack);
 		if(!$cxt->stack) {
-			if($expr instanceof AS2Expression && !($expr instanceof AS2Variable)) {
+			if($this->checkSideEffect($expr)) {
 				return $expr;
 			}
 		}
@@ -1388,21 +1423,38 @@ class AS2Decompiler {
 	protected function doStoreRegister($cxt) {
 		$regIndex = $this->readUI8($cxt);
 		$stackIndex = count($cxt->stack) - 1;
-		$value = $cxt->stack[$stackIndex];
-		if(isset($cxt->registers[$regIndex])) {
-			array_push($cxt->stack, $cxt->registers[$regIndex]);
-			array_push($cxt->stack, $value);
-			$expr = $this->doSetVariable($cxt);
-		} else {
-			$var = new AS2Variable;
-			$expr = new AS2VariableDeclaration;
-			$expr->value = $value;
-			$expr->name =& $var->name;
-			$var->name = 'reg' . $regIndex;
-			$cxt->registers[$regIndex] = $var;
-			$cxt->unnamedLocalVariables[] = $var;
+		if($stackIndex >= 0) {
+			$value = $cxt->stack[$stackIndex];
+			if($value instanceof AS2Enumeration) {
+				$enumeration = $value;
+				if(isset($cxt->registers[$regIndex])) {
+					$var = $cxt->registers[$regIndex];
+					$enumeration->variable = $var;
+				} else {
+					$var = new AS2Variable;
+					$expr = new AS2VariableDeclaration;
+					$expr->name =& $var->name;
+					$var->name = 'reg' . $regIndex;
+					$cxt->registers[$regIndex] = $var;
+					$enumeration->variable = $expr;
+				}
+			} else {
+				if(isset($cxt->registers[$regIndex])) {
+					array_push($cxt->stack, $cxt->registers[$regIndex]);
+					array_push($cxt->stack, $value);
+					$this->doBinaryOp($cxt, '=', 15);
+					$expr = array_pop($cxt->stack);
+				} else {
+					$var = new AS2Variable;
+					$expr = new AS2VariableDeclaration;
+					$expr->value = $value;
+					$expr->name =& $var->name;
+					$var->name = 'reg' . $regIndex;
+					$cxt->registers[$regIndex] = $var;
+				}
+				return $expr;
+			}
 		}
-		return $expr;
 	}
 
 	protected function doStrictEquals($cxt) {
@@ -1725,7 +1777,6 @@ class AS2DecompilerContext {
 
 	public $stack = array();
 	public $registers = array();
-	public $unnamedLocalVariables = array();
 	public $target;
 	
 	public $relatedBranch;
@@ -1837,6 +1888,11 @@ class AS2Function extends AS2Expression {
 }
 
 class AS2FlowControl {
+}
+
+class AS2Enumeration {
+	public $container;
+	public $variable;
 }
 
 class AS2UnconditionalBranch extends AS2FlowControl {

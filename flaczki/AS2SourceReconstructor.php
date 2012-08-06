@@ -100,6 +100,14 @@ class AS2SourceReconstructor {
 		$this->addToken(')');
 	}
 
+	protected function addForIn($loop) {
+		$this->addToken('for');
+		$this->addToken('(');
+		$this->addExpression($loop->condition);
+		$this->addToken(')');
+		$this->addExpressions($loop->expressions);
+	}
+	
 	protected function addIfElse($stmt) {
 		$this->addToken('if');
 		$this->addToken('(');
