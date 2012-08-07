@@ -420,6 +420,7 @@ class FLAReconstructor {
 				$frame->elements = array($instance);
 			}
 		}
+		$timeline->layers = array_reverse($timeline->layers, true);
 		
 		$this->addCharacter($characterId, $button);
 		$this->addSymbol($button);
