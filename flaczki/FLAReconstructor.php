@@ -17,6 +17,7 @@ class FLAReconstructor {
 	protected $media;
 	protected $library;
 	protected $metadata;
+	protected $buttonFlags;
 	protected $tlfTextObjects;
 	protected $tlfTextObjectSymbol;
 	protected $embeddedFLAFile;
@@ -39,6 +40,7 @@ class FLAReconstructor {
 		$this->symbols = array();
 		$this->library = array();
 		$this->dictionary = array();
+		$this->buttonFlags = array();
 		$this->tlfTextObjects = array();
 		$this->tlfTextObjectSymbol = null;
 		$this->embeddedFLAFiles = array();
@@ -324,6 +326,105 @@ class FLAReconstructor {
 		$this->addMedia($video);
 	}
 	
+	protected function addButton($characterId, $records) {
+		$button = new FLADOMSymbolItem;
+		$button->lastModified = $this->lastModified;
+		$button->itemID = $this->getNextItemID();
+		$button->name = $this->getNextLibraryName('Button');
+		$button->symbolType = 'button';
+		$button->timeline = array();		
+		
+		$timeline = $button->timeline[] = new FLADOMTimeline;
+		$timeline->name = $button->name;
+		$timeline->layers = array();
+		foreach($records as $record) {
+			$character = $this->getCharacter($record->characterId);
+			if($character instanceof FLADOMSymbolItem) {
+				$instance = new FLADOMSymbolInstance;
+				$instance->libraryItemName = $character->name;
+			} else if($character instanceof FLAMorphShape || $character instanceof FLAVideo) {
+				continue;
+			} else {
+				$instance = $character;
+			}
+			if($record->matrix !== null) {
+				$instance->matrix = $this->convertMatrix($record->matrix);
+			}
+			if($record->colorTransform !== null) {
+				if($record->colorTransform->redMultTerm !== null || $record->colorTransform->redAddTerm !== null) {
+					$instance->color = $this->convertColorTransform($record->colorTransform);
+				}
+			}
+			if($record->blendMode !== null) {
+				static $blendModes = array('normal', 'normal', 'layer', 'multiply', 'screen', 'lighten', 'darken', 'difference', 'add', 'subtract', 'invert', 'alpha', 'erase', 'overlay', 'hardlight');
+				$instance->blendMode = $blendModes[$record->blendMode];
+			}
+			if($record->filters !== null) {
+				$instance->filters = $this->convertFilters($record->filters);
+			}
+		
+			if(isset($timeline->layers[$record->placeDepth])) {
+				$layer = $timeline->layers[$record->placeDepth];
+			} else {
+				$layer = new FLADOMLayer;
+				$layer->name = "Layer $record->placeDepth";
+				$layer->color = "#4FFF4F";
+				$layer->frames = array();
+				$timeline->layers[$record->placeDepth] = $layer;
+			}
+
+			// add instance to appropriate frames			
+			if($record->flags & 0x0001) {
+				$frame = $layer->frames[] = new FLADOMFrame;
+				$frame->index = 0;
+				$frame->duration = 1;
+				$frame->elements = array($instance);
+				if($record->flags & 0x0002) {
+					// extend to over state
+					$frame->duration++;
+					if($record->flags & 0x0004) {
+						// extend to down state
+						$frame->duration++;
+						if($record->flags & 0x0008) {
+							// extend to hit test
+							$frame->duration++;
+						}
+					}
+				}
+			}
+			if(($record->flags & 0x0003) == 0x0002) {
+				$frame = $layer->frames[] = new FLADOMFrame;
+				$frame->index = 1;
+				$frame->duration = 1;
+				$frame->elements = array($instance);
+				if($record->flags & 0x0004) {
+					$frame->duration++;
+					if($record->flags & 0x0008) {
+						$frame->duration++;
+					}
+				}
+			}
+			if(($record->flags & 0x0006) == 0x0004) {
+				$frame = $layer->frames[] = new FLADOMFrame;
+				$frame->index = 2;
+				$frame->duration = 1;
+				$frame->elements = array($instance);
+				if($record->flags & 0x0008) {
+					$frame->duration++;
+				}
+			}
+			if(($record->flags & 0x000C) == 0x0008) {
+				$frame = $layer->frames[] = new FLADOMFrame;
+				$frame->index = 3;
+				$frame->duration = 1;
+				$frame->elements = array($instance);
+			}
+		}
+		
+		$this->addCharacter($characterId, $button);
+		$this->addSymbol($button);
+	}
+	
 	protected function findFont($name) {
 		foreach($this->dictionary as $object) {
 			if($object instanceof FLAFont) {
@@ -363,6 +464,14 @@ class FLAReconstructor {
 			if($character instanceof FLADOMSymbolItem) {
 				$instance = new FLADOMSymbolInstance;
 				$instance->libraryItemName = $character->name;
+				if($character->symbolType == 'button') {
+					if(isset($this->buttonFlags[$tag->characterId])) {
+						$buttonFlags = $this->buttonFlags[$tag->characterId];
+						if($buttonFlags & SWFDefineButton2Tag::TrackAsMenu) {
+							$instance->trackAsMenu = 'true';
+						}
+					}
+				}
 				$frame = $this->addFrame($tag->depth);
 				$frame->elements[] = $instance;
 			} else if($character instanceof FLAMorphShape) {
@@ -435,6 +544,15 @@ class FLAReconstructor {
 	
 	protected function processRemoveObject2Tag($tag) {
 		$this->processRemoveObjectTag($tag);
+	}
+	
+	protected function processDefineButtonTag($tag) {
+		$this->addButton($tag->characterId, $tag->characters);
+	}
+	
+	protected function processDefineButton2Tag($tag) {
+		$this->addButton($tag->characterId, $tag->characters);
+		$this->buttonFlags[$tag->characterId] = $tag->flags;
 	}
 	
 	protected function processDefineShapeTag($tag) {
@@ -902,7 +1020,6 @@ class FLAReconstructor {
 		echo "DoAction\n";
 		$decompiler = new AS2Decompiler;
 		$expressions = $decompiler->decompile($tag->actions);
-		//print_r($expressions);
 	}
 	
 	protected function processDoInitActionTag($tag) {

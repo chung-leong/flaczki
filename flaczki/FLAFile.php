@@ -49,6 +49,7 @@ class FLADOMSymbolInstance {
 	public $transformationPoint;
 	public $filters;
 	public $matteColor;
+	public $trackAsMenu;
 }
 
 class FLADOMBitmapItem {
