@@ -142,11 +142,21 @@ class FLAMorphCurves {
 	public $isLine;
 }
 
-class FLALineStyle {
+class FLAStrokeStyle {
 	public $index;
-	public $width;
-	public $color;
-	public $alpha;
+	public $solidStroke;
+}
+
+class FLASolidStroke {
+	public $scaleMode;
+	public $caps;
+	public $weight;
+	public $joints;
+	public $miterLimit;
+	public $pixelHinting;
+	public $solidStyle;
+	
+	public $fill;
 }
 
 class FLAFillStyle {

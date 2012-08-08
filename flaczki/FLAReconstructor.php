@@ -90,6 +90,7 @@ class FLAReconstructor {
 		// process the tags
 		foreach($tags as $tag) {
 			$tagName = substr(get_class($tag), 3, -3);
+			//$memeoryUsage = memory_get_usage(); echo "$tagName ($memeoryUsage)\n";
 			$methodName = "process{$tagName}Tag";
 			if(method_exists($this, $methodName)) {
 				$this->$methodName($tag);
@@ -244,7 +245,7 @@ class FLAReconstructor {
 		$shape = new FLADOMShape;
 		$shape->fills = $this->convertFills($shapeRecord->fillStyles);
 		$shape->strokes = $this->convertStrokes($shapeRecord->lineStyles);
-		$shape->edges = $this->convertEdges($shapeRecord->edges);
+		$shape->edges = $this->convertEdges($shapeRecord->edges, $shape->fills, $shape->strokes);
 
 		// put a wrapper around the shape		
 		/*$frame = new FLADOMFrame;
@@ -278,8 +279,8 @@ class FLAReconstructor {
 		$morph->morphSegments = $this->convertMorphSegments($morphRecord->startEdges, $morphRecord->endEdges);
 		list($morph->startShape->fills, $morph->endShape->fills) = $this->convertMorphFills($morphRecord->fillStyles);
 		list($morph->startShape->strokes, $morph->endShape->strokes) = $this->convertMorphStrokes($morphRecord->lineStyles);
-		$morph->startShape->edges = $this->convertEdges($morphRecord->startEdges);
-		$morph->endShape->edges = $this->convertEdges($morphRecord->endEdges);
+		$morph->startShape->edges = $this->convertEdges($morphRecord->startEdges, $morph->startShape->fills, $morph->startShape->strokes);
+		$morph->endShape->edges = $this->convertEdges($morphRecord->endEdges, $morph->endShape->fills, $morph->endShape->strokes);
 		
 		$this->addCharacter($characterId, $morph);
 	}
@@ -300,6 +301,7 @@ class FLAReconstructor {
 			case 'image/jpeg': $extension = '.jpg'; break;
 			case 'image/png': $extension = '.png'; break;
 			case 'image/gif': $extension = '.gif'; break;
+			default: $extension = '';
 		}
 		$bitmap->path = "{$bitmap->name}$extension";
 		
@@ -600,7 +602,7 @@ class FLAReconstructor {
 	protected function processDefineBitsTag($tag) {
 		$this->addBitmap($tag->characterId, $this->jpegTables . $tag->imageData);
 	}
-	
+
 	protected function processDefineBitsJPEG2Tag($tag) {
 		$this->addBitmap($tag->characterId, $tag->imageData);
 	}
@@ -620,7 +622,7 @@ class FLAReconstructor {
 	}
 	
 	protected function processDefineBitsLosslessTag($tag) {
-		if($this->tag instanceof SWFDefineBitsLosslessTag && LosslessBitsConverter::isAvailable()) {
+		if($tag instanceof SWFDefineBitsLosslessTag && LosslessBitsConverter::isAvailable()) {
 			$converter = new LosslessBitsConverter;
 			$this->addBitmap($tag->characterId, $converter->convertToPNG($tag));
 		}
@@ -1018,16 +1020,13 @@ class FLAReconstructor {
 	}
 	
 	protected function processDoActionTag($tag) {
-		echo "DoAction\n";
 		$decompiler = new AS2Decompiler;
-		$expressions = $decompiler->decompile($tag->actions);
+		//$expressions = $decompiler->decompile($tag->actions);
 	}
 	
 	protected function processDoInitActionTag($tag) {
-		echo "DoInitAction\n";
-		//print_r($tag);
 		$decompiler = new AS2Decompiler;
-		$expressions = $decompiler->decompile($tag->actions);
+		//$expressions = $decompiler->decompile($tag->actions);
 	}
 	
 	protected function processDefineVideoStreamTag($tag) {
@@ -1392,13 +1391,57 @@ class FLAReconstructor {
 	protected function convertStrokes($records) {
 		$list = array();
 		foreach($records as $index => $record) {
-			$lineStyle = $list[] = new FLALineStyle;
-			$lineStyle->index = $index + 1;
-			if($record->width !== null) {
-				$lineStyle->width = $record->width;
-			}
+			$strokeStyle = $list[] = new FLAStrokeStyle;
+			$strokeStyle->index = $index + 1;
+			
 			if($record instanceof SWFLineStyle2) {
+				static $capStyles = array("round", "none", "square");
+				static $joinStyles = array("round", "bevel", "miter");				
+
+				if($record->fillStyle) {
+				} else {
+					$stroke = new FLASolidStroke;
+					$solidColor = $this->convertSolidColor($record->color);
+					$stroke->fill = array($solidColor);
+				}
+				
+				$stroke->weight = $record->width / 20.0;
+				if($stroke->weight == 0.05 && $stroke instanceof FLASolidStroke) {
+					$stroke->solidStyle = "hairline";
+				}
+				if($record->startCapStyle) {
+					$stroke->caps = $capStyles[$record->startCapStyle];
+				}
+				if($record->joinStyle) {
+					$stroke->joints = $joinStyles[$record->joinStyle];
+				}
+				if($record->flags & SWFLineStyle2::NoHScale) {
+					if($record->flags & SWFLineStyle2::NoVScale) {
+					//	$stroke->scaleMode = "none";
+					} else {
+						$stroke->scaleMode = "vertical";
+					}
+				} else {
+					if($record->flags & SWFLineStyle2::NoVScale) {
+						$stroke->scaleMode = "horizontal";
+					} else {
+						$stroke->scaleMode = "normal";
+					}
+				}
+				if($record->flags & SWFLineStyle2::PixelHinting) {
+					$stroke->pixelHinting = "true";
+				}
+				if($record->miterLimitFactor) {
+					$stroke->miterLimit = $record->miterLimitFactor / 256.0;
+				}
+			} else {
+				$solidColor = $this->convertSolidColor($record->color);
+				$stroke = new FLASolidStroke;
+				$stroke->fill = array($solidColor);
+				$stroke->weight = $record->width / 20.0;
+				$stroke->scaleMode = "normal";
 			}
+			$strokeStyle->solidStroke = $stroke;
 		}
 		return $list;
 	}
@@ -1505,13 +1548,18 @@ class FLAReconstructor {
 		}
 	}
 	
-	protected function convertEdges($records) {
+	protected function convertEdges($records, &$fills, &$strokes) {
 		$list = array();
 		$edge = $list[] = new FLAEdge;
 		$tokens = array();
 		$x = 0;
 		$y = 0;
 		$flags = 0;
+		$fillStyle0 = 0;
+		$fillStyle1 = 0;
+		$strokeStyle = 0;
+		$fillStyleOffset = 0;
+		$strokeStyleOffset = 0;
 		foreach($records as $record) {
 			if($record instanceof SWFStyleChange) {
 				if($record->fillStyle0 !== null || $record->fillStyle1 !== null || $record->lineStyle !== null) {
@@ -1522,19 +1570,40 @@ class FLAReconstructor {
 					}
 					
 					if($record->fillStyle0 !== null) {
-						$edge->fillStyle0 = $record->fillStyle0;
+						$edge->fillStyle0 = $fillStyle0 = $record->fillStyle0 + $fillStyleOffset;
 						$flags |= 0x01;
+					} else {
+						$edge->fillStyle0 = $fillStyle0;
 					}
 					if($record->fillStyle1 !== null) {
-						$edge->fillStyle1 = $record->fillStyle1;
+						$edge->fillStyle1 = $fillStyle1 = $record->fillStyle1 + $fillStyleOffset;
 						$flags |= 0x02;
+					} else {
+						$edge->fillStyle1 = $fillStyle1;
 					}
 					if($record->lineStyle !== null) {
-						$edge->strokeStyle = $record->lineStyle;
+						$edge->strokeStyle = $strokeStyle = $record->lineStyle + $strokeStyleOffset;
 						$flags |= 0x04;
+					} else {
+						$edge->strokeStyle = $strokeStyle;
+					}
+					
+					if($record->newLineStyles) {
+						$strokeStyleOffset = count($strokes);
+						$newStrokes = $this->convertStrokes($record->newLineStyles);
+						foreach($newStrokes as $newStroke) {
+							$strokes[] = $newStroke;
+						}
+					}
+					if($record->newFillStyles) {
+						$fillStyleOffset = count($fills);
+						$newFills = $this->convertFills($record->newLineStyles);
+						foreach($newFills as $newFill) {
+							$fills[] = $newFill;
+						}
 					}
 				}
-				if($record->moveDeltaX !== null) {
+				if($record->moveDeltaX !== null || $record->moveDeltaY !== null) {
 					$x = $record->moveDeltaX;
 					$y = $record->moveDeltaY;
 				}
