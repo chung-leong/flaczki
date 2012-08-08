@@ -56,7 +56,7 @@ class FLAAssembler {
 	protected function writeXMLFile($path, $rootNode) {
 		if($this->createParentFolder($path)) {
 			$stream = fopen($path, "wb");
-			$this->writeXMLNode($stream, $rootNode, true);
+			$this->writeXMLNode($stream, $rootNode, 0, true);
 			fclose($stream);
 		}
 	}
@@ -69,7 +69,7 @@ class FLAAssembler {
 		}
 	}
 	
-	protected function writeXMLNode($stream, $node, $addNS = false) {
+	protected function writeXMLNode($stream, $node, $depth, $addNS = false) {
 		$nodeName = substr(get_class($node), 3);
 		$s = "<$nodeName";
 		if($addNS) {
@@ -92,6 +92,9 @@ class FLAAssembler {
 		} else {
 			$s .= "/>\n";
 		}
+		if($depth) {
+			fwrite($stream, str_repeat("  ", $depth));
+		}
 		fwrite($stream, $s);
 		
 		if($hasChildren) {
@@ -99,20 +102,25 @@ class FLAAssembler {
 				if($value !== null) {
 					if(is_array($value)) {
 						if(count($value)) {
+							fwrite($stream, str_repeat("  ", $depth + 1));
 							fwrite($stream, "<$name>\n");
 							foreach($value as $child) {
-								$this->writeXMLNode($stream, $child);
+								$this->writeXMLNode($stream, $child, $depth + 2);
 							}
+							fwrite($stream, str_repeat("  ", $depth + 1));
 							fwrite($stream, "</$name>\n");
 						}
 					} else if(is_object($value) && $value) {
 						if(method_exists($value, 'write')) {
 							$value->write($stream, $name);
 						} else {
-							$this->writeXMLNode($stream, $value);
+							$this->writeXMLNode($stream, $value, $depth + 1);
 						}
 					}
 				}
+			}
+			if($depth) {
+				fwrite($stream, str_repeat("  ", $depth));
 			}
 			fwrite($stream, "</$nodeName>\n");
 		}

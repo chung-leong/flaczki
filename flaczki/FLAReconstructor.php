@@ -1543,9 +1543,7 @@ class FLAReconstructor {
 	}
 	
 	protected function convertAlpha($record) {
-		if($record->alpha != 255) {
-			return $record->alpha / 255.0;
-		}
+		return $record->alpha / 255.0;
 	}
 	
 	protected function convertEdges($records, &$fills, &$strokes) {
@@ -1554,10 +1552,9 @@ class FLAReconstructor {
 		$tokens = array();
 		$x = 0;
 		$y = 0;
-		$flags = 0;
-		$fillStyle0 = 0;
-		$fillStyle1 = 0;
-		$strokeStyle = 0;
+		$fillStyle0 = null;
+		$fillStyle1 = null;
+		$strokeStyle = null;
 		$fillStyleOffset = 0;
 		$strokeStyleOffset = 0;
 		foreach($records as $record) {
@@ -1570,20 +1567,29 @@ class FLAReconstructor {
 					}
 					
 					if($record->fillStyle0 !== null) {
-						$edge->fillStyle0 = $fillStyle0 = $record->fillStyle0 + $fillStyleOffset;
-						$flags |= 0x01;
+						if($record->fillStyle0 != 0) {
+							$edge->fillStyle0 = $fillStyle0 = $record->fillStyle0 + $fillStyleOffset;
+						} else {
+							$fillStyle0 = null;
+						}
 					} else {
 						$edge->fillStyle0 = $fillStyle0;
 					}
 					if($record->fillStyle1 !== null) {
-						$edge->fillStyle1 = $fillStyle1 = $record->fillStyle1 + $fillStyleOffset;
-						$flags |= 0x02;
+						if($record->fillStyle1 != 0) {
+							$edge->fillStyle1 = $fillStyle1 = $record->fillStyle1 + $fillStyleOffset;
+						} else {
+							$fillStyle1 = null;
+						}
 					} else {
 						$edge->fillStyle1 = $fillStyle1;
 					}
 					if($record->lineStyle !== null) {
-						$edge->strokeStyle = $strokeStyle = $record->lineStyle + $strokeStyleOffset;
-						$flags |= 0x04;
+						if($record->lineStyle != 0) {
+							$edge->strokeStyle = $strokeStyle = $record->lineStyle + $strokeStyleOffset;
+						} else {
+							$strokeStyle = null;
+						}
 					} else {
 						$edge->strokeStyle = $strokeStyle;
 					}
@@ -1592,36 +1598,29 @@ class FLAReconstructor {
 						$strokeStyleOffset = count($strokes);
 						$newStrokes = $this->convertStrokes($record->newLineStyles);
 						foreach($newStrokes as $newStroke) {
+							$newStroke->index += $strokeStyleOffset;
 							$strokes[] = $newStroke;
 						}
 					}
 					if($record->newFillStyles) {
 						$fillStyleOffset = count($fills);
-						$newFills = $this->convertFills($record->newLineStyles);
+						$newFills = $this->convertFills($record->newFillStyles);
 						foreach($newFills as $newFill) {
+							$newFill->index += $fillStyleOffset;
 							$fills[] = $newFill;
 						}
 					}
 				}
-				if($record->moveDeltaX !== null || $record->moveDeltaY !== null) {
+				if($record->moveDeltaX !== null) {				
 					$x = $record->moveDeltaX;
+				}
+				if($record->moveDeltaY !== null) {
 					$y = $record->moveDeltaY;
 				}
 			} else if($record instanceof SWFStraightEdge) {
 				$tokens[] = "!$x $y";
-				if($flags) {
-					$tokens[] = "S$flags";
-					$flags = 0;
-				}
-				if($record->deltaX && $record->deltaY) {
-					$x += $record->deltaX;
-					$y += $record->deltaY;
-					
-				} else if($record->deltaX) {
-					$x += $record->deltaX;
-				} else {
-					$y += $record->deltaY;
-				}
+				$x += $record->deltaX;
+				$y += $record->deltaY;
 				$tokens[] = "|$x $y";
 			} else if($record instanceof SWFQuadraticCurve) {
 				$tokens[] = "!$x $y";
