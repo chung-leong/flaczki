@@ -10,6 +10,11 @@ class TransparentJPEGConverter {
 		// create the image and get the GD raw data, using output buffering as
 		// GD doesn't work with stream wrappers in all versions of PHP
 		$image = imagecreatefromstring($tag->imageData);
+		if(!$image) {
+			file_put_contents("TransparentJPEGConverter.failed.jpg", $tag->imageData);
+			exit;
+			return false;
+		}
 		imagesavealpha($image, true);
 		ob_start();
 		imagegd2($image);

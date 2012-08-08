@@ -1043,7 +1043,7 @@ class AS2Decompiler {
 		$index = array_pop($cxt->stack);
 		$expr = new AS2Variable;
 		$expr->name = array_pop($cxt->stack);
-		array_push($expr);
+		array_push($cxt->stack, $expr);
 		$this->doBinaryOp($cxt, '.', 1);
 	}
 
@@ -1306,7 +1306,7 @@ class AS2Decompiler {
 
 	protected function doPushDuplicate($cxt) {
 		$index = count($cxt->stack) - 1;
-		array_push($cxt->stack[$index]);
+		array_push($cxt->stack, $cxt->stack[$index]);
 	}
 
 	protected function doRandomNumber($cxt) {
@@ -1340,7 +1340,7 @@ class AS2Decompiler {
 	protected function doSetProperty($cxt) {
 		$value = array_pop($cxt->stack);
 		$this->doGetProperty($cxt);
-		array_push($value);
+		array_push($cxt->stack, $value);
 		$this->doBinaryOp($cxt, '=', 15);
 		$expr = array_pop($cxt->stack);
 		return $expr;

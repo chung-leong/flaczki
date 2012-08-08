@@ -136,6 +136,11 @@ class AS2SourceReconstructor {
 		}
 	}
 	
+	protected function addReturn($expr) {
+		$this->addToken('return');
+		$this->addExpression($expr);
+	}
+	
 	protected function addFunctionCall($call) {
 		$this->addExpression($call->name);
 		$this->addToken('(');
