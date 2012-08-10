@@ -241,12 +241,28 @@ class FLAReconstructor {
 	}
 	
 	protected function addFrame($depth) {
+		$layer = $this->getLayer($depth);
+		if($this->frameIndex > 0) {
+			$lastFrameIndex = 0;
+			if($layer->frames) {
+				$previousFrame = $layer->frames[count($layer->frames) - 1];
+				$lastFrameIndex = $previousFrame->index + $previousFrame->duration;
+			}
+			if($lastFrameIndex != $this->frameIndex) {
+				// add some empty frames
+				$emptyFrame = new FLADOMFrame;
+				$emptyFrame->index = $lastFrameIndex;
+				$emptyFrame->duration = $this->frameIndex - $lastFrameIndex;
+				$emptyFrame->keyMode = 0;
+				$emptyFrame->elements = array();
+				$layer->frames[] = $emptyFrame;
+			}
+		}
 		$frame = new FLADOMFrame;
 		$frame->index = $this->frameIndex;
 		$frame->duration = 0;
 		$frame->keyMode = 0;
 		$frame->elements = array();
-		$layer = $this->getLayer($depth);
 		$layer->frames[] = $frame;
 		return $frame;
 	}
