@@ -28,7 +28,7 @@ class FLADOMDocument {
 }
 
 class FLACharacter {
-	public $referenced = array();
+	public $references = array();
 }
 
 class FLADOMSymbolItem extends FLACharacter { 
@@ -77,8 +77,45 @@ class FLABitmap extends FLACharacter {
 	public $mimeType;
 	public $data;
 	public $name;
+	public $itemID;
 	public $filename;
 	public $allowSmoothing;
+}
+
+class FLADOMVideoInstance {
+	public $libraryItemName;
+	public $frameRight;
+	public $frameBottom;
+}
+
+class FLADOMVideoItem {
+	public $name;
+	public $itemID;
+	public $sourceExternalFilepath;
+	public $sourceLastImported;
+	public $videoDataHRef;
+	public $videoType;
+	public $fps;
+	public $rate;
+	public $bits; 
+	public $channels;
+	public $width;
+	public $height;
+	public $length;
+}
+
+class FLAVideo extends FLACharacter {
+	public $data;
+	public $filename;
+	public $frameCount;	
+	public $width;
+	public $height;
+	public $deblockingLevel;
+	public $smoothing;
+	public $codecId;
+	public $codec;
+	public $path;
+	public $referenceCount;
 }
 
 class FLAInclude {
@@ -114,7 +151,7 @@ class FLADOMFrame {
 	public $elements;
 }
 
-class FLADOMShape {
+class FLADOMShape extends FLACharacter {
 	public $fills;
 	public $strokes;
 	public $edges;
@@ -331,42 +368,6 @@ class FLADOMDynamicText extends FLACharacter {
 	public $matrix;
 	public $textRuns;
 	public $filters;
-}
-
-class FLADOMVideoInstance {
-	public $libraryItemName;
-	public $frameRight;
-	public $frameBottom;
-}
-
-class FLADOMVideoItem {
-	public $name;
-	public $itemID;
-	public $sourceExternalFilepath;
-	public $sourceLastImported;
-	public $videoDataHRef;
-	public $videoType;
-	public $fps;
-	public $rate;
-	public $bits; 
-	public $channels;
-	public $width;
-	public $height;
-	public $length;
-}
-
-class FLAVideo extends FLACharacter {
-	public $data;
-	public $filename;
-	public $frameCount;	
-	public $width;
-	public $height;
-	public $deblockingLevel;
-	public $smoothing;
-	public $codecId;
-	public $codec;
-	public $path;
-	public $referenceCount;
 }
 
 class FLADOMInputText extends FLADOMDynamicText {

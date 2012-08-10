@@ -23,11 +23,11 @@ class FLAAssembler {
 		}
 		$this->writeFile("{$this->folderPath}/{$movieName}.xfl", "PROXY-CS5");
 		
-		foreach($flaFile->library as $name => $item) {
+		foreach($flaFile->library as $href => $item) {
 			if($item instanceof FLABitmap || $item instanceof FLAVideo) {
-				$this->writeFile("{$this->folderPath}/LIBRARY/{$item->path}", $item->data);
+				$this->writeFile("$this->folderPath/LIBRARY/$href", $item->data);
 			} else if($item instanceof FLADOMSymbolItem) {
-				$this->writeXMLFile("{$this->folderPath}/LIBRARY/{$item->name}.xml", $item);
+				$this->writeXMLFile("$this->folderPath/LIBRARY/$href", $item);
 			}
 		}		
 	}
@@ -70,6 +70,10 @@ class FLAAssembler {
 	}
 	
 	protected function writeXMLNode($stream, $node, $depth, $addNS = false) {
+		if($depth > 100) {
+			echo "RECURSION";
+			exit;
+		}
 		$nodeName = substr(get_class($node), 3);
 		$s = "<$nodeName";
 		if($addNS) {
@@ -112,7 +116,9 @@ class FLAAssembler {
 						}
 					} else if(is_object($value) && $value) {
 						if(method_exists($value, 'write')) {
+							fwrite($stream, str_repeat("  ", $depth + 1));
 							$value->write($stream, $name);
+							fwrite($stream, "\n");
 						} else {
 							$this->writeXMLNode($stream, $value, $depth + 1);
 						}
