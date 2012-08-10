@@ -35,11 +35,10 @@ class FLAReconstructor {
 	
 	public function reconstruct($swfFile, $lastModified = 0) {
 		$this->lastModified = ($lastModified) ? $lastModified : time();
-		$this->fileID = rand(1, 0xFF);
-		$this->lastItemID = 0x50000000;
 		$this->symbols = array();
 		$this->library = array();
 		$this->dictionary = array();
+		$this->media = array();
 		$this->buttonFlags = array();
 		$this->tlfTextObjects = array();
 		$this->tlfTextObjectSymbol = null;
@@ -62,13 +61,83 @@ class FLAReconstructor {
 		$flaFile->document->playOptionsPlayFrameActions = 'false';
 		$flaFile->document->timelines = $this->createTimelines($swfFile->tags);
 		$flaFile->document->nextSceneIdentifier = count($flaFile->document->timelines) + 1;
+		
+		foreach($this->dictionary as $characterId => $character) {
+			if($character instanceof FLADOMSymbolItem) {
+				if($character->symbolType == 'graphic') {
+					if(count($character->references) == 1) {
+						// the graphic is only referenced once
+						$timeline = $character->references[0];
+						if(count($timeline->layers) == 1) {
+							// there's only one layer on the timeline
+							$originalLayer = reset($timeline->layers);
+							if(count($originalLayer->frames) == 1) {
+								// it has only one frame
+								$originalFrame = $originalLayer->frames[0];
+	
+								// put layers of the graphic object into the timeline
+								$timeline->layers = $character->timeline[0]->layers;
+								foreach($timeline->layers as $layer) {
+									foreach($layer->frames as $frame) {
+										$frame->index = $originalFrame->index;
+										$frame->duration = $originalFrame->duration;
+									}
+								}
+	
+								// remove the graphic from the library
+								$this->removeSymbol($characterId);
+							}
+						}
+					}
+				}
+			}
+			$character->references = null;
+		}
+
+		// assign names to library items		
+		$nameIndices = array();
+		foreach($this->library as $characterId => $item) {
+			if($character instanceof FLABitmap) {
+				$prefix = 'Bitmap';
+			} else {
+				$prefix = 'Symbol';
+			}
+			$number =& $nameIndices[$prefix];
+			$number++;
+			$item->name = "$prefix $number";
+		}
+		
+		// set href of include's
+		foreach($this->symbols as $characterId => $include) {
+			$character = $this->dictionary[$characterId];
+			$include->href = "$character->name.xml";
+		}
+		
+		// set paths of media item
+		foreach($this->media as $characterId => $item) {
+			$object = $this->dictionary[$characterId];
+			if($item instanceof FLADOMBitmapItem) {
+				switch($object->mimeType) {
+					case 'image/jpeg': $extension = '.jpg'; break;
+					case 'image/png': $extension = '.png'; break;
+					case 'image/gif': $extension = '.gif'; break;
+					default: $extension = '';
+				}
+			} else if($item instanceof FLADOMVideoItem) {
+				$extension = '.flv';
+			}
+			$object->path = $item->href = "{$item->name}$extension";
+		}
+		
 		$flaFile->document->media = $this->media;
 		$flaFile->document->symbols = $this->symbols;
-		
 		$flaFile->library = $this->library;
 		$flaFile->metadata = $this->metadata;
+		if($this->embeddedFLAFile) {
+			$flaFile = $this->embeddedFLAFile;
+		}
 		
-		return ($this->embeddedFLAFile) ? $this->embeddedFLAFile : $flaFile;
+		return $flaFile;
 	}
 	
 	protected function createTimelines($tags) {
@@ -124,17 +193,10 @@ class FLAReconstructor {
 		return $timelines;
 	}
 	
-	protected function getNextItemID() {
-		return sprintf('%08x-%08x', ++$this->lastItemID, $this->fileID);
-	}
-	
-	protected function getNextLibraryName($prefix) {
-		$num = 0;
-		do {	
-			$num++;
-			$name = "$prefix $num";
-		} while(isset($this->library[$name]));
-		return $name;
+	protected function getLayerColor($depth) {
+		static $colors = array(0x4FFF4F, 0x9933CC, 0xFF800A, 0xFF4FFF, 0x4FFFFF, 0x808080, 0x4F80FF, 0xFF4F4F);
+		$index = (int) ($depth - 1) % 8;
+		return sprintf("#%06X", $colors[$index]);
 	}
 	
 	protected function getLayer($depth) {
@@ -143,7 +205,7 @@ class FLAReconstructor {
 		} else {
 			$layer = new FLADOMLayer;
 			$layer->name = "Layer $depth";
-			$layer->color = "#4FFF4F";
+			$layer->color = $this->getLayerColor($depth);
 			$layer->frames = array();
 			$this->timeline->layers[$depth] = $layer;
 		}
@@ -155,6 +217,9 @@ class FLAReconstructor {
 	}
 	
 	protected function addCharacter($characterId, $character) {
+		if(isset($this->dictionary[$characterId])) {
+			exit;
+		}
 		$this->dictionary[$characterId] = $character;
 	}
 	
@@ -186,90 +251,118 @@ class FLAReconstructor {
 		return $frame;
 	}
 	
-	protected function addSymbol($object) {
-		$this->library[$object->name] = $object;
+	protected function addSymbol($characterId, $object) {
+		$this->library[$characterId] = $object;
 		
 		$include = new FLAInclude;
-		$include->href = "{$object->name}.xml";
 		$include->loadImmediate = "false";
 		$include->itemID = $object->itemID;
 		$include->lastModified = $object->lastModified;
 		if($object->symbolType == 'graphic') {
 			$include->itemIcon = "1";
 		}
-		$this->symbols[] = $include;
+		$this->symbols[$characterId] = $include;
 	}
 	
-	protected function removeSymbol($object) {
-		unset($this->library[$object->name]);
+	protected function removeSymbol($characterId) {
+		unset($this->library[$characterId]);
+		unset($this->symbols[$characterId]);;
 	}
 	
-	protected function addMedia($object) {
-		$this->library[$object->name] = $object;
+	protected function addMedia($characterId, $object) {
+		$this->library[$characterId] = $object;
 
 		if($object instanceof FLABitmap) {
 			$item = new FLADOMBitmapItem;
-			$item->name = $object->name;
-			$item->itemID = $object->itemID;
+			$item->name =& $object->name;
+			$item->itemID =& $object->itemID;
 			$item->externalFileSize = strlen($object->data);
 			$item->originalCompressionType = ($object->mimeType == 'image/jpeg') ? 'losssly' : 'lossless';
 			$item->quality = 50;
-			$item->href = $object->path;
 			$item->frameRight = $object->width * 20;
 			$item->frameBottom = $object->height * 20;
 			$item->allowSmoothing =& $object->allowSmoothing;
 		} else if($object instanceof FLAVideo) {
 			$item = new FLADOMVideoItem;
-			$item->name = $object->name;
-			$item->itemID = $object->itemID;
+			$item->name =& $object->name;
+			$item->itemID =& $object->itemID;
 			$item->videoType = "$object->codec media";
-			$item->href = $object->path;
 			$item->width = $object->width;
 			$item->height = $object->height;
 		}
-		$this->media[] = $item;
+		$this->media[$characterId] = $item;
 	}
 	
 	protected function addMovieClip($characterId, $tags) {
 		$movieClip = new FLADOMSymbolItem;
 		$movieClip->lastModified = $this->lastModified;
-		$movieClip->itemID = $this->getNextItemID();
-		$movieClip->name = $this->getNextLibraryName('Symbol');
 		$movieClip->timeline = $this->createTimelines($tags);
-		$movieClip->timeline[0]->name = $movieClip->name;
+		$movieClip->timeline[0]->name =& $movieClip->name;
 		$this->addCharacter($characterId, $movieClip);
-		$this->addSymbol($movieClip);
+		$this->addSymbol($characterId, $movieClip);
 	}
 	
 	protected function addShape($characterId, $shapeRecord) {
-		$shape = new FLADOMShape;
-		$shape->fills = $this->convertFills($shapeRecord->fillStyles);
-		$shape->strokes = $this->convertStrokes($shapeRecord->lineStyles);
-		$shape->edges = $this->convertEdges($shapeRecord->edges, $shape->fills, $shape->strokes);
-
-		// put a wrapper around the shape		
-		/*$frame = new FLADOMFrame;
-		$frame->index = 0;
-		$frame->keyMode = 9728;
-		$frame->elements = array($shape);
-		$layer = new FLADOMLayer;
-		$layer->name = "Layer 1";
-		$layer->color = "#4FFF4F";
-		$layer->current = "true";
-		$layer->isSelected = "true";
-		$layer->frames = array($frame);
-		$timeline = new FLADOMTimeline;
-		$timeline->layers = array($layer);
-		
-		$graphic = new FLADOMSymbolItem;
-		$graphic->symbolType = "graphic";
-		$graphic->itemID = $this->getNextItemID();
-		$graphic->name = $timeline->name = $this->getNextLibraryName('Symbol');
-		$graphic->lastModified = $this->lastModified;
-		$graphic->timeline = array($timeline);*/
-		
-		$this->addCharacter($characterId, $shape);
-		//$this->addSymbol($graphic);
+		// see if the shape records add any new style
+		// that indicates that the original graphic has multiple layers
+		$layerCount = 1;
+		foreach($shapeRecord->edges as $record) {
+			if($record instanceof SWFStyleChange && ($record->newFillStyles || $record->newLineStyles)) {
+				$layerCount++;
+			}
+		}
+		if($layerCount > 1) {
+			// create a graphic object
+			$timeline = new FLADOMTimeline;
+			$timeline->layers = array();
+			$graphic = new FLADOMSymbolItem;
+			$graphic->symbolType = "graphic";
+			$timeline->name =& $graphic->name;
+			$graphic->lastModified = $this->lastModified;
+			$graphic->timeline = array($timeline);
+			
+			// split up the shape and put each part on each own layer
+			$recordCount = count($shapeRecord->edges);
+			$fillStyles = $shapeRecord->fillStyles;
+			$lineStyles = $shapeRecord->lineStyles;
+			$edges = array();
+			for($i = 0; $i <= $recordCount; $i++) {
+				$record = ($i < $recordCount) ? $shapeRecord->edges[$i] : null;
+				if(($record instanceof SWFStyleChange && ($record->newFillStyles || $record->newLineStyles)) || !$record) {
+					$shape = new FLADOMShape;
+					$shape->fills = $this->convertFills($fillStyles);
+					$shape->strokes = $this->convertStrokes($lineStyles);
+					$shape->edges = $this->convertEdges($edges);
+				
+					$frame = new FLADOMFrame;
+					$frame->index = 0;
+					$frame->keyMode = 9728;
+					$frame->elements = array($shape);
+					$layer = new FLADOMLayer;
+					$layer->color = $this->getLayerColor($layerCount);
+					$layer->name = "Layer " . $layerCount--;
+					$layer->frames = array($frame);
+					$timeline->layers[] = $layer;
+					
+					if($record) {
+						$fillStyles = $record->newFillStyles;
+						$lineStyles = $record->newLineStyles;
+						$edges = array();
+					}
+				} else {
+					$edges[] = $record;
+				}
+			}
+			
+			$this->addCharacter($characterId, $graphic);
+			$this->addSymbol($characterId, $graphic);
+		} else {
+			$shape = new FLADOMShape;
+			$shape->fills = $this->convertFills($shapeRecord->fillStyles);
+			$shape->strokes = $this->convertStrokes($shapeRecord->lineStyles);
+			$shape->edges = $this->convertEdges($shapeRecord->edges);
+			$this->addCharacter($characterId, $shape);
+		}
 	}
 		
 	protected function addMorphShape($characterId, $morphRecord) {
@@ -279,8 +372,8 @@ class FLAReconstructor {
 		$morph->morphSegments = $this->convertMorphSegments($morphRecord->startEdges, $morphRecord->endEdges);
 		list($morph->startShape->fills, $morph->endShape->fills) = $this->convertMorphFills($morphRecord->fillStyles);
 		list($morph->startShape->strokes, $morph->endShape->strokes) = $this->convertMorphStrokes($morphRecord->lineStyles);
-		$morph->startShape->edges = $this->convertEdges($morphRecord->startEdges, $morph->startShape->fills, $morph->startShape->strokes);
-		$morph->endShape->edges = $this->convertEdges($morphRecord->endEdges, $morph->endShape->fills, $morph->endShape->strokes);
+		$morph->startShape->edges = $this->convertEdges($morphRecord->startEdges);
+		$morph->endShape->edges = $this->convertEdges($morphRecord->endEdges);
 		
 		$this->addCharacter($characterId, $morph);
 	}
@@ -294,27 +387,15 @@ class FLAReconstructor {
 		$bitmap->mimeType = $imageInfo['mime'];
 		$bitmap->width = $imageInfo[0];
 		$bitmap->height = $imageInfo[1];
-		$bitmap->name = $this->getNextLibraryName('Bitmap');
-		$bitmap->itemID = $this->getNextItemID();
-		
-		switch($bitmap->mimeType) {
-			case 'image/jpeg': $extension = '.jpg'; break;
-			case 'image/png': $extension = '.png'; break;
-			case 'image/gif': $extension = '.gif'; break;
-			default: $extension = '';
-		}
-		$bitmap->path = "{$bitmap->name}$extension";
 		
 		$this->addCharacter($characterId, $bitmap);
-		$this->addMedia($bitmap);
+		$this->addMedia($characterId, $bitmap);
 	}
 	
 	protected function addVideo($characterId, $record) {
 		static $codes = array( 2 => 'h263', 3 => 'screen share', 4 => 'vp6', 5 => 'vp6 alpha' );
 		$video = new FLAVideo;
 		$video->data = "FLV\x01\x01\x00\x00\x00\x09\x00\x00\x00\x00";
-		$video->name = $this->getNextLibraryName('Video');
-		$video->itemID = $this->getNextItemID();
 		$video->width = $record->width;
 		$video->height = $record->height;
 		$video->deblockingLevel = ($record->flags >> 1) & 0x07;
@@ -322,28 +403,25 @@ class FLAReconstructor {
 		$video->frameCount = $record->frameCount;
 		$video->codec = $codes[$record->codecId];
 		$video->codecId = $record->codecId;
-		$video->path = "{$video->name}.flv";
 		
 		$this->addCharacter($characterId, $video);
-		$this->addMedia($video);
+		$this->addMedia($characterId, $video);
 	}
 	
 	protected function addButton($characterId, $records) {
 		$button = new FLADOMSymbolItem;
 		$button->lastModified = $this->lastModified;
-		$button->itemID = $this->getNextItemID();
-		$button->name = $this->getNextLibraryName('Button');
 		$button->symbolType = 'button';
 		$button->timeline = array();		
 		
 		$timeline = $button->timeline[] = new FLADOMTimeline;
-		$timeline->name = $button->name;
+		$timeline->name =& $button->name;
 		$timeline->layers = array();
 		foreach($records as $record) {
 			$character = $this->getCharacter($record->characterId);
 			if($character instanceof FLADOMSymbolItem) {
 				$instance = new FLADOMSymbolInstance;
-				$instance->libraryItemName = $character->name;
+				$instance->libraryItemName =& $character->name;
 			} else if($character instanceof FLAMorphShape || $character instanceof FLAVideo) {
 				continue;
 			} else {
@@ -370,7 +448,7 @@ class FLAReconstructor {
 			} else {
 				$layer = new FLADOMLayer;
 				$layer->name = "Layer $record->placeDepth";
-				$layer->color = "#4FFF4F";
+				$layer->color = $this->getLayerColor($record->placeDepth);
 				$layer->frames = array();
 				$timeline->layers[$record->placeDepth] = $layer;
 			}
@@ -425,7 +503,7 @@ class FLAReconstructor {
 		$timeline->layers = array_reverse($timeline->layers, true);
 		
 		$this->addCharacter($characterId, $button);
-		$this->addSymbol($button);
+		$this->addSymbol($characterId, $button);
 	}
 	
 	protected function findFont($name) {
@@ -437,7 +515,7 @@ class FLAReconstructor {
 			}
 		}
 	}
-	
+
 	protected function processMetadataTag($tag) {
 		$this->metadata = '<?xpacket begin="?" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.2-c003 61.141987, 2011/02/22-12:03:51 ">'
 				. $tag->metadata
@@ -466,7 +544,8 @@ class FLAReconstructor {
 			}
 			if($character instanceof FLADOMSymbolItem) {
 				$instance = new FLADOMSymbolInstance;
-				$instance->libraryItemName = $character->name;
+				$instance->libraryItemName =& $character->name;
+				$this->instances[] = $instance;
 				if($character->symbolType == 'button') {
 					if(isset($this->buttonFlags[$tag->characterId])) {
 						$buttonFlags = $this->buttonFlags[$tag->characterId];
@@ -488,16 +567,17 @@ class FLAReconstructor {
 				}
 			} else if($character instanceof FLAVideo) {
 				$instance = new FLADOMVideoInstance;
-				$instance->libraryItemName = $character->name;
+				$instance->libraryItemName =& $character->name;
 				$instance->frameRight = $character->width;
 				$instance->frameBottom = $character->height;
 				$frame = $this->addFrame($tag->depth);
 				$frame->elements[] = $instance;
-			} else {
+			} else {				
 				$instance = $character;
 				$frame = $this->addFrame($tag->depth);
 				$frame->elements[] = $instance;
 			}
+			$character->references[] = $this->timeline;
 		} else {
 			if($previousFrame && !$previousFrame->morphShape && !($previousInstance instanceof FLADOMVideoInstance)) {
 				$frame = $this->addFrame($tag->depth);
@@ -1060,7 +1140,7 @@ class FLAReconstructor {
 			} else if($className == 'fl.text.TLFTextField') {
 				// remove it from the library
 				$this->tlfTextObjectSymbol = $object;
-				$this->removeSymbol($object);
+				$this->removeSymbol($characterId);
 			} else {
 			}
 		}
@@ -1546,7 +1626,7 @@ class FLAReconstructor {
 		return $record->alpha / 255.0;
 	}
 	
-	protected function convertEdges($records, &$fills, &$strokes) {
+	protected function convertEdges($records) {
 		$list = array();
 		$edge = $list[] = new FLAEdge;
 		$tokens = array();
@@ -1555,8 +1635,6 @@ class FLAReconstructor {
 		$fillStyle0 = null;
 		$fillStyle1 = null;
 		$strokeStyle = null;
-		$fillStyleOffset = 0;
-		$strokeStyleOffset = 0;
 		foreach($records as $record) {
 			if($record instanceof SWFStyleChange) {
 				if($record->fillStyle0 !== null || $record->fillStyle1 !== null || $record->lineStyle !== null) {
@@ -1568,7 +1646,7 @@ class FLAReconstructor {
 					
 					if($record->fillStyle0 !== null) {
 						if($record->fillStyle0 != 0) {
-							$edge->fillStyle0 = $fillStyle0 = $record->fillStyle0 + $fillStyleOffset;
+							$edge->fillStyle0 = $fillStyle0 = $record->fillStyle0;
 						} else {
 							$fillStyle0 = null;
 						}
@@ -1577,7 +1655,7 @@ class FLAReconstructor {
 					}
 					if($record->fillStyle1 !== null) {
 						if($record->fillStyle1 != 0) {
-							$edge->fillStyle1 = $fillStyle1 = $record->fillStyle1 + $fillStyleOffset;
+							$edge->fillStyle1 = $fillStyle1 = $record->fillStyle1;
 						} else {
 							$fillStyle1 = null;
 						}
@@ -1586,29 +1664,12 @@ class FLAReconstructor {
 					}
 					if($record->lineStyle !== null) {
 						if($record->lineStyle != 0) {
-							$edge->strokeStyle = $strokeStyle = $record->lineStyle + $strokeStyleOffset;
+							$edge->strokeStyle = $strokeStyle = $record->lineStyle;
 						} else {
 							$strokeStyle = null;
 						}
 					} else {
 						$edge->strokeStyle = $strokeStyle;
-					}
-					
-					if($record->newLineStyles) {
-						$strokeStyleOffset = count($strokes);
-						$newStrokes = $this->convertStrokes($record->newLineStyles);
-						foreach($newStrokes as $newStroke) {
-							$newStroke->index += $strokeStyleOffset;
-							$strokes[] = $newStroke;
-						}
-					}
-					if($record->newFillStyles) {
-						$fillStyleOffset = count($fills);
-						$newFills = $this->convertFills($record->newFillStyles);
-						foreach($newFills as $newFill) {
-							$newFill->index += $fillStyleOffset;
-							$fills[] = $newFill;
-						}
 					}
 				}
 				if($record->moveDeltaX !== null) {				

@@ -27,7 +27,11 @@ class FLADOMDocument {
 	public $timelines;
 }
 
-class FLADOMSymbolItem { 
+class FLACharacter {
+	public $referenced = array();
+}
+
+class FLADOMSymbolItem extends FLACharacter { 
 	public $name;
 	public $itemID;
 	public $symbolType;
@@ -67,7 +71,7 @@ class FLADOMBitmapItem {
 	public $frameBottom;
 }
 
-class FLABitmap {
+class FLABitmap extends FLACharacter {
 	public $width;
 	public $height;
 	public $mimeType;
@@ -116,7 +120,7 @@ class FLADOMShape {
 	public $edges;
 }
 
-class FLAMorphShape  {
+class FLAMorphShape extends FLACharacter {
 	public $morphSegments;
 	
 	public $startShape;
@@ -311,7 +315,7 @@ class FLAAdjustColorFilter {
 	public $hue;
 }
 
-class FLADOMDynamicText {
+class FLADOMDynamicText extends FLACharacter {
 	public $name;
 	public $fontRenderingMode;
 	public $width;
@@ -351,7 +355,7 @@ class FLADOMVideoItem {
 	public $length;
 }
 
-class FLAVideo {
+class FLAVideo extends FLACharacter {
 	public $data;
 	public $filename;
 	public $frameCount;	
@@ -362,6 +366,7 @@ class FLAVideo {
 	public $codecId;
 	public $codec;
 	public $path;
+	public $referenceCount;
 }
 
 class FLADOMInputText extends FLADOMDynamicText {
@@ -403,7 +408,7 @@ class FLADOMTextAttrs {
 	public $url;
 }
 
-class FLADOMTLFText {
+class FLADOMTLFText extends FLACharacter {
 	public $name;
 	public $left;
 	public $top;
@@ -415,7 +420,6 @@ class FLADOMTLFText {
 	public $filters;
 	public $tlfFonts;
 	public $markup;
-	
 }
 
 class FLAMarkup {

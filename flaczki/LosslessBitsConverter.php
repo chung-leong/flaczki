@@ -76,7 +76,6 @@ class LosslessBitsConverter {
 					}
 				}
 			} else {
-				echo $format;
 				if($format == 5) {
 					// loop through all rows 
 					for($r = 0, $j = 23; $r < $rowCount; $r++) {
