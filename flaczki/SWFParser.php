@@ -73,7 +73,7 @@ class SWFParser {
 				}
 			} else if($tag instanceof SWFGenericTag) {
 				$className = "SWF{$tag->name}Tag";
-				if(is_subclass_of($className, 'SWFCharacterTag')) {
+				if(class_exists($className, false) && is_subclass_of($className, 'SWFCharacterTag')) {
 					$array = unpack('v', $tag->data);
 					$characterId = $array[1];
 					if($characterId > $swfFile->highestCharacterId) {
