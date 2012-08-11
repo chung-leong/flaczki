@@ -254,7 +254,7 @@ class SWFParser {
 		$tag = new SWFDefineBitsJPEG2Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->imageData = $this->readBytes($bytesAvailable, $bytesAvailable);
-		$this->removeErroneousJPEGheader($tag->imageData);
+		$this->removeErroneousJPEGHeader($tag->imageData);
 		return $tag;
 	}
 
@@ -264,7 +264,7 @@ class SWFParser {
 		$alphaOffset = $this->readUI32($bytesAvailable);
 		$tag->imageData = $this->readBytes($alphaOffset, $bytesAvailable);
 		$tag->alphaData = $this->readBytes($bytesAvailable, $bytesAvailable);
-		$this->removeErroneousJPEGheader($tag->imageData);
+		$this->removeErroneousJPEGHeader($tag->imageData);
 		return $tag;
 	}
 

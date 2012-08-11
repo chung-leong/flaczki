@@ -562,6 +562,7 @@ class SWFAssembler {
 	}
 	
 	protected function writeDoInitActionTag($tag) {
+		$this->writeUI16($tag->characterId);
 		$this->writeBytes($tag->actions);
 	}
 	
