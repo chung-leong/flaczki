@@ -43,14 +43,13 @@ class AS3ConstantExtractor {
 							case 0x06: $value = $abcFile->doubleTable[$slRec->valueIndex]; break;
 							case 0x0A: $value = false; break;
 							case 0x0B: $value = true; break;
-							case 0x0C: $value = null; break;
-							case 0x0D: $value = null; break;
-							default: continue;
 						}
 						
-						$mnRec = $abcFile->multinameTable[$trRec->nameIndex];
-						$name = $abcFile->stringTable[$mnRec->stringIndex];
-						$constants[$name] = $value;
+						if($value != null) {
+							$mnRec = $abcFile->multinameTable[$trRec->nameIndex];
+							$name = $abcFile->stringTable[$mnRec->stringIndex];
+							$constants[$name] = $value;
+						}
 					}
 				}
 			}
