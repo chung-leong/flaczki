@@ -346,12 +346,6 @@ class SWFTextObjectUpdaterDOCX extends SWFTextObjectUpdater {
 	}
 	
 	protected function copyMissingProperties($object1, $object2) {
-		if(!$object2) {
-			$backtrace = debug_backtrace();
-			foreach($backtrace as $entry) {
-				echo $entry['function'] . "<br>";
-			}
-		}
 		foreach($object1 as $name => &$value1) {
 			if($value1 === null) {
 				$value2 = $object2->$name;
