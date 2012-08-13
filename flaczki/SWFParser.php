@@ -719,7 +719,7 @@ class SWFParser {
 	protected function readMetadataTag(&$bytesAvailable) {
 		$tag = new SWFMetadataTag;
 		$tag->metadata = $this->readBytes($bytesAvailable - 1, $bytesAvailable);
-		$this->readbytes(1, $bytesAvailable);
+		$this->readBytes(1, $bytesAvailable);
 		return $tag;
 	}
 	
