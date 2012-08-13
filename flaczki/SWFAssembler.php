@@ -1462,7 +1462,7 @@ class SWFAssembler {
 	}
 	
 	protected function writeUB($value, $numBits) {
-		$this->bitBuffer = $this->bitBuffer | ($value << (32 - $numBits - $this->bitsRemaining));
+		$this->bitBuffer |= ($value << (32 - $numBits - $this->bitsRemaining));
 		$this->bitsRemaining += $numBits;
 		while($this->bitsRemaining > 8) {
 			$byte = chr(($this->bitBuffer >> 24) & 0x000000FF);

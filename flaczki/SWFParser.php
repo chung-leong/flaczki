@@ -1682,8 +1682,7 @@ class SWFParser {
 		// the next available bit is always at the 31st bit of the buffer
 		while($this->bitsRemaining < $count) {
 			$byte = ord($this->readBytes(1, $bytesAvailable));
-			echo "$byte\n";
-			$this->bitBuffer = $this->bitBuffer | ($byte << (24 - $this->bitsRemaining));
+			$this->bitBuffer |= ($byte << (24 - $this->bitsRemaining));
 			$this->bitsRemaining += 8;
 		}
 		
