@@ -296,8 +296,8 @@ class SWFParser {
 		return $tag;
 	}
 	
-	protected function readDefineButtonCxFormTag(&$bytesAvailable) {
-		$tag = new SWFDefineButtonCxFormTag;
+	protected function readDefineButtonCxformTag(&$bytesAvailable) {
+		$tag = new SWFDefineButtonCxformTag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$tag->colorTransform = $this->readColorTransform($bytesAvailable);
 		return $tag;
@@ -360,11 +360,12 @@ class SWFParser {
 	protected function readDefineFontTag($tag) {
 		$tag = new SWFDefineFontTag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
-		$offsetTable = array();
-		for($i = 0; $i < $glyphCount; $i++) {
+		$firstOffset = $this->readUI16($bytesAvailable);
+		$glyphCount = $firstOffset >> 1;
+		$offsetTable = array($firstOffset);
+		for($i = 1; $i < $glyphCount; $i++) {
 			$offsetTable[] = $this->readUI16($bytesAvailable);
 		}
-		$glyphCount = $offsetTable[0] >> 1;
 		$tag->glyphTable = array();
 		for($i = 0; $i < $glyphCount; $i++) {
 			$tag->glyphTable[] = $this->readShape($bytesAvailable);
@@ -476,7 +477,7 @@ class SWFParser {
 	}
 	
 	protected function readDefineFontInfo2Tag(&$bytesAvailable) {
-		$tag = new SWFDefineFontInfoTag;
+		$tag = new SWFDefineFontInfo2Tag;
 		$tag->characterId = $this->readUI16($bytesAvailable);
 		$nameLength = $this->readUI8($bytesAvailable);
 		$tag->name = $this->readBytes($nameLength, $bytesAvailable);
@@ -715,7 +716,7 @@ class SWFParser {
 		return $tag;
 	}
 	
-	protected function readMetaDataTag(&$bytesAvailable) {
+	protected function readMetadataTag(&$bytesAvailable) {
 		$tag = new SWFMetadataTag;
 		$tag->metadata = $this->readBytes($bytesAvailable - 1, $bytesAvailable);
 		$this->readbytes(1, $bytesAvailable);
@@ -844,6 +845,7 @@ class SWFParser {
 	}
 	
 	protected function readSetTabIndexTag(&$bytesAvailable) {
+		$tag = new SWFSetTabIndexTag;
 		$tag->depth = $this->readUI16($bytesAvailable);
 		$tag->tabIndex = $this->readUI16($bytesAvailable);
 		return $tag;
@@ -1111,8 +1113,6 @@ class SWFParser {
 		$count = $this->readUI8($bytesAvailable);
 		for($i = 0; $i < $count; $i++) {
 			$glyph = $this->readGlyphEntry($glyphBits, $advanceBits, $bytesAvailable);
-			$glyph->bytesAvailable = $bytesAvailable;
-			$glyph->count = $count;
 			$glyphs[] = $glyph;
 		}
 		return $glyphs;
@@ -1682,6 +1682,7 @@ class SWFParser {
 		// the next available bit is always at the 31st bit of the buffer
 		while($this->bitsRemaining < $count) {
 			$byte = ord($this->readBytes(1, $bytesAvailable));
+			echo "$byte\n";
 			$this->bitBuffer = $this->bitBuffer | ($byte << (24 - $this->bitsRemaining));
 			$this->bitsRemaining += 8;
 		}

@@ -248,7 +248,7 @@ class SWFAssembler {
 		}
 	}
 	
-	protected function writeDefineButtonCxFormTag(&$bytesAvailable) {
+	protected function writeDefineButtonCxformTag(&$bytesAvailable) {
 		$this->writeUI16($tag->characterId);
 		$this->writeColorTransform($tag->colorTransform);
 		return $tag;
@@ -609,7 +609,7 @@ class SWFAssembler {
 		$this->writeBytes($tag->jpegData);
 	}
 	
-	protected function writeMetaDataTag($tag) {
+	protected function writeMetadataTag($tag) {
 		$this->writeString($tag->metadata);
 	}
 	

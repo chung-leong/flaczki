@@ -84,7 +84,7 @@ class SWFDefineButton2Tag extends SWFDefineButtonTag {
 	public $flags;
 }
 
-class SWFDefineButtonCxFormTag {
+class SWFDefineButtonCxformTag {
 	public $characterId;
 	public $colorTransform;
 }
@@ -767,7 +767,7 @@ class SWFMorphGradient {
 	public $records;
 }
 
-class SWFMorphGraidentRecord {
+class SWFMorphGradientRecord {
 	public $startRatio;
 	public $startColor;
 	public $endRatio;
