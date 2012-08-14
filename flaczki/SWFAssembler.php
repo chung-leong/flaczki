@@ -28,7 +28,6 @@ class SWFAssembler {
 		
 		// convert all tags to generic ones first so we know the total length
 		$tags = array();
-		$swfFile->generic = array();
 		foreach($swfFile->tags as &$tag) {
 			if($tag instanceof SWFGenericTag) {
 				$tags[] = $tag;
@@ -469,7 +468,7 @@ class SWFAssembler {
 	}
 	
 	protected function writeDefineSceneAndFrameLabelDataTag($tag) {
-		$this->writeEncodedStringTable($tag->names);
+		$this->writeEncodedStringTable($tag->sceneNames);
 		$this->writeEncodedStringTable($tag->frameLabels);
 	}
 	
@@ -1052,7 +1051,6 @@ class SWFAssembler {
 	
 	protected function writeShapeRecords($records, $numFillBits, $numLineBits, $version) {
 		foreach($records as $index => $record) {
-			//if($index == 19) break;
 			if($record instanceof SWFStraightEdge) {
 				$this->writeUB(0x03, 2);
 				$this->writeUB($record->numBits - 2, 4);
