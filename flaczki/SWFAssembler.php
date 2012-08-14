@@ -696,6 +696,15 @@ class SWFAssembler {
 		if($tag->flags & SWFPlaceObject3Tag::HasBackgroundColor) {
 			$this->writeRGBA($tag->bitmapCacheBackgroundColor);
 		}
+		if($tag->flags & SWFPlaceObject3Tag::HasClipActions) {
+			$this->writeUI16(0);
+			if($this->swfVersion >= 6) {
+				$this->writeUI32($tag->allEventFlags);
+			} else {
+				$this->writeUI16($tag->allEventFlags);
+			}
+			$this->writeClipActions($tag->clipActions);
+		}
 	}
 	
 	protected function writeProtectTag($tag) {

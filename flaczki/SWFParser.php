@@ -807,6 +807,11 @@ class SWFParser {
 		if($tag->flags & SWFPlaceObject3Tag::HasBackgroundColor) {
 			$tag->bitmapCacheBackgroundColor = $this->readRGBA($bytesAvailable);
 		}
+		if($tag->flags & SWFPlaceObject3Tag::HasClipActions) {
+			$reserved = $this->readUI16($bytesAvailable);
+			$tag->allEventFlags = ($this->swfVersion >= 6) ? $this->readUI32($bytesAvailable) : $this->readUI16($bytesAvailable);
+			$tag->clipActions = $this->readClipActions($bytesAvailable);
+		}
 		return $tag;
 	}
 	
