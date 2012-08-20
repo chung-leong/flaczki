@@ -5,9 +5,11 @@ class SWFParser {
 	protected $bitBuffer;
 	protected $bitsRemaining;
 	protected $swfVersion;
+	protected $requiredTags;
 	protected $tagMask;
+	protected $ignoreOtherTags;
 	
-	public function parse(&$input, $tagNames = null) {
+	public function parse(&$input, $requiredTags = null, $ignoreOtherTags = false) {
 		if(gettype($input) == 'string') {
 			$path = StreamMemory::add($input);
 			$this->input = fopen($path, "rb");
@@ -18,13 +20,15 @@ class SWFParser {
 		}
 		$this->bitBuffer = 0;
 		$this->bitsRemaining = 0;
+		$this->requiredTags = $requiredTags;
+		$this->ignoreOtherTags = $ignoreOtherTags;
 		
 		$swfFile = new SWFFile;
 		$bytesAvailable = 8;
-		
-		if($tagNames !== null) {
+				
+		if($requiredTags !== null) {
 			$this->tagMask = array();
-			foreach($tagNames as $tagName) {
+			foreach($requiredTags as $tagName) {
 				$this->tagMask[$tagName] = true;
 			}
 		} else {
@@ -64,7 +68,9 @@ class SWFParser {
 		$swfFile->highestCharacterId = 0;
 		
 		while($tag = $this->readTag($bytesAvailable)) {
-			$swfFile->tags[] = $tag;
+			if(!$this->ignoreOtherTags || (!$tag instanceof SWFGenericTag)) {
+				$swfFile->tags[] = $tag;
+			}
 			
 			// see if the tag holds a character
 			if($tag instanceof SWFCharacterTag) {
@@ -184,7 +190,7 @@ class SWFParser {
 				$path = StreamPartial::add($this->input, $bytesAvailable, $signature);
 				$stream = fopen($path, "rb");
 				$parser = clone $this;
-				$tag->swfFile = $parser->parse($stream);
+				$tag->swfFile = $parser->parse($stream, $this->requiredTags, $this->ignoreOtherTags);
 				$bytesAvailable = 0;
 			} else {
 				$tag->data = $signature . $this->readBytes($bytesAvailable, $bytesAvailable);

@@ -32,24 +32,21 @@ class AS3ConstantExtractor {
 		foreach($abcFile->instanceTable as $insRec) {
 			$constants  = array();
 			foreach($insRec->traits as $trRec) {
-				if($trRec->data instanceof ABCTraitSlot) {
-					$slRec = $trRec->data;
-					if($slRec->valueType !== null) {
-						$value = null;						
-						switch($slRec->valueType) {
-							case 0x01: $value = $abcFile->stringTable[$slRec->valueIndex]; break;
-							case 0x03: $value = $abcFile->intTable[$slRec->valueIndex]; break;
-							case 0x04: $value = $abcFile->uintTable[$slRec->valueIndex]; break;
-							case 0x06: $value = $abcFile->doubleTable[$slRec->valueIndex]; break;
-							case 0x0A: $value = false; break;
-							case 0x0B: $value = true; break;
-						}
-						
-						if($value != null) {
-							$mnRec = $abcFile->multinameTable[$trRec->nameIndex];
-							$name = $abcFile->stringTable[$mnRec->stringIndex];
-							$constants[$name] = $value;
-						}
+				if($trRec->valueType !== null) {
+					$value = null;						
+					switch($trRec->valueType) {
+						case 0x01: $value = $abcFile->stringTable[$trRec->valueIndex]; break;
+						case 0x03: $value = $abcFile->intTable[$trRec->valueIndex]; break;
+						case 0x04: $value = $abcFile->uintTable[$trRec->valueIndex]; break;
+						case 0x06: $value = $abcFile->doubleTable[$trRec->valueIndex]; break;
+						case 0x0A: $value = false; break;
+						case 0x0B: $value = true; break;
+					}
+					
+					if($value != null) {
+						$mnRec = $abcFile->multinameTable[$trRec->nameIndex];
+						$name = $abcFile->stringTable[$mnRec->stringIndex];
+						$constants[$name] = $value;
 					}
 				}
 			}

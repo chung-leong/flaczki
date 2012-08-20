@@ -246,23 +246,20 @@ class ABCAssembler {
 		switch($trait->type & 0x0F) {
 			case 0:		// Trait_Slot
 			case 6:		// Trait_Const
-				$this->writeU32($trait->data->typeNameIndex);
-				$this->writeU32($trait->data->valueIndex);
-				if($trait->data->valueIndex) {
-					$this->writeU8($trait->data->valueType);
+				$this->writeU32($trait->typeNameIndex);
+				$this->writeU32($trait->valueIndex);
+				if($trait->valueIndex) {
+					$this->writeU8($trait->valueType);
 				}
 				break;
 			case 1: 	// Trait_Method
 			case 2:		// Trait_Getter
 			case 3:		// Trait_Setter
-				$this->writeU32($trait->data->methodIndex);
+			case 5:		// Trait_Function
+				$this->writeU32($trait->methodIndex);
 				break;
 			case 4:		// Trait_Class
-				$this->writeU32($trait->data->classIndex);
-				break;
-			case 5:		// Trait_Function
-				$this->writeU32($trait->data->methodIndex);
-				break;
+				$this->writeU32($trait->classIndex);
 		}
 		if($trait->type & 0x40) {	// ATTR_Metadata
 			$this->writeU32(count($trait->metadataIndices));

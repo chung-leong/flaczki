@@ -168,7 +168,6 @@ class AVM1Decoder {
 		$op->op2 = $argumentCount = $this->readUI16();
 		$arguments = array();
 		for($i = 0; $i < $argumentCount; $i++) {
-			$argument = new AS2Variable;
 			$arguments[] = $this->readString();
 		}
 		$op->op3 = $arguments;
@@ -184,16 +183,13 @@ class AVM1Decoder {
 		$registers = array();
 		$arguments = array();
 		for($i = 0; $i < $argumentCount; $i++) {
-			$index = $this->readUI8();
-			$name = $this->readString();
+			$index = $arguments[] = $this->readUI8();
+			$name = $arguments[] = $this->readString();
 			if($index) {
 				$register = new AVM1Register;
 				$register->index = $index;
 				$register->name = $name;
-				$arguments[] = $register;
 				$registers[$index] = $register;
-			} else {
-				$arguments[] = $name;
 			}
 		}
 		$op->op5 = $arguments;
@@ -207,18 +203,19 @@ class AVM1Decoder {
 		);
 		$index = 1;
 		foreach($predefinedVariables as $flag => $name) {		
-			if($flags & $flags) {
+			if($flags & $flag) {
 				$register = new AVM1Register;
-				$register->index = $index++;
+				$register->index = $index;
 				$register->name = $name;
 				$registers[$index] = $register;
+				$index++;
 			}
 		}
-		for($i = 1; $i < $registerCount; $i++) {
-			if(!isset($registers[$i])) {
+		for($index = 0; $index < $registerCount; $index++) {
+			if(!isset($registers[$index])) {
 				$register = new AVM1Register;
-				$register->index = $index++;
-				$registers[$i] = $register;
+				$register->index = $index;
+				$registers[$index] = $register;
 			}
 		}
 		$op->op6 = $codeSize = $this->readUI16();
@@ -369,6 +366,8 @@ class AVM1Decoder {
 	
 	protected function readF64() {
 		$data = substr($this->byteCodes, $this->position, 8);
+		// swap the 32-bit components
+		$data = substr($data, 4) . substr($data, 0, 4);
 		$array = unpack('d', $data);
 		$this->position += 8;
 		return $array[1];

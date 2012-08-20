@@ -197,9 +197,8 @@ class ABCTextObjectUpdater {
 		$trait = new ABCTrait;
 		$trait->nameIndex = $nameIndex;
 		$trait->type = 0x04;
-		$trait->data = new ABCTraitClass;
-		$trait->data->slotId = 0;
-		$trait->data->classIndex = $classIndex;
+		$trait->slotId = 0;
+		$trait->classIndex = $classIndex;
 		$script->traits[] = $trait;
 		array_unshift($abcFile->scriptTable, $script);
 		

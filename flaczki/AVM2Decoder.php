@@ -42,17 +42,15 @@ class AVM2Decoder {
 		foreach($abcFile->metadataTable as $metadataRec) {
 			$this->metadataTable[] = $this->decodeMetadata($metadataRec);
 		}
-		$this->classTable = array();
-		foreach($abcFile->classTable as $classRec) {		
-			$this->classTable[] = $this->decodeClass($classRec);
-		}
 		$this->instanceTable = array();
-		foreach($abcFile->instanceTable as $index => $instanceRec) {
-			$class = $this->classTable[$index];
-			$instance = $this->decodeInstance($instanceRec);
-			$instance->staticMembers = $class->members;
-			$instance->staticConstructor = $class->constructor;
-			$this->instanceTable[] = $instance;
+		foreach($abcFile->instanceTable as $instanceRec) {
+			$this->instanceTable[] = $this->decodeInstance($instanceRec);
+		}
+		$this->classTable = array();
+		foreach($abcFile->classTable as $index => $classRec) {		
+			$class = $this->decodeClass($classRec);
+			$class->instance = $this->instanceTable[$index];
+			$this->classTable[] = $class;
 		}
 		$this->scriptTable = array();
 		foreach($abcFile->scriptTable as $scriptRec) {
@@ -62,7 +60,8 @@ class AVM2Decoder {
 			$method = $this->methodTable[$methodBodyRec->methodIndex];
 			$method->body = $this->decodeMethodBody($methodBodyRec, $method->arguments);
 		}
-		print_r($this->scriptTable);
+		$scripts = $this->scriptTable;
+		return $scripts;
 	}
 	
 	protected function decodeMethodBody($methodBodyRec, $arguments) {
@@ -150,13 +149,10 @@ class AVM2Decoder {
 					$object = $this->classTable[$traitRec->classIndex];
 					break;
 			}
-			if(!$object) {
-				print_r($traitRec);
-			}
 			$member->object = $object;
 			if($traitRec->metadataIndices) {
 				$metadata = array();
-				foreach($trait->metadataIndices as $index) {
+				foreach($traitRec->metadataIndices as $index) {
 					$metadata[] = $this->metadataTable[$index];
 				}
 				$member->metadata = $metadata;
@@ -171,7 +167,7 @@ class AVM2Decoder {
 		$method->returnType = $this->nameTable[$methodRec->returnType];
 		$arguments = array();
 		for($i = 0; $i < $methodRec->paramCount; $i++) {
-			$argument = new AVM2Variable;
+			$argument = new AVM2Argument;
 			$argument->type = $this->nameTable[$methodRec->paramTypes[$i]];
 			$name = new AVM2QName;
 			$name->namespace = $this->namespaceTable[0];
@@ -214,11 +210,11 @@ class AVM2Decoder {
 	
 	protected function decodeMetadata($metadataRec) {
 		$metadata = new AVM2Metadata;
-		$metadata->name = $this->nameTable[$metadataRec->nameIndex];
+		$metadata->name = $this->stringTable[$metadataRec->nameIndex];
 		$values = array();
 		foreach($metadataRec->keyIndices as $index => $keyIndex) {
-			$key = $this->stringTable[keyIndex];
-			$value = $this->stringTable[$metadataRec->valueindices[$index]];
+			$key = $this->stringTable[$keyIndex];
+			$value = $this->stringTable[$metadataRec->valueIndices[$index]];
 			$values[$key] = $value;
 		}
 		$metadata->values = $values;
@@ -226,15 +222,14 @@ class AVM2Decoder {
 	}
 	
 	protected function decodeNamespace($namespaceRec) {
-		$namespace = new AVM2Namespace;
 		switch($namespaceRec->kind) {
-			case 0x08: $namspace = new AVM2RegularNamespace; break;
-			case 0x16: $namspace = new AVM2PackageNamespace; break;
-			case 0x17: $namspace = new AVM2InternalNamespace; break;
-			case 0x18: $namspace = new AVM2ProtectedNamespace; break;
-			case 0x19: $namspace = new AVM2ExplicitNamespace; break;
-			case 0x1A: $namspace = new AVM2StaticProtectedNamespace; break;
-			case 0x05: $namspace = new AVM2PrivateNamespace; break;
+			case 0x08: $namespace = new AVM2RegularNamespace; break;
+			case 0x16: $namespace = new AVM2PackageNamespace; break;
+			case 0x17: $namespace = new AVM2InternalNamespace; break;
+			case 0x18: $namespace = new AVM2ProtectedNamespace; break;
+			case 0x19: $namespace = new AVM2ExplicitNamespace; break;
+			case 0x1A: $namespace = new AVM2StaticProtectedNamespace; break;
+			case 0x05: $namespace = new AVM2PrivateNamespace; break;
 		}
 		$namespace->string = $this->stringTable[$namespaceRec->stringIndex];
 		return $namespace;
@@ -287,9 +282,11 @@ class AVM2Decoder {
 				break;
 			case 0x1B:
 				$name = new AVM2MultinameL;
+				$name->namespaceSet = $this->namespaceSetTable[$multinameRec->namespaceSetIndex];
 				break;
 			case 0x1C:
 				$name = new AVM2MultinameLA;
+				$name->namespaceSet = $this->namespaceSetTable[$multinameRec->namespaceSetIndex];
 				break;
 			case 0x1D:
 				$name = new AVM2GenericName;
@@ -558,7 +555,19 @@ class AVM2Decoder {
 				if(isset($operandHandlers[$opcode])) {
 					$handler = $operandHandlers[$opcode];
 					$this->$handler($op);
-				} 
+				} else {
+					// exapnd getlocal_# and setlocal_# 
+					if($opcode >= 0xd0 && $opcode <= 0xd3) {
+						$op->code = 0x62;
+						$op->name = "getlocal";
+						$op->op1 = $this->registers[$opcode - 0xd0];
+					} else if($opcode >= 0xd4 && $opcode <= 0xd7) {
+						$op->code = 0x63;
+						$op->name = "setlocal";
+						$op->op1 = $this->registers[$opcode - 0xd4];
+					
+					}
+				}
 				$ops[$opcodePosition] = $op;
 			}
 		}
@@ -569,7 +578,7 @@ class AVM2Decoder {
 	
 	protected function decodeSwitchOperands($op) {
 		$op->op1 = $this->readS24();
-		$op->op2 = $caseCount = $this->readS24();
+		$op->op2 = $caseCount = $this->readU30();
 		$offsets = array();
 		for($i = 0; $i <= $caseCount; $i++) {
 			$offsets[] = $this->readS24();
@@ -687,7 +696,7 @@ class AVM2Decoder {
 			$value |= ($byte & 0x7F) << $shift;
 			$shift += 7;
 		} while($byte & 0x80);
-		if($shift > 7 && $b & 0x40) {
+		if($shift > 7 && $byte & 0x40) {
 			$value |= -1 << $shift;
 		}
 		return $value;
@@ -742,12 +751,6 @@ class AVM2StaticProtectedNamespace extends AVM2ProtectedNamespace {
 class AVM2Name {
 }
 
-class AVM2RuntimeName {
-}
-
-class AVM2LongRunetimeName {
-}
-
 class AVM2QName extends AVM2Name {
 	public $namespace;
 	public $string;
@@ -758,18 +761,17 @@ class AVM2QNameA extends AVM2Name {
 	public $string;
 }
 
-class AVM2RTQName extends AVM2RuntimeName {
+class AVM2RTQName extends AVM2Name {
 	public $namespace;
 }
 
-class AVM2RTQNameA extends AVM2RuntimeName {
-	public $namespace;
+class AVM2RTQNameA extends AVM2RTQName {
 }
 
-class AVM2RTQNameL extends AVM2LongRunetimeName {
+class AVM2RTQNameL extends AVM2Name {
 }
 
-class AVM2RTQNameLA extends AVM2LongRunetimeName {
+class AVM2RTQNameLA extends AVM2RTQNameL {
 }
 
 class AVM2Multiname extends AVM2Name {
@@ -777,20 +779,17 @@ class AVM2Multiname extends AVM2Name {
 	public $string;
 }
 
-class AVM2MultinameA extends AVM2Name {
-	public $namespaceSet;
-	public $string;
+class AVM2MultinameA extends AVM2Multiname {
 }
 
-class AVM2MultinameL extends AVM2RuntimeName {
+class AVM2MultinameL extends AVM2Name {
 	public $namespaceSet;
 }
 
-class AVM2MultinameLA extends AVM2RuntimeName {
-	public $namespaceSet;
+class AVM2MultinameLA extends AVM2MultinameL {
 }
 
-class AVM2GenricName extends AVM2NAme {
+class AVM2GenericName extends AVM2NAme {
 	public $name;
 	public $types;
 }
@@ -801,13 +800,13 @@ class AVM2Metadata {
 }
 
 class AVM2ClassMember {
-	const TypeVariable = 0;
-	const TypeConstant = 6;
-	const TypeMethod = 1;
-	const TypeGetter = 2;
-	const TypeSetter = 3;
-	const TypeFunction = 5;
-	const TypeClass = 4;
+	const MEMBER_VARIABLE = 0;
+	const MEMBER_CONSTANT = 6;
+	const MEMBER_METHOD = 1;
+	const MEMBER_GETTER = 2;
+	const MEMBER_SETTER = 3;
+	const MEMBER_FUNCTION = 5;
+	const MEMBER_CLASS = 4;
 
 	public $name;
 	public $type;
@@ -819,6 +818,10 @@ class AVM2ClassMember {
 class AVM2Variable {
 	public $type;
 	public $value;
+}
+
+class AVM2Argument extends AVM2Variable {
+	public $name;
 }
 
 class AVM2Constant {
@@ -836,13 +839,12 @@ class AVM2ClassInstance {
 	public $interfaces;
 	public $constructor;
 	public $members;
-	public $staticConstructor;
-	public $staticMembers;
 }
 
 class AVM2Class {
 	public $constructor;
 	public $members;
+	public $instance;
 }
 
 class AVM2Script {

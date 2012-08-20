@@ -45,16 +45,15 @@ class AS3ConstantInjector {
 						if(isset($constants[$name])) {
 							$value = $constants[$name];
 							$type = gettype($value);
-							$slRec = $trRec->data;
 							
 							switch($type) {
 								case 'NULL': 
-									$slRec->valueType = 0x0C;
-									$slRec->valueIndex = null;
+									$trRec->valueType = 0x0C;
+									$trRec->valueIndex = null;
 									break;
 								case 'boolean':
-									$slRec->valueType = ($value) ? 0x0B : 0x0A;
-									$slRec->valueIndex = null;
+									$trRec->valueType = ($value) ? 0x0B : 0x0A;
+									$trRec->valueIndex = null;
 									break;
 								case 'integer':
 									if($value < 0) {
@@ -62,15 +61,15 @@ class AS3ConstantInjector {
 											$index = count($abcFile->intTable);
 											$abcFile->intTable[] = $value;
 										}
-										$slRec->valueType = 0x03;
-										$slRec->valueIndex = $index;
+										$trRec->valueType = 0x03;
+										$trRec->valueIndex = $index;
 									} else {
 										if(($index = array_search($value, $abcFile->uintTable, true)) == false) {
 											$index = count($abcFile->uintTable);
 											$abcFile->uintTable[] = $value;
 										}
-										$slRec->valueType = 0x04;
-										$slRec->valueIndex = $index;
+										$trRec->valueType = 0x04;
+										$trRec->valueIndex = $index;
 									}
 									break;
 								case 'double':								
@@ -78,16 +77,16 @@ class AS3ConstantInjector {
 										$index = count($abcFile->doubleTable);
 										$abcFile->doubleTable[] = $value;
 									}
-									$slRec->valueType = 0x06;
-									$slRec->valueIndex = $index;
+									$trRec->valueType = 0x06;
+									$trRec->valueIndex = $index;
 									break;
 								case 'string':
 									if(($index = array_search($value, $abcFile->stringTable, true)) == false) {
 										$index = count($abcFile->stringTable);
 										$abcFile->stringTable[] = $value;
 									}
-									$slRec->valueType = 0x01;
-									$slRec->valueIndex = $index;
+									$trRec->valueType = 0x01;
+									$trRec->valueIndex = $index;
 									break;
 							}
 						}

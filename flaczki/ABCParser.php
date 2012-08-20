@@ -50,21 +50,30 @@ class ABCParser {
 		
 		// namespace constants
 		$namespaceCount = $this->readU32();
-		$abcFile->namespaceTable[] = new ABCNamespace;
+		$defaultNamespace = new ABCNamespace;
+		$defaultNamespace->stringIndex = 0;
+		$defaultNamespace->kind = 0x08;
+		$abcFile->namespaceTable[] = $defaultNamespace;
 		for($i = 1; $i < $namespaceCount; $i++) {
 			$abcFile->namespaceTable[] = $this->readNamespace();
 		}
 		
 		// namespace-set constants
 		$namespaceSetCount = $this->readU32();
-		$abcFile->namespaceSetTable[] = new ABCNamespaceSet;
+		$defaultNamespaceSet = new ABCNamespaceSet;
+		$defaultNamespaceSet->namespaceIndices = array();
+		$abcFile->namespaceSetTable[] = $defaultNamespaceSet;
 		for($i = 1; $i < $namespaceSetCount; $i++) {
 			$abcFile->namespaceSetTable[] = $this->readNamespaceSet();
 		}
 		
 		// multiname (i.e. variable name) constants
 		$multinameCount = $this->readU32();
-		$abcFile->multinameTable[] = new ABCMultiname;
+		$defaultName = new ABCMultiname;
+		$defaultName->type = 0x07;
+		$defaultName->namespaceIndex = 0;
+		$defaultName->stringIndex = 0;
+		$abcFile->multinameTable[] = $defaultName;
 		for($i = 1; $i < $multinameCount; $i++) {
 			$abcFile->multinameTable[] = $this->readMultiname();
 		}
@@ -276,30 +285,20 @@ class ABCParser {
 		switch($trait->type & 0x0F) {
 			case 0:		// Trait_Slot
 			case 6:		// Trait_Const
-				$data = new ABCTraitSlot;
-				$data->typeNameIndex = $this->readU32();
-				$data->valueIndex = $this->readU32();
-				if($data->valueIndex) {
-					$data->valueType = $this->readU8();
+				$trait->typeNameIndex = $this->readU32();
+				$trait->valueIndex = $this->readU32();
+				if($trait->valueIndex) {
+					$trait->valueType = $this->readU8();
 				}
-				$trait->data = $data;
 				break;
 			case 1: 	// Trait_Method
 			case 2:		// Trait_Getter
 			case 3:		// Trait_Setter
-				$data = new ABCTraitMethod;
-				$data->methodIndex = $this->readU32();
-				$trait->data = $data;
+			case 5:		// Trait_Function
+				$trait->methodIndex = $this->readU32();
 				break;
 			case 4:		// Trait_Class
-				$data = new ABCTraitClass;
-				$data->classIndex = $this->readU32();
-				$trait->data = $data;
-				break;
-			case 5:		// Trait_Function
-				$data = new ABCTraitFunction;
-				$data->methodIndex = $this->readU32();
-				$trait->data = $data;
+				$trait->classIndex = $this->readU32();
 				break;
 		}
 		if($trait->type & 0x40) {	// ATTR_Metadata
@@ -460,26 +459,12 @@ class ABCMethodBody {
 class ABCTrait {
 	public $nameIndex;
 	public $type;
-	public $data;
 	public $slotId;
 	public $metadataIndices = array();
-}
-
-class ABCTraitSlot {
 	public $typeNameIndex;
 	public $valueIndex;
 	public $valueType;
-}
-
-class ABCTraitClass {
 	public $classIndex;
-}
-
-class ABCTraitFunction {
-	public $methodIndex;
-}
-
-class ABCTraitMethod {
 	public $methodIndex;
 }
 
