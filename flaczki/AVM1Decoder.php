@@ -301,16 +301,38 @@ class AVM1Decoder {
 	
 	protected function decodeWaitForFrame($op) {
 		$op->op1 = $this->readUI16();
-		
+		$op->op2 = $skipCount = $this->readUI8();
+		// calculate the length of the bytecodes based on skipCount
+		$startIndex = $this->position;
+		while($skipCount-- > 0) {
+			$code = $this->readUI8();
+			if($code >= 0x80) {
+				$this->position += $this->readUI16();
+			} 
+		}
+		$size = $this->position - $startIndex;
+		$this->position = $startIndex;
+		$op->op3 = $this->decodeInstructions($size);
 	}
 	
 	
 	protected function decodeWaitForFrame2($op) {
-		$op->op1 = $this->readUI8();
-		
+		$op->op1 = $skipCount = $this->readUI8();
+		$startIndex = $this->position;
+		while($skipCount-- > 0) {
+			$code = $this->readUI8();
+			if($code >= 0x80) {
+				$this->position += $this->readUI16();
+			} 
+		}
+		$size = $this->position - $startIndex;
+		$this->position = $startIndex;
+		$op->op2 = $this->decodeInstructions($size);
 	}
 	
 	protected function decodeWith($op) {
+		$op->op1 = $size = $this->readUI16();
+		$op->op2 = $this->decodeInstructions($size);
 	}
 	
 	protected function readString() {

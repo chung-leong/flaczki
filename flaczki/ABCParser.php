@@ -147,7 +147,7 @@ class ABCParser {
 				break;
 			case 0x0F:	// CONSTANT_RTQName
 			case 0x10:	// CONSTANT_RTQNameA
-				$multiname->namespaceIndex = $this->readU32();
+				$multiname->stringIndex = $this->readU32();
 				break;
 			case 0x11:	// CONSTANT_RTQNameL
 			case 0x12:	// CONSTANT_RTQNameLA

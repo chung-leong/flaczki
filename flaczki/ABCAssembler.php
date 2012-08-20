@@ -128,7 +128,7 @@ class ABCAssembler {
 				break;
 			case 0x0F:	// CONSTANT_RTQName
 			case 0x10:	// CONSTANT_RTQNameA
-				$this->writeU32($multiname->namespaceIndex);
+				$this->writeU32($multiname->stringIndex);
 				break;
 			case 0x11:	// CONSTANT_RTQNameL
 			case 0x12:	// CONSTANT_RTQNameLA

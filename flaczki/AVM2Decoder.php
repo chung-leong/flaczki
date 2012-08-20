@@ -251,34 +251,34 @@ class AVM2Decoder {
 				$name->namespace = $this->namespaceTable[$multinameRec->namespaceIndex];
 				$name->string = $this->stringTable[$multinameRec->stringIndex];
 				break;
-			case 0x09:
-				$name = new AVM2Multiname;
-				$name->namespaceSet = $this->namespaceSetTable[$multinameRec->namespaceSetIndex];
-				$name->string = $this->stringTable[$multinameRec->stringIndex];
-				break;
 			case 0x0D:
 				$name = new AVM2QNameA;
 				$name->namespace = $this->namespaceTable[$multinameRec->namespaceIndex];
+				$name->string = $this->stringTable[$multinameRec->stringIndex];
+				break;
+			case 0x0F:
+				$name = new AVM2RTQName;
+				$name->string = $this->stringTable[$multinameRec->stringIndex];
+				break;
+			case 0x10:
+				$name = new AVM2RTQNameA;
+				$name->string = $this->stringTable[$multinameRec->stringIndex];
+				break;
+			case 0x11:
+				$name = new AVM2RTQNameL;
+				break;
+			case 0x12:
+				$name = new AVM2RTQNameLA;
+				break;
+			case 0x09:
+				$name = new AVM2Multiname;
+				$name->namespaceSet = $this->namespaceSetTable[$multinameRec->namespaceSetIndex];
 				$name->string = $this->stringTable[$multinameRec->stringIndex];
 				break;
 			case 0x0E:
 				$name = new AVM2MultinameA;
 				$name->namespaceSet = $this->namespaceSetTable[$multinameRec->namespaceSetIndex];
 				$name->string = $this->stringTable[$multinameRec->stringIndex];
-				break;
-			case 0x0F:
-				$name = new AVM2RTName;
-				$name->namespace = $this->namespaceTable[$multinameRec->namespaceIndex];
-				break;
-			case 0x10:
-				$name = new AVM2RTNameA;
-				$name->namespace = $this->namespaceTable[$multinameRec->namespaceIndex];
-				break;
-			case 0x11:
-				$name = new AVM2RTNameL;
-				break;
-			case 0x12:
-				$name = new AVM2RTNameLA;
 				break;
 			case 0x1B:
 				$name = new AVM2MultinameL;
@@ -762,7 +762,7 @@ class AVM2QNameA extends AVM2Name {
 }
 
 class AVM2RTQName extends AVM2Name {
-	public $namespace;
+	public $string;
 }
 
 class AVM2RTQNameA extends AVM2RTQName {

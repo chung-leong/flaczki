@@ -30,15 +30,18 @@ class ASCodeDumper {
 					$this->printScript($script);
 				}
 			} else if($tag instanceof SWFDoActionTag || $tag instanceof SWFDoInitActionTag) {
-				if($tag instanceof SWFDoInitActionTag) {
-					$symbolName = $this->symbolNames[$tag->characterId];
-					echo "<div class='comments'>// $symbolName initialization </div>";
-				} else {
-					echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
+				// an empty tag would still contain the zero terminator
+				if(strlen($tag->actions) > 1) {
+					if($tag instanceof SWFDoInitActionTag) {
+						$symbolName = $this->symbolNames[$tag->characterId];
+						echo "<div class='comments'>// $symbolName initialization </div>";
+					} else {
+						echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
+					}
+					$decoder1 = new AVM1Decoder;
+					$operations = $decoder1->decode($tag->actions);
+					$this->printOperations($operations);
 				}
-				$decoder1 = new AVM1Decoder;
-				$operations = $decoder1->decode($tag->actions);
-				$this->printOperations($operations);
 			} else if($tag instanceof SWFPlaceObject2Tag) {
 				$this->instanceCount++;
 				if($tag->clipActions) {
@@ -123,15 +126,36 @@ class ASCodeDumper {
 				
 				// print instance members
 				echo "<div class='code-block'>\n";
-				$constructor = new AVM2ClassMember;
-				$constructor->object = $instance->constructor;
-				$constructor->name = $instance->name;
-				$constructor->type = AVM2ClassMember::MEMBER_METHOD;
-				$this->printMembers(array_merge($instance->members, array($constructor)), false);
+				$this->printMembers($instance->members, false);
+				// print instance constructor
+				$constructor = $instance->constructor;
+				echo "<div>\n";
+				echo "public function ";
+				$this->printName($instance->name);
+				echo "(";
+				foreach($constructor->arguments as $index => $argument) {
+					echo ($index > 0) ? ",\n" : "";
+					$this->printName($argument->name);
+					echo ":";
+					$this->printName($argument->type);
+					if($argument->value) {
+						echo " = ";
+						$this->printOperand($argument->value);
+					}
+				}
+				echo ")";
+				if($constructor->body) {
+					echo " {<div class='code-block'>\n";
+					$this->printOperations($constructor->body->operations);
+					echo "</div>\n";
+					echo "}</div>\n";
+				} else {
+					echo ";</div>\n";
+				}
 				echo "</div>\n";
-				echo "<div class='code-block'>\n";
 				
 				// print static constructor
+				echo "<div class='code-block'>\n";
 				echo "<span class='comments'>// static constructor</span>";
 				$this->printOperations($static->constructor->body->operations);
 				echo "</div>\n";
@@ -160,10 +184,14 @@ class ASCodeDumper {
 				}
 				echo "):";
 				$this->printName($method->returnType);
-				echo " {<div class='code-block'>\n";
-				$this->printOperations($method->body->operations);
-				echo "</div>\n";
-				echo "}</div>\n";
+				if($method->body) {
+					echo " {<div class='code-block'>\n";
+					$this->printOperations($method->body->operations);
+					echo "</div>\n";
+					echo "}</div>\n";
+				} else {
+					echo ";</div>\n";
+				}
 			} else if($member->object instanceof AVM2Variable) {
 				$var = $member->object;
 				echo "<div>\n";
@@ -223,7 +251,7 @@ class ASCodeDumper {
 				echo "<span class='integer'>$text</span>"; 
 				break;
 			case 'string':
-				$text = '"' . addcslashes($operand, "\\\"\n\r\t") . '"';
+				$text = '"' . htmlspecialchars(addcslashes($operand, "\\\"\n\r\t")) . '"';
 				echo "<span class='string'>$text</span>";
 				break;
 			case 'array':
@@ -266,11 +294,11 @@ class ASCodeDumper {
 		if($name instanceof AVM2QName) {
 			echo ($name->namespace->string) ? $name->namespace->string . "." : "";
 			echo ($name instanceof AVM2QNameA) ? "@" : "";
-			echo $name->string;
+			echo ($name->string) ? $name->string : "*";
 		} else if($name instanceof AVM2RTQName) {
-			echo ($name->namespace->string) ? $name->namespace->string . "." : "";
+			echo "(RUNTIME NAMESPACE).";
 			echo ($name instanceof AVM2RTQNameA) ? "@" : "";
-			echo "(RUNTIME STRING)";
+			echo ($name->string) ? $name->string : "*";
 		} else if($name instanceof AVM2RTQNameL) {
 			echo "(RUNTIME NAMESPACE)";
 			echo ($name instanceof AVM2RTQNameLA) ? "@" : "";
@@ -280,7 +308,7 @@ class ASCodeDumper {
 				echo "[";
 				foreach($name->namespaceSet->namespaces as $index => $namespace) {
 					echo ($index > 0) ? "|" : "";
-					echo $namespace->string;
+					echo ($namespace->string) ? $namespace->string : "*";
 				}
 				echo "].";
 			}
@@ -291,7 +319,7 @@ class ASCodeDumper {
 				echo "[";
 				foreach($name->namespaceSet->namespaces as $index => $namespace) {
 					echo ($index > 0) ? "|" : "";
-					echo $namespace->string;
+					echo ($namespace->string) ? $namespace->string : "*";
 				}
 				echo "].";
 			}
