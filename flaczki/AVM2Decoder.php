@@ -589,7 +589,7 @@ class AVM2Decoder {
 	protected function decodeDebugOperands($op) {
 		$op->op1 = $this->readU8();
 		$op->op2 = $this->stringTable[ $this->readU30() ];
-		$op->op3 = $this->registers[ $this->readU8() ];
+		$op->op3 = $this->readU8();
 		$op->op4 = $this->readU30();
 	}
 	
