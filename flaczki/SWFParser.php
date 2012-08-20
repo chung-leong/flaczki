@@ -804,9 +804,6 @@ class SWFParser {
 		if($tag->flags & SWFPlaceObject3Tag::HasCacheAsBitmap) {
 			$tag->bitmapCache = $this->readUI8($bytesAvailable);
 		}
-		if($tag->flags & SWFPlaceObject3Tag::HasClipActions) {
-			$tag->clipActions = $this->readClipActions($bytesAvailable);
-		}
 		if($tag->flags & SWFPlaceObject3Tag::HasVisibility) {
 			$tag->visibility = $this->readUI8($bytesAvailable);
 		}
