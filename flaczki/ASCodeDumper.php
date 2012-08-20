@@ -2,18 +2,22 @@
 
 class ASCodeDumper {
 
-	protected $instanceName;
 	protected $frameIndex;
 	protected $symbolCount;
+	protected $symbolName;
+	protected $symbolNames;
+	protected $instanceCount;
 				
 	public function getRequiredTags() {
 		return array('DoABC', 'DoAction', 'DoInitAction', 'PlaceObject2', 'PlaceObject3', 'DefineSprite', 'DefineBinaryData', 'ShowFrame');
 	}
 	
 	public function dump($swfFile) {
-		$this->instanceName = "_root";
-		$this->frameIndex = 0;
+		$this->frameIndex = 1;
+		$this->symbolName = "_root";
 		$this->symbolCount = 0;
+		$this->symbolNames = array( 0 => $this->symbolName);
+		$this->instanceCount = 0;
 		$this->processTags($swfFile->tags);
 	}
 
@@ -26,21 +30,65 @@ class ASCodeDumper {
 					$this->printScript($script);
 				}
 			} else if($tag instanceof SWFDoActionTag || $tag instanceof SWFDoInitActionTag) {
+				if($tag instanceof SWFDoInitActionTag) {
+					$symbolName = $this->symbolNames[$tag->characterId];
+					echo "<div class='comments'>// $symbolName initialization </div>";
+				} else {
+					echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
+				}
 				$decoder1 = new AVM1Decoder;
 				$operations = $decoder1->decode($tag->actions);
 				$this->printOperations($operations);
-			} else if($tag instanceof SWFPlaceObject2) {
-				
+			} else if($tag instanceof SWFPlaceObject2Tag) {
+				$this->instanceCount++;
+				if($tag->clipActions) {
+					static $eventNames = array(	0x00040000 => "construct",	0x00020000 => "keyPress", 
+									0x00010000 => "dragOut", 	0x00008000 => "dragOver",
+									0x00004000 => "rollOut", 	0x00002000 => "rollOver",
+									0x00001000 => "releaseOutside",	0x00000800 => "release",
+									0x00000400 => "press",		0x00000200 => "initialize",
+									0x00000100 => "data",		0x00000080 => "keyUp",
+									0x00000040 => "keyDown",	0x00000020 => "mouseUp",
+									0x00000010 => "mouseDown",	0x00000008 => "mouseMove",
+									0x00000004 => "inload",		0x00000002 => "enterFrame",
+									0x00000001 => "load"	);
+					
+					$instanceName = ($tag->name) ? $tag->name : "instance$this->instanceCount";
+					$instancePath = "$this->symbolName.$instanceName";
+					echo "<div class='comments'>// $instancePath</div>";
+					foreach($tag->clipActions as $clipAction) {
+						echo "<div>on(";
+						$eventCount = 0;
+						foreach($eventNames as $flag => $eventName) {
+							if($clipAction->eventFlags & $flag) {
+								if($eventCount > 0) {
+									echo ", ";
+								}
+								echo "<span class='name'>$eventName</span>";
+								$eventCount++;
+							}
+						}
+						echo ") {\n";
+						$decoder1 = new AVM1Decoder;
+						$operations = $decoder1->decode($clipAction->actions);
+						echo "<div class='code-block'>\n";
+						$this->printOperations($operations);
+						echo "</div>}\n";
+					}
+				}
 			} else if($tag instanceof SWFShowFrameTag) {
 				$this->frameIndex++;
 			} else if($tag instanceof SWFDefineSpriteTag) {
-				$prevInstanceName = $this->instanceName;
+				$prevSymbolName = $this->symbolName;
 				$prevFrameIndex = $this->frameIndex;
-				$this->instanceName = "symbol" . ++$tag->spriteCount;
-				$this->frameIndex = 0;
+				$prevInstanceCount = $this->instanceCount;
+				$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$tag->spriteCount;
+				$this->frameIndex = 1;
+				$this->instanceCount = 0;
 				$this->processTags($tag->tags);
-				$this->instanceName = $prevInstanceName;
+				$this->symbolName = $prevSymbolName;
 				$this->frameIndex = $prevFrameIndex;
+				$this->instanceCount = $prevInstanceCount;
 			} else if($tag instanceof SWFDefineBinaryDataTag) {
 				if($tag->swfFile) {
 					$dumper = clone $this;
@@ -53,7 +101,7 @@ class ASCodeDumper {
 	protected function printScript($script) {
 		$this->printMembers($script->members, false);
 		// output the initializer 
-		echo "<span class='comments'>// script initializer</span>";
+		echo "<div class='comments'>// script initializer</div>";
 		$this->printOperations($script->initializer->body->operations);
 	}
 	
