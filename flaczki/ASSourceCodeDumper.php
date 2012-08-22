@@ -37,6 +37,7 @@ class ASSourceCodeDumper {
 						echo "<div class='comments'>// $symbolName initialization </div>";
 					} else {
 						echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
+						continue;
 					}
 					$decoder1 = new AVM1Decoder;
 					$operations = $decoder1->decode($tag->actions);
@@ -122,13 +123,20 @@ class ASSourceCodeDumper {
 				echo "<span class='string'>$text</span>";
 				break;
 			case 'NULL':
-				echo "<span class='null'>null</span>\n";
+				echo "<span class='null'>null</span>";
 				break;
 			case 'object':
 				if($expr instanceof AS2Identifier) {
 					echo "<span class='name'>$expr->string</span>";
 				} else if($expr instanceof AVM1Undefined) {
 					echo "<span class='undefined'>undefined</span>";
+				} else if($expr instanceof AVM1Register) {
+					if($expr->name) {
+						$text = $expr->name;
+					} else {
+						$text = "REG_$expr->index";
+					}
+					echo "<span class='register'>$text</span>";
 				} else if($expr instanceof AS2Function) {
 					echo "<span class='keyword'>function</span>";
 					$this->printExpression($expr->name);

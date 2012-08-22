@@ -542,9 +542,9 @@ class AS2Decompiler {
 		return 0;
 	}
 	
-	protected function getPropertyName($id) {
+	protected function getPropertyName($index) {
 		static $propertyNames = array('_x', '_y', '_xscale', '_yscale', '_currentframe', '_totalframes', '_alpha', '_visible', '_width', '_height', '_rotation', '_target', '_framesloaded', '_name', '_droptarget', '_url', '_highquality', '_focusrect', '_soundbuftime', '_quality', '_xmouse', '_ymouse' );
-		return $propertyNames[$id];
+		return $propertyNames[$index];
 	}
 	
 	protected function invertBinaryOperator($operator) {
@@ -573,6 +573,11 @@ class AS2Decompiler {
 			}
 		}
 		return false;
+	}
+	
+	protected function isThisVariable($expr) {
+		return ($expr instanceof AS2Identifier && $expr->string == "this")
+		    || ($expr instanceof AVM1Register && $expr->name == "this");
 	}
 	
 	protected function invertCondition($expr) {
@@ -638,10 +643,7 @@ class AS2Decompiler {
 	protected function doCallFunction($cxt) {
 		$name = array_pop($cxt->stack);
 		$argumentCount = array_pop($cxt->stack);
-		$arguments();
-		for($i = 0; $i < $argumentCount; $i++) {
-			$arguments[] = array_pop($cxt->stack);
-		}
+		$arguments = ($argumentCount > 0) ? array_reverse(array_splice($cxt->stack, -$argumentCount)) : array();
 		array_push($cxt->stack, new AS2FunctionCall(null, $name, $arguments));
 	}
 
@@ -649,9 +651,9 @@ class AS2Decompiler {
 		$name = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
 		$argumentCount = array_pop($cxt->stack);
-		$arguments = array_reverse(array_splice($cxt->stack, -$argumentCount));
+		$arguments = ($argumentCount > 0) ? array_reverse(array_splice($cxt->stack, -$argumentCount)) : array();
 		if($name && !($name instanceof AVM1Undefined)) {
-			if($object instanceof AS2Identifier && $object->string == 'this') {
+			if($this->isThisVariable($object)) {
 				$object = null;
 			}
 		} else {
@@ -686,12 +688,12 @@ class AS2Decompiler {
 	protected function doDefineFunction($cxt) {
 		$name = $cxt->op->op1;
 		$arguments = $cxt->op->op3;
-		$operations = $cxt->op->op5;
+		$functionBody = $cxt->op->op5;
 		$function = new AS2Function($name, $arguments);
 		$cxtF = new AS2DecompilerContext;
-		$cxtF->opQueue = $operations;
+		$cxtF->opQueue = $functionBody->operations;
 		$this->decompileFunctionBody($cxtF, $function);
-		if($function->name) {
+		if($name) {
 			return $function;
 		} else {
 			array_push($cxt->stack, $function);
@@ -701,12 +703,12 @@ class AS2Decompiler {
 	protected function doDefineFunction2($cxt) {
 		$name = $cxt->op->op1;
 		$arguments = $cxt->op->op5;
-		$operations = $cxt->op->op7;
+		$functionBody = $cxt->op->op7;
 		$function = new AS2Function($name, $arguments);
 		$cxtF = new AS2DecompilerContext;
-		$cxtF->opQueue = $operations;
+		$cxtF->opQueue = $functionBody->operations;
 		$this->decompileFunctionBody($cxtF, $function);
-		if($function->name) {
+		if($name) {
 			return $function;
 		} else {
 			array_push($cxt->stack, $function);
@@ -777,16 +779,20 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
 			$name = new AS2Identifier($name);
-			array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
+			if($this->isThisVariable($object)) {
+				array_push($cxt->stack, $name);
+			} else {
+				array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
+			}
 		} else {
 			array_push($cxt->stack, new AS2ArrayAccess($name, $object));
 		}
 	}
 
 	protected function doGetProperty($cxt) {
-		$id = array_pop($cxt->stack);
+		$index = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
-		$name = $this->getPropertyName($id);
+		$name = $this->getPropertyName($index);
 		$var = new AS2Identifier($name);
 		array_push($cxt->stack, new AS2BinaryOperation($var, '.', $object, 1));
 	}
@@ -875,7 +881,7 @@ class AS2Decompiler {
 
 	protected function doInitArray($cxt) {
 		$count = array_pop($cxt->stack);
-		$items = array_reverse(array_splice($cxt->stack, -$count));
+		$items = ($count > 0) ? array_reverse(array_splice($cxt->stack, -$count)) : array();
 		array_push($cxt->stack, new AS2ArrayInitializer($items));
 	}
 
@@ -938,7 +944,7 @@ class AS2Decompiler {
 	protected function doNewObject($cxt) {
 		$name = array_pop($cxt->stack);
 		$argumentCount = array_pop($cxt->stack);
-		$arguments = array_reverse(array_splice($cxt->stack, -$argumentCount));
+		$arguments = ($argumentCount > 0) ? array_reverse(array_splice($cxt->stack, -$argumentCount)) : array();
 		$constructor = new AS2Functioncall(null, $name, $arguments);
 		array_push($cxt->stack, new AS2UnaryOperation('new', $constructor, 3));
 	}
@@ -1000,7 +1006,11 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
 			$name = new AS2Identifier($name);
-			$var = new AS2BinaryOperation($name, '.', $object, 1);
+			if($this->isThisVariable($object)) {
+				$var = $name;
+			} else {
+				$var = new AS2BinaryOperation($name, '.', $object, 1);
+			}
 		} else {
 			$var = new AS2ArrayAccess($name, $object);
 		}
@@ -1008,10 +1018,10 @@ class AS2Decompiler {
 	}
 
 	protected function doSetProperty($cxt) {
-		$id = $cxt->op->op1;
 		$value = array_pop($cxt->stack);
+		$index = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
-		$name = new AS2Identifier($this->getPropertyName($id));
+		$name = new AS2Identifier($this->getPropertyName($index));
 		$var = new AS2BinaryOperation($name, '.', $object, 1);
 		return new AS2BinaryOperation($value, '=', $var, 15);
 	}
@@ -1159,15 +1169,15 @@ class AS2Decompiler {
 	}
 
 	protected function doTry($cxt) {
-		$tryOps = $cxt->op->op6;
+		$tryBody = $cxt->op->op6;
 		$catchVar = $cxt->op->op5;
-		$catchOps = $cxt->op->op7;
-		$finallyOps = $cxt->op->op8;
+		$catchBody = $cxt->op->op7;
+		$finallyBody = $cxt->op->op8;
 		
 		// decompile try block
 		$try = new AS2Function(null, null);
 		$cxtT = new AS2DecompilerContext;
-		$cxtT->opQueue = $tryByteCodes;
+		$cxtT->opQueue = $tryBody->operations;
 		$this->decompileFunctionBody($cxtT, $try);
 		
 		if($catchOps) {
@@ -1176,7 +1186,7 @@ class AS2Decompiler {
 				$catchVar = $catchVar->name ? $catchVar->name : "REG_$catchVar->index";
 			}
 			$catch = new AS2Function(null, array($catchVar));
-			$cxtC->opQueue = $catchOps;
+			$cxtC->opQueue = $catchBody->operations;
 			$this->decompileFunctionBody($cxtC, $catch);
 		} else {
 			$catch = null;
@@ -1184,7 +1194,7 @@ class AS2Decompiler {
 		if($finallyOps) {
 			// decompile finally block
 			$finally = new AS2Function(null, null);
-			$cxtF->opQueue = $finallyOps;
+			$cxtF->opQueue = $finallyBody->operations;
 			$this->decompileFunctionBody($cxtF, $finally);
 		} else {
 			$finally = null;
@@ -1425,6 +1435,9 @@ class AS2Function extends AS2CompoundStatement {
 	public $statements = array();
 	
 	public function __construct($name, $arguments) {
+		if(is_string($name)) {
+			$name = new AS2Identifier($name);
+		}
 		$this->name = $name;
 		$this->arguments = $arguments;
 	}
