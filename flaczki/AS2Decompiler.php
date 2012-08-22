@@ -353,14 +353,14 @@ class AS2Decompiler {
 						$enumeration = $condition->operand1;
 						$condition = new AS2binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
 					} else {
-						if($entryBlock->lastStatement->address == $headerBlock->lastStatement->address) {
+						if($entryBlock->lastStatement->address == $headerBlock->lastStatement->addressIfTrue) {
 							// it goes to the beginning of the loop so it must be a do-while
 							$stmt = new AS2DoWhile;
 						} else {			
 							$stmt = new AS2While;
 						}
 					}
-					$entryBlock->lastStatement = $expr;
+					$entryBlock->lastStatement = $stmt;
 				} else {
 					// we just fall into the loop
 					if($condition instanceof AS2BinaryOperation && $condition->operand1 instanceof AS2DecompilerEnumeration) {
@@ -666,7 +666,9 @@ class AS2Decompiler {
 	}
 
 	protected function doCastOp($cxt) {
-		echo "doCastOp\n";
+		$object = array_pop($cxt->stack);
+		$constructor = array_pop($cxt->stack);
+		array_push($cxt->stack, new AS2FunctionCall(null, $constructor, array($object)));
 	}
 
 	protected function doCharToAscii($cxt) {
@@ -946,7 +948,9 @@ class AS2Decompiler {
 
 	protected function doNewMethod($cxt) {
 		$name = array_pop($cxt->stack);
-		$name = new AS2Identifier($name);
+		if(is_string($name)) {
+			$name = new AS2Identifier($name);
+		}
 		$object = array_pop($cxt->stack);
 		$argumentCount = array_pop($cxt->stack);
 		$arguments = ($argumentCount > 0) ? array_reverse(array_splice($cxt->stack, -$argumentCount)) : array();
@@ -1283,11 +1287,6 @@ class AS2Identifier extends AS2Expression {
 	public $string;
 	
 	public function __construct($name) {
-		if(!is_string($name)) {
-			dump($name);
-			dump_backtrace();
-			exit;
-		}
 		$this->string = $name;
 	}
 }
@@ -1352,6 +1351,7 @@ class AS2TernaryConditional extends AS2Operation {
 		$this->condition = $condition;
 		$this->valueIfTrue = $valueIfTrue;
 		$this->valueIfFalse = $valueIfFalse;
+		$this->precedence = 14;
 	}
 }
 
