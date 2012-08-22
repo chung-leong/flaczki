@@ -87,6 +87,9 @@ class AS2Decompiler {
 				while(($stmt = $this->decompileNextInstruction($cxt)) !== false) {
 					if($stmt) {
 						if($stmt instanceof AS2DecompilerBranch) {
+							if($stmt->condition instanceof AS2BinaryOperation && $stmt->condition->operand1 instanceof AS2DecompilerEnumeration) {
+								break;
+							}
 							if($cxt->branchOnTrue) {
 								$cxt->relatedBranch->branchIfTrue = $stmt;
 							} else {
@@ -744,22 +747,17 @@ class AS2Decompiler {
 	}
 
 	protected function doEndDrag($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'stopDrag');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall($this->currentTarget, 'stopDrag', array());
 	}
 
 	protected function doEnumerate($cxt) {
-		$this->doGetVariable($cxt);
-		$this->doEnumerate2($cxt);
+		$name = array_pop($cxt->stack);
+		$object = new AS2Identifier($name);
+		array_push($cxt->stack, new AS2DecompilerEnumeration($object));
 	}
 
 	protected function doEnumerate2($cxt) {
-		$object = array_pop($cxt->stack);
-		$expr = new AS2DecompilerEnumeration;
-		$expr->container = $object;
-		array_push($cxt->stack, $expr);
+		array_push($cxt->stack, new AS2DecompilerEnumeration(array_pop($cxt->stack)));
 	}
 
 	protected function doEquals($cxt) {
@@ -831,7 +829,12 @@ class AS2Decompiler {
 	}
 
 	protected function doGetVariable($cxt) {
-		array_push($cxt->stack, new AS2Identifier(array_pop($cxt->stack)));
+		$name = array_pop($cxt->stack);
+		if(is_string($name)) {
+			array_push($cxt->stack, new AS2Identifier($name));
+		} else {
+			array_push($cxt->stack, new AS2FunctionCall(null, 'eval', array($name)));
+		}
 	}
 
 	protected function doGotoFrame($cxt) {
@@ -866,7 +869,7 @@ class AS2Decompiler {
 	}
 
 	protected function doImplementsOp($cxt) {
-		$class = array_pop($cxt->stack);
+		/*$class = array_pop($cxt->stack);
 		$count = array_pop($cxt->stack);
 		$interfaces = new AS2ArrayInitializer;
 		for($i = 0; $i < $count; $i++) {
@@ -875,7 +878,7 @@ class AS2Decompiler {
 		array_push($cxt->stack, $class);
 		array_push($cxt->stack, 'interfaces');
 		array_push($cxt->stack, $interfaces);
-		return $this->doSetMember($cxt);
+		return $this->doSetMember($cxt);*/
 	}
 
 	protected function doIncrement($cxt) {
@@ -942,7 +945,13 @@ class AS2Decompiler {
 	}
 
 	protected function doNewMethod($cxt) {
-		echo "NewMethod\n";
+		$name = array_pop($cxt->stack);
+		$name = new AS2Identifier($name);
+		$object = array_pop($cxt->stack);
+		$argumentCount = array_pop($cxt->stack);
+		$arguments = ($argumentCount > 0) ? array_reverse(array_splice($cxt->stack, -$argumentCount)) : array();
+		$constructor = new AS2Functioncall(null, $name, $arguments);
+		array_push($cxt->stack, new AS2UnaryOperation('new', $constructor, 3));
 	}
 
 	protected function doNewObject($cxt) {
@@ -1081,7 +1090,17 @@ class AS2Decompiler {
 		if($stackIndex >= 0) {
 			$value = $cxt->stack[$stackIndex];
 			if($value instanceof AS2DecompilerEnumeration) {
+				$enumeration = $value;
+				if(isset($cxt->registerDeclared[$register->index])) {
+					$enumeration->variable = $register;
+				} else {
+					// need to declare variable
+					$var = new AS2VariableDeclaration(AVM1Undefined::$singleton, $register);
+					$enumeration->variable = $var;
+				}
 			} else {
+				// replace expression on the stack with the register
+				$cxt->stack[$stackIndex] = $register;
 				if(isset($cxt->registerDeclared[$register->index])) {
 					return new AS2Assignment($value, $register);
 				} else {
@@ -1264,6 +1283,11 @@ class AS2Identifier extends AS2Expression {
 	public $string;
 	
 	public function __construct($name) {
+		if(!is_string($name)) {
+			dump($name);
+			dump_backtrace();
+			exit;
+		}
 		$this->string = $name;
 	}
 }
@@ -1480,6 +1504,10 @@ class AS2DecompilerFlowControl {
 class AS2DecompilerEnumeration {
 	public $container;
 	public $variable;
+	
+	public function __construct($container) {
+		$this->container = $container;
+	}
 }
 
 class AS2DecompilerJump extends AS2DecompilerFlowControl {

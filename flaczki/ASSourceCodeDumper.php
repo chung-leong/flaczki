@@ -37,7 +37,6 @@ class ASSourceCodeDumper {
 						echo "<div class='comments'>// $symbolName initialization </div>";
 					} else {
 						echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
-						continue;
 					}
 					$decoder1 = new AVM1Decoder;
 					$operations = $decoder1->decode($tag->actions);
@@ -77,7 +76,10 @@ class ASSourceCodeDumper {
 						echo ") {\n";
 						$decoder1 = new AVM1Decoder;
 						$operations = $decoder1->decode($clipAction->actions);
+						$decompiler = new AS2Decompiler;
+						$statements = $decompiler->decompile($operations);
 						echo "<div class='code-block'>\n";
+						$this->printStatements($statements);
 						echo "</div>}\n";
 					}
 				}
@@ -87,7 +89,7 @@ class ASSourceCodeDumper {
 				$prevSymbolName = $this->symbolName;
 				$prevFrameIndex = $this->frameIndex;
 				$prevInstanceCount = $this->instanceCount;
-				$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$tag->spriteCount;
+				$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$this->symbolCount;
 				$this->frameIndex = 1;
 				$this->instanceCount = 0;
 				$this->processTags($tag->tags);
@@ -103,7 +105,7 @@ class ASSourceCodeDumper {
 		}
 	}
 					
-	protected function printExpression($expr) {
+	protected function printExpression($expr, $precedence = null) {
 		$type = gettype($expr);
 		switch($type) {
 			case 'boolean': 
@@ -144,7 +146,7 @@ class ASSourceCodeDumper {
 					$this->printExpressions($expr->arguments);
 					echo ") {<div class='code-block'>\n";
 					$this->printStatements($expr->statements);
-					echo "</div>}\n";
+					echo "</div>}";
 				} else if($expr instanceof AS2FunctionCall) {
 					$this->printExpression($expr->name);
 					echo "(";
@@ -157,26 +159,57 @@ class ASSourceCodeDumper {
 						echo " = ";
 						$this->printExpression($expr->value);
 					}
+				} else if($expr instanceof AS2ArrayInitializer) {
+					if($expr->items) {
+						echo "[ ";
+						$this->printExpressions($expr->items);
+						echo " ]";
+					} else {
+						echo "[]";
+					}
+				} else if($expr instanceof AS2ObjectInitializer) {
+					if($expr->items) {
+						echo "{ ";
+						$count = 0;
+						foreach($expr->items as $name => $value) {
+							if($count++ > 0) {
+								echo ", ";
+							}
+							$this->printExpression($name);
+							echo ": ";
+							$this->printExpression($value);
+						}
+						echo " }";
+					} else {
+						echo "{}";
+					}
 				} else if($expr instanceof AS2Operation) {
 					static $noSpace = array('.' => true, '!' => true, '~' => true, '++' => true, '--' => true);
+					$needParentheses = ($precedence !== null && $expr instanceof AS2Operation && $precedence < $expr->precedence);
+					if($needParentheses) {
+						echo "(";
+					}
 					if($expr instanceof AS2BinaryOperation) {
-						$this->printExpression($expr->operand1);
+						$this->printExpression($expr->operand1, $expr->precedence);
 						echo isset($noSpace[$expr->operator]) ? $expr->operator : " $expr->operator ";
-						$this->printExpression($expr->operand2);
+						$this->printExpression($expr->operand2, $expr->precedence);
 					} else if($expr instanceof AS2UnaryOperation) {
 						echo isset($noSpace[$expr->operator]) ? $expr->operator : " $expr->operator ";
-						$this->printExpression($expr->operand);
-					} else if($expr instanceof AS2TrenaryConditional) {
-						$this->printExpression($expr->condition);
+						$this->printExpression($expr->operand, $expr->precedence);
+					} else if($expr instanceof AS2TernaryConditional) {
+						$this->printExpression($expr->condition, $expr->precedence);
 						echo " ? ";
-						$this->printExpression($expr->valueIfTrue);
+						$this->printExpression($expr->valueIfTrue, $expr->precedence);
 						echo " : ";
-						$this->printExpression($expr->valueIfFalse);
+						$this->printExpression($expr->valueIfFalse, $expr->precedence);
 					} else if($expr instanceof AS2ArrayAccess) {
 						$this->printExpression($expr->array);
 						echo "[";
 						$this->printExpression($expr->index);
 						echo "]";
+					}
+					if($needParentheses) {
+						echo ")";
 					}
 				}
 				break;
@@ -236,18 +269,18 @@ class ASSourceCodeDumper {
 				echo ") {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->statements);
 				echo "</div>}\n";
-			} else if($stmt instanceof AS2DoWhile) {
-				echo "<span class='keyword'>do {\n<div class='code-block'>\n";
-				$this->printStatements($stmt->statements);
-				echo "</div>} while(";
-				$this->printExpression($stmt->condition);
-				echo ");\n";
 			} else if($stmt instanceof AS2ForIn) {
 				echo "<span class='keyword'>for</span>(";
 				$this->printExpression($stmt->condition);
 				echo ") {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->statements);
 				echo "</div>}\n";
+			} else if($stmt instanceof AS2DoWhile) {
+				echo "<span class='keyword'>do {\n<div class='code-block'>\n";
+				$this->printStatements($stmt->statements);
+				echo "</div>} while(";
+				$this->printExpression($stmt->condition);
+				echo ");\n";
 			} else if($stmt instanceof AS2TryCatch) {
 				echo "<span class='keyword'>try</span> {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->tryStatements);

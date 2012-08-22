@@ -85,7 +85,7 @@ class ASCodeDumper {
 				$prevSymbolName = $this->symbolName;
 				$prevFrameIndex = $this->frameIndex;
 				$prevInstanceCount = $this->instanceCount;
-				$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$tag->spriteCount;
+				$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$this->symbolCount;
 				$this->frameIndex = 1;
 				$this->instanceCount = 0;
 				$this->processTags($tag->tags);

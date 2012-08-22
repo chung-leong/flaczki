@@ -15,7 +15,7 @@ class AVM1Decoder {
 		$this->constantPool = null;
 		
 		$registers = array();
-		for($index = 0; $index < 5; $index++) {
+		for($index = 0; $index < 3; $index++) {
 			$register = new AVM1Register;
 			$register->index = $index;
 			$registers[$index] = $register;
@@ -179,7 +179,13 @@ class AVM1Decoder {
 		}
 		$op->op3 = $arguments;
 		$op->op4 = $codeSize = $this->readUI16();
-		$op->op5 = $this->decodeInstructions($codeSize);
+		$registers = array();
+		for($index = 0; $index < 3; $index++) {
+			$register = new AVM1Register;
+			$register->index = $index;
+			$registers[$index] = $register;
+		}
+		$op->op5 = $this->decodeInstructions($codeSize, $registers);
 	}
 	
 	protected function decodeDefineFunction2($op) {
@@ -190,16 +196,20 @@ class AVM1Decoder {
 		$registers = array();
 		$arguments = array();
 		for($i = 0; $i < $argumentCount; $i++) {
-			$index = $arguments[] = $this->readUI8();
-			$name = $arguments[] = $this->readString();
+			$index = $this->readUI8();
+			$name = $this->readString();
 			if($index) {
 				$register = new AVM1Register;
 				$register->index = $index;
 				$register->name = $name;
 				$registers[$index] = $register;
+				$arguments[] = $register;
+			} else {
+				$arguments[] = $name;
 			}
 		}
 		$op->op5 = $arguments;
+		$op->op6 = $codeSize = $this->readUI16();
 		static $predefinedVariables = array(
 			0x0001 => 'this',
 			0x0004 => 'arguments',
@@ -225,7 +235,6 @@ class AVM1Decoder {
 				$registers[$index] = $register;
 			}
 		}
-		$op->op6 = $codeSize = $this->readUI16();
 		$op->op7 = $this->decodeInstructions($codeSize, $registers);
 	}
 	
