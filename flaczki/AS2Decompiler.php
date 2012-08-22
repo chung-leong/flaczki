@@ -566,10 +566,8 @@ class AS2Decompiler {
 			if($expr instanceof AS2FunctionCall) {
 				return true;
 			}
-			if($expr instanceof AS2BinaryOperation) {
-				switch($expr->operator) {
-					case '=': return true;
-				}
+			if($expr instanceof AS2Assignment) {
+				return true;
 			}
 		}
 		return false;
@@ -689,6 +687,11 @@ class AS2Decompiler {
 		$name = $cxt->op->op1;
 		$arguments = $cxt->op->op3;
 		$functionBody = $cxt->op->op5;
+		foreach($arguments as &$argument) {
+			if(is_string($argument)) {
+				$argument = new AS2Identifier($argument);
+			}
+		}
 		$function = new AS2Function($name, $arguments);
 		$cxtF = new AS2DecompilerContext;
 		$cxtF->opQueue = $functionBody->operations;
@@ -704,6 +707,11 @@ class AS2Decompiler {
 		$name = $cxt->op->op1;
 		$arguments = $cxt->op->op5;
 		$functionBody = $cxt->op->op7;
+		foreach($arguments as &$argument) {
+			if(is_string($argument)) {
+				$argument = new AS2Identifier($argument);
+			}
+		}
 		$function = new AS2Function($name, $arguments);
 		$cxtF = new AS2DecompilerContext;
 		$cxtF->opQueue = $functionBody->operations;
@@ -771,7 +779,7 @@ class AS2Decompiler {
 		$subclassPrototype = new AS2BinaryOperation($prototype, '.', $subclass, 1);
 		$superclassPrototype = new AS2BinaryOperation($prototype, '.', $superclass, 1);
 		$prototypeObject = new AS2ObjectInitializer(array( '__proto__' => $superclassPrototype, '__constructor__' => $superclass ));
-		return new AS2BinaryOperation($prototypeObject, '=', $subclassPrototype, 15);
+		return new AS2Assignment($prototypeObject, $subclassPrototype);
 	}
 
 	protected function doGetMember($cxt) {
@@ -779,11 +787,7 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
 			$name = new AS2Identifier($name);
-			if($this->isThisVariable($object)) {
-				array_push($cxt->stack, $name);
-			} else {
-				array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
-			}
+			array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
 		} else {
 			array_push($cxt->stack, new AS2ArrayAccess($name, $object));
 		}
@@ -1006,15 +1010,11 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
 			$name = new AS2Identifier($name);
-			if($this->isThisVariable($object)) {
-				$var = $name;
-			} else {
-				$var = new AS2BinaryOperation($name, '.', $object, 1);
-			}
+			$var = new AS2BinaryOperation($name, '.', $object, 1);
 		} else {
 			$var = new AS2ArrayAccess($name, $object);
 		}
-		return new AS2BinaryOperation($value, '=', $var, 15);
+		return new AS2Assignment($value, $var);
 	}
 
 	protected function doSetProperty($cxt) {
@@ -1023,7 +1023,7 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		$name = new AS2Identifier($this->getPropertyName($index));
 		$var = new AS2BinaryOperation($name, '.', $object, 1);
-		return new AS2BinaryOperation($value, '=', $var, 15);
+		return new AS2Assignment($value, $var);
 	}
 
 	protected function doSetTarget($cxt) {
@@ -1046,7 +1046,7 @@ class AS2Decompiler {
 		$value = array_pop($cxt->stack);
 		$name = array_pop($cxt->stack);
 		$var = new AS2Identifier($name);
-		return new AS2BinaryOperation($value, '=', $var, 15);
+		return new AS2Assignment($value, $var);
 	}
 
 	protected function doStackSwap($cxt) {
@@ -1082,6 +1082,12 @@ class AS2Decompiler {
 			$value = $cxt->stack[$stackIndex];
 			if($value instanceof AS2DecompilerEnumeration) {
 			} else {
+				if(isset($cxt->registerDeclared[$register->index])) {
+					return new AS2Assignment($value, $register);
+				} else {
+					$cxt->registerDeclared[$register->index] = true;
+					return new AS2VariableDeclaration($value, $register);
+				}
 			}
 		}
 	}
@@ -1292,6 +1298,16 @@ class AS2BinaryOperation extends AS2Operation {
 	}
 }
 
+class AS2Assignment extends AS2BinaryOperation {
+
+	public function __construct($operand2, $operand1) {
+		$this->operator = '=';
+		$this->operand1 = $operand1;
+		$this->operand2 = $operand2;
+		$this->precedence = 15;
+	}
+}
+
 class AS2UnaryOperation extends AS2Operation {
 	public $operator;
 	public $operand;
@@ -1451,6 +1467,7 @@ class AS2DecompilerContext {
 	public $lastAddress = 0;
 	public $nextAddress = 0;
 	public $stack = array();
+	public $registerDeclared = array();
 	public $currentTarget;
 	
 	public $relatedBranch;
