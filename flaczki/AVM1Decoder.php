@@ -288,14 +288,14 @@ class AVM1Decoder {
 		$op->op4 = $finallySize = $this->readUI16();
 		if($flags & 0x04) {	// CatchInRegister
 			$catchName = null;
-			$op->op2 = $catchRegister = $this->registers[ $this->readUI8() ];
+			$op->op5 = $catchRegister = $this->registers[ $this->readUI8() ];
 		} else {
-			$op->op2 = $catchName = $this->readString();
+			$op->op5 = $catchName = $this->readString();
 			$catchRegister = null;
 		}
-		$op->op5 = $this->decodeInstructions($trySize);
-		$op->op6 = ($flags & 0x01) ? $this->decodeInstructions($catchSize) : null;
-		$op->op7 = ($flags & 0x02) ? $this->decodeInstructions($finallySize) : null;
+		$op->op6 = $this->decodeInstructions($trySize);
+		$op->op7 = ($flags & 0x01) ? $this->decodeInstructions($catchSize) : null;
+		$op->op8 = ($flags & 0x02) ? $this->decodeInstructions($finallySize) : null;
 		
 	}
 	
