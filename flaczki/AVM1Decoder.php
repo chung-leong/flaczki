@@ -13,7 +13,14 @@ class AVM1Decoder {
 		$this->position = 0;
 		$this->registers = null;
 		$this->constantPool = null;
-		$function = $this->decodeInstructions(strlen($byteCodes));
+		
+		$registers = array();
+		for($index = 0; $index < 5; $index++) {
+			$register = new AVM1Register;
+			$register->index = $index;
+			$registers[$index] = $register;
+		}
+		$function = $this->decodeInstructions(strlen($byteCodes), $registers);
 		return $function->operations;
 	}
 	
