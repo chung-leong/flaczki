@@ -1,45 +1,30 @@
 <?php
 
 class AS2Decompiler {
-	protected static $undefined;
 	
 	protected $constantPool;
 
-	public function decompile($byteCodes) {
-		if(!self::$undefined) {
-			self::$undefined = new AS2Variable;
-			self::$undefined->name = 'undefined';
-		}
+	public function decompile($operations) {
 		$this->constantPool = array();
 			
-		$cxt = $this->createContext($byteCodes);
-		$function = new AS2Function;
+		$cxt = new AS2DecompilerContext;
+		$cxt->opQueue = $operations;
+		$function = new AS2Function(null, null);
 		$this->decompileFunctionBody($cxt, $function);
 		
 		$r = new AS2SourceReconstructor;
 		print_r($r->reconstruct($function->expressions));
+		///print_r($function->expressions);
 
 		return $function->expressions;
-	}
-	
-	protected function createContext($byteCodes, $preloadedVariables = array()) {
-		$cxt = new AS2DecompilerContext;
-		$cxt->byteCodes = $byteCodes;
-		$cxt->byteCodeLength = strlen($byteCodes);
-		$cxt->nextPosition = 0;
-		
-		foreach($preloadedVariables as $index => $name) {
-			$var = new AS2Variable;
-			$var->name = $name;
-			$cxt->registers[$index] = $var;
-		}
-		return $cxt;
 	}
 	
 	protected function decompileFunctionBody($cxt, $function) {
 		// decompile the ops into expressions
 		$expressions = array();	
 		$contexts = array($cxt);
+		reset($cxt->opQueue);
+		$cxt->nextPosition = key($cxt->opQueue);
 		while($contexts) {
 			$cxt = array_shift($contexts);
 			while(($expr = $this->decompileNextInstruction($cxt)) !== false) {				
@@ -61,8 +46,6 @@ class AS2Decompiler {
 								$cxtT = clone $cxt;
 								$cxtT->nextPosition = $expr->positionIfTrue;
 								$contexts[] = $cxtT;
-								
-								$cxt->nextPosition = $expr->positionIfFalse;
 							} else if($expr instanceof AS2UnconditionalBranch) {
 								// jump to the location and continue
 								$cxt->nextPosition = $expr->position;
@@ -175,12 +158,7 @@ class AS2Decompiler {
 		$changed = false;
 		if(isset($branch->branchIfTrue)) {
 			if($branch->branchIfTrue->positionIfFalse == $branch->positionIfFalse) {
-				$logicalExpr = new AS2BinaryOperation;
-				$logicalExpr->operator = '&&';
-				$logicalExpr->operand1 = $branch->condition;
-				$logicalExpr->operand2 = $branch->branchIfTrue->condition;
-				$logicalExpr->precedence = 12;
-				$branch->condition = $logicalExpr;
+				$branch->condition = new AS2BinaryOperation($branch->branchIfTrue->condition, '&&', $branch->condition, 12);
 				$branch->positionIfTrue = $branch->branchIfTrue->positionIfTrue;
 				if(isset($branch->branchIfTrue->branchIfTrue)) {
 					$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
@@ -194,12 +172,7 @@ class AS2Decompiler {
 		}
 		if(isset($branch->branchIfFalse)) {
 			if($branch->branchIfFalse->positionIfTrue == $branch->positionIfTrue) {
-				$logicalExpr = new AS2BinaryOperation;
-				$logicalExpr->operator = '||';
-				$logicalExpr->operand1 = $branch->condition;
-				$logicalExpr->operand2 = $branch->branchIfFalse->condition;
-				$logicalExpr->precedence = 13;
-				$branch->condition = $logicalExpr;
+				$branch->condition = new AS2BinaryOperation($branch->branchIfFalse->condition, '||', $branch->condition, 13);
 				$branch->positionIfFalse = $branch->branchIfFalse->positionIfFalse;
 				if(isset($branch->branchIfFalse->branchIfFalse)) {
 					$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
@@ -264,16 +237,9 @@ class AS2Decompiler {
 			}
 			if(count($cxtT->stack) == $stackHeight + 1) {			
 				$valueT = array_pop($cxtT->stack);
-				// swap the values if we branch on false
-				$branchOnTrue = ($branch->position == $branch->positionIfTrue);
-				$expr = new AS2TernaryConditional;
-				$expr->condition = $branch->condition;
-				$expr->valueIfTrue = ($branchOnTrue) ? $valueT : $valueF;
-				$expr->valueIfFalse = ($branchOnTrue) ? $valueF : $valueT;
-				$expr->precedence = 14;
-				// push the expression on to the caller's context  and advance the instruction pointer 
-				// to the jump destination
-				array_push($cxt->stack, $expr);
+				// push the expression on to the caller's context 
+				// and advance the instruction pointer to the jump destination
+				array_push($cxt->stack, new AS2TernaryConditional($branch->condition, $valueT, $valueF, 14));
 				$cxt->nextPosition = $uBranch->position;
 				return true;
 			}
@@ -282,123 +248,18 @@ class AS2Decompiler {
 	}
 	
 	public function decompileNextInstruction($cxt) {
-		static $handlers = array(
-			0x0A => 'doAdd',
-			0x47 => 'doAdd2',
-			0x10 => 'doAnd',
-			0x33 => 'doAsciiToChar',
-			0x60 => 'doBitAnd',
-			0x63 => 'doBitLShift',
-			0x61 => 'doBitOr',
-			0x64 => 'doBitRShift',
-			0x65 => 'doBitURShift',
-			0x62 => 'doBitXor',
-			0x9E => 'doCall',
-			0x3D => 'doCallFunction',
-			0x52 => 'doCallMethod',
-			0x2B => 'doCastOp',
-			0x32 => 'doCharToAscii',
-			0x24 => 'doCloneSprite',
-			0x88 => 'doConstantPool',
-			0x51 => 'doDecrement',
-			0x9B => 'doDefineFunction',
-			0x8E => 'doDefineFunction2',
-			0x3C => 'doDefineLocal',
-			0x41 => 'doDefineLocal2',
-			0x3A => 'doDelete',
-			0x3B => 'doDelete2',
-			0x0D => 'doDivide',
-			0x28 => 'doEndDrag',
-			0x46 => 'doEnumerate',
-			0x55 => 'doEnumerate2',
-			0x0E => 'doEquals',
-			0x49 => 'doEquals2',
-			0x69 => 'doExtends',
-			0x4E => 'doGetMember',
-			0x22 => 'doGetProperty',
-			0x34 => 'doGetTime',
-			0x83 => 'doGetURL',
-			0x9A => 'doGetURL2',
-			0x1C => 'doGetVariable',
-			0x81 => 'doGotoFrame',
-			0x9F => 'doGotoFrame2',
-			0x8C => 'doGoToLabel',
-			0x67 => 'doGreater',
-			0x9D => 'doIf',
-			0x2C => 'doImplementsOp',
-			0x50 => 'doIncrement',
-			0x42 => 'doInitArray',
-			0x43 => 'doInitObject',
-			0x54 => 'doInstanceOf',
-			0x99 => 'doJump',
-			0x0F => 'doLess',
-			0x48 => 'doLess2',
-			0x37 => 'doMBAsciiToChar',
-			0x36 => 'doMBCharToAscii',
-			0x35 => 'doMBStringExtract',
-			0x31 => 'doMBStringLength',
-			0x3F => 'doModulo',
-			0x0C => 'doMultiply',
-			0x53 => 'doNewMethod',
-			0x40 => 'doNewObject',
-			0x04 => 'doNextFrame',
-			0x12 => 'doNot',
-			0x11 => 'doOr',
-			0x06 => 'doPlay',
-			0x17 => 'doPop',
-			0x05 => 'doPrevFrame',
-			0x96 => 'doPush',
-			0x4C => 'doPushDuplicate',
-			0x30 => 'doRandomNumber',
-			0x25 => 'doRemoveSprite',
-			0x3E => 'doReturn',
-			0x4F => 'doSetMember',
-			0x23 => 'doSetProperty',
-			0x8B => 'doSetTarget',
-			0x20 => 'doSetTarget2',
-			0x1D => 'doSetVariable',
-			0x4D => 'doStackSwap',
-			0x27 => 'doStartDrag',
-			0x07 => 'doStop',
-			0x09 => 'doStopSounds',
-			0x87 => 'doStoreRegister',
-			0x66 => 'doStrictEquals',
-			0x21 => 'doStringAdd',
-			0x13 => 'doStringEquals',
-			0x15 => 'doStringExtract',
-			0x68 => 'doStringGreater',
-			0x14 => 'doStringLength',
-			0x29 => 'doStringLess',
-			0x0B => 'doSubtract',
-			0x45 => 'doTargetPath',
-			0x08 => 'doToggleQualty',
-			0x18 => 'doToInteger',
-			0x4A => 'doToNumber',
-			0x4B => 'doToString',
-			0x26 => 'doTrace',
-			0x8F => 'doTry',
-			0x44 => 'doTypeOf',
-			0x8A => 'doWaitForFrame',
-			0x8D => 'doWaitForFrame2',
-			0x94 => 'doWith',
-		);
-		
-		if($cxt->nextPosition < $cxt->byteCodeLength) {
-			$cxt->lastPosition = $cxt->nextPosition;
-			$cxt->dataRemaining = 1;
-			$code = $this->readUI8($cxt);
-			if($code) {
-				$method = $handlers[$code];
-				if($code >= 0x80) {
-					$cxt->dataRemaining = 2;
-					$cxt->dataRemaining = $this->readUI16($cxt);
-				} 
+		while($op = current($cxt->opQueue)) {
+			if(key($cxt->opQueue) == $cxt->nextPosition) {
+				$cxt->lastPosition = $cxt->nextPosition;
+				next($cxt->opQueue);
+				$cxt->nextPosition = key($cxt->opQueue);
+				$cxt->op = $op;
+				$method = "do$op->name";
 				$expr = $this->$method($cxt);
-				if($cxt->dataRemaining) {
-					$cxt->nextPosition += $cxt->dataRemaining;
-				}
 				return $expr;
-			} 
+			} else {
+				next($cxt->opQueue);
+			}
 		}
 		return false;
 	}
@@ -488,10 +349,7 @@ class AS2Decompiler {
 						// a for in loop						
 						$expr = new AS2ForIn;
 						$enumeration = $condition->operand1;
-						$condition = new AS2binaryOperation;
-						$condition->operator = 'in';
-						$condition->operand1 = $enumeration->variable;
-						$condition->operand2 = $enumeration->container;
+						$condition = new AS2binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
 					} else {
 						if($entryBlock->lastExpression->position == $headerBlock->lastExpression->position) {
 							// it goes to the beginning of the loop so it must be a do-while
@@ -507,10 +365,7 @@ class AS2Decompiler {
 						// a for in loop						
 						$expr = new AS2ForIn;
 						$enumeration = $condition->operand1;
-						$condition = new AS2binaryOperation;
-						$condition->operator = 'in';
-						$condition->operand1 = $enumeration->variable;
-						$condition->operand2 = $enumeration->container;
+						$condition = new AS2binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
 					} else {
 						if($loop->headerPosition == $loop->continuePosition) {
 							// the conditional statement is at the "bottom" of the loop so it's a do-while
@@ -688,6 +543,11 @@ class AS2Decompiler {
 		return 0;
 	}
 	
+	protected function getPropertyName($id) {
+		static $propertyNames = array('_x', '_y', '_xscale', '_yscale', '_currentframe', '_totalframes', '_alpha', '_visible', '_width', '_height', '_rotation', '_target', '_framesloaded', '_name', '_droptarget', '_url', '_highquality', '_focusrect', '_soundbuftime', '_quality', '_xmouse', '_ymouse' );
+		return $propertyNames[$id];
+	}
+	
 	protected function invertBinaryOperator($operator) {
 		switch($operator) {
 			case '==': return '!='; 
@@ -728,120 +588,79 @@ class AS2Decompiler {
 				return $newExpr;
 			}
 		}
-		$newExpr = new AS2UnaryOperation;
-		$newExpr->operator = '!';
-		$newExpr->operand = $expr;
-		$newExpr->precedence = 3;
+		$newExpr = new AS2UnaryOperation('!', $expr, 3);
 		return $newExpr;
 	}
 	
-	protected function doBinaryOp($cxt, $operator, $precedence) {
-		$expr = new AS2BinaryOperation;
-		$expr->operator = $operator;
-		$expr->operand2 = array_pop($cxt->stack);
-		$expr->operand1 = array_pop($cxt->stack);
-		$expr->precedence = $precedence;
-		array_push($cxt->stack, $expr);
-	}
-
-	protected function doUnaryOp($cxt, $operator, $precedence) {
-		$expr = new AS2UnaryOperation;
-		$expr->operator = $operator;
-		$expr->operand = array_pop($cxt->stack);
-		$expr->precedence = $precedence;
-		array_push($cxt->stack, $expr);
-	}
-	
-	protected function doCallTargetMethod($cxt) {
-		if($cxt->target) {
-			$name = array_pop($cxt->stack);
-			array_push($cxt->stack, $cxt->target);
-			array_push($cxt->stack, $name);
-			$this->doCallMethod($cxt);
-		} else {
-			$this->doCallFunction($cxt);
-		}
-		return $this->doPop($cxt);
-	}
-	
 	protected function doAdd($cxt) {
-		$this->doBinaryOp($cxt, '+', 5);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '+', array_pop($cxt->stack), 5));
 	}
 
 	protected function doAdd2($cxt) {
-		$this->doBinaryOp($cxt, '+', 5);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '+', array_pop($cxt->stack), 5));
 	}
 
 	protected function doAnd($cxt) {
-		$this->doBinaryOp($cxt, '&&', 12);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '&&', array_pop($cxt->stack), 12));
 	}
 
 	protected function doAsciiToChar($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'chr');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'chr', array_splice($cxt->stack, -1)));
 	}
 
 	protected function doBitAnd($cxt) {
-		$this->doBinaryOp($cxt, '&', 9);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '&', array_pop($cxt->stack), 9));
 	}
 
 	protected function doBitLShift($cxt) {
-		$this->doBinaryOp($cxt, '<<', 6);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '<<', array_pop($cxt->stack), 6));
 	}
 
 	protected function doBitOr($cxt) {
-		$this->doBinaryOp($cxt, '|', 11);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '|', array_pop($cxt->stack), 11));
 	}
 
 	protected function doBitRShift($cxt) {
-		$this->doBinaryOp($cxt, '>>', 6);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '>>', array_pop($cxt->stack), 6));
 	}
 
 	protected function doBitURShift($cxt) {
-		$this->doBinaryOp($cxt, '>>>', 6);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '>>>', array_pop($cxt->stack), 6));
 	}
 
 	protected function doBitXor($cxt) {
-		$this->doBinaryOp($cxt, '^', 10);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '^', array_pop($cxt->stack), 10));
 	}
 
 	protected function doCall($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'call');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall(null, 'call', array_splice($cxt->stack, -1));
 	}
 
 	protected function doCallFunction($cxt) {
-		$expr = new AS2FunctionCall;
 		$name = array_pop($cxt->stack);
-		if(is_scalar($name)) {
-			$expr->name = new AS2Variable;
-			$expr->name->name = $name;
-		} else {
-			$expr->name = $name;
-		}
 		$argumentCount = array_pop($cxt->stack);
+		$arguments();
 		for($i = 0; $i < $argumentCount; $i++) {
-			$expr->arguments[] = array_pop($cxt->stack);
+			$arguments[] = array_pop($cxt->stack);
 		}
-		array_push($cxt->stack, $expr);
+		array_push($cxt->stack, new AS2FunctionCall(null, $name, $arguments));
 	}
 
 	protected function doCallMethod($cxt) {
 		$name = array_pop($cxt->stack);
-		if($name && $name !== self::$undefined) {
-			$object = array_pop($cxt->stack);
-			if(!($object instanceof AS2Variable) || $object->name != 'this') {
-				array_push($cxt->stack, $object);
-				array_push($cxt->stack, $name);
-				$this->doGetMember($cxt);
-			} else {
-				array_push($cxt->stack, $name);
+		$object = array_pop($cxt->stack);
+		$argumentCount = array_pop($cxt->stack);
+		$arguments = array_reverse(array_splice($cxt->stack, -$argumentCount));
+		if($name && !($name instanceof AVM1Undefined)) {
+			if($object instanceof AS2Identifier && $object->string == 'this') {
+				$object = null;
 			}
+		} else {
+			// constructor
+			$name = $object;
+			$object = null;
 		}
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall($object, $name, $arguments));
 	}
 
 	protected function doCastOp($cxt) {
@@ -849,24 +668,15 @@ class AS2Decompiler {
 	}
 
 	protected function doCharToAscii($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'ord');
-		$this->doCallFunction($cxt);
+		return new AS2FunctionCall(null, 'ord', array_splice($cxt->stack, -1));
 	}
 
 	protected function doCloneSprite($cxt) {
-		array_push($cxt->stack, 3);
-		array_push($cxt->stack, 'duplicateMovieClip');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall(null, 'duplicateMovieClip', array_splice($cxt->stack, -3));
 	}
 
 	protected function doConstantPool($cxt) {
-		$count = $this->readUI16($cxt);
-		$this->constantPool = array();
-		for($i = 0; $i < $count; $i++) {
-			$this->constantPool[] = $this->readString($cxt);
-		}
+		$this->constantPool = $cxt->op->op2;
 	}
 
 	protected function doDecrement($cxt) {
@@ -875,104 +685,53 @@ class AS2Decompiler {
 	}
 
 	protected function doDefineFunction($cxt) {
-		$expr = new AS2Function;
-		$name = $this->readString($cxt);
-		if($name) {
-			$expr->name = new AS2Variable;
-			$expr->name->name = $name;
-		}
-		$argumentCount = $this->readUI16($cxt);
-		for($i = 0; $i < $argumentCount; $i++) {
-			$argument = new AS2Variable;
-			$argument->name = $this->readString($cxt);
-			$expr->arguments[] = $argument;
-		}
-		$codeSize = $this->readUI16($cxt);
-		$cxt->dataRemaining = $codeSize;
-		$byteCodes = $this->readBytes($cxt, $codeSize);
-		$cxtF = $this->createContext($byteCodes);
-		$this->decompileFunctionBody($cxtF, $expr);
-		if($expr->name) {
-			return $expr;
+		$name = $cxt->op->op1;
+		$arguments = $cxt->op->op3;
+		$operations = $cxt->op->op5;
+		$function = new AS2Function($name, $arguments);
+		$cxtF = new AS2DecompilerContext;
+		$cxtF->opQueue = $operations;
+		$this->decompileFunctionBody($cxtF, $function);
+		if($function->name) {
+			return $function;
 		} else {
-			array_push($cxt->stack, $expr);
+			array_push($cxt->stack, $function);
 		}
 	}
 
 	protected function doDefineFunction2($cxt) {
-		$expr = new AS2Function;
-		$name = $this->readString($cxt);
-		if($name) {
-			$expr->name = new AS2Variable;
-			$expr->name->name = $name;
-		}
-		$argumentCount = $this->readUI16($cxt);
-		$registerCount = $this->readUI8($cxt);
-		$flags = $this->readUI16($cxt);
-		$preloadedVariables = array();
-		for($i = 0; $i < $argumentCount; $i++) {
-			$registerIndex = $this->readUI8($cxt);
-			$argument = new AS2Variable;
-			$argument->name = $this->readString($cxt);
-			$expr->arguments[] = $argument;
-			if($registerIndex) {
-				$preloadedVariables[$registerIndex] = $argument->name;
-			}
-		}
-		$registerIndex = 1;
-		if($flags & 0x0001) {	// PreloadThis
-			$preloadedVariables[$registerIndex++] = 'this';
-		}
-		if($flags & 0x0004) {	// PreloadArguments
-			$preloadedVariables[$registerIndex++] = 'arguments';
-		}
-		if($flags & 0x0010) {	// PreloadSuper
-			$preloadedVariables[$registerIndex++] = 'super';
-		}
-		if($flags & 0x0040) {	// PreloadRoot
-			$preloadedVariables[$registerIndex++] = '_root';
-		}
-		if($flags & 0x0080) {	// PreloadParent
-			$preloadedVariables[$registerIndex++] = '_parent';
-		}
-		if($flags & 0x0100) {	// PreloadGlobal
-			$preloadedVariables[$registerIndex++] = '_global';
-		}
-		$codeSize = $this->readUI16($cxt);
-		$cxt->dataRemaining = $codeSize;
-		$byteCodes = $this->readBytes($cxt, $codeSize);
-		$cxtF = $this->createContext($byteCodes, $preloadedVariables);
-		$this->decompileFunctionBody($cxtF, $expr);
-		if($expr->name) {
-			return $expr;
+		$name = $cxt->op->op1;
+		$arguments = $cxt->op->op5;
+		$operations = $cxt->op->op7;
+		$function = new AS2Function($name, $arguments);
+		$cxtF = new AS2DecompilerContext;
+		$cxtF->opQueue = $operations;
+		$this->decompileFunctionBody($cxtF, $function);
+		if($function->name) {
+			return $function;
 		} else {
-			array_push($cxt->stack, $expr);
+			array_push($cxt->stack, $function);
 		}
 	}
 
 	protected function doDefineLocal($cxt) {
-		$expr = new AS2VariableDeclaration;
-		$expr->value = array_pop($cxt->stack);
-		$expr->name = array_pop($cxt->stack);
-		return $expr;
+		return new AS2VariableDeclaration(array_pop($cxt->stack), array_pop($cxt->stack));
 	}
 
 	protected function doDefineLocal2($cxt) {
-		$expr = new AS2VariableDeclaration;
-		$expr->name = array_pop($cxt->stack);
-		return $expr;
+		return new AS2VariableDeclaration(null, array_pop($cxt->stack));
 	}
 
 	protected function doDelete($cxt) {
-		$this->doUnaryOp($cxt, 'delete', 3);
+		array_push($cxt->stack, new AS2UnaryOperation('delete', array_pop($cxt->stack), 3));
 	}
 
 	protected function doDelete2($cxt) {
-		$this->doUnaryOp($cxt, 'delete', 3);
+		array_push($cxt->stack, new AS2UnaryOperation('delete', array_pop($cxt->stack), 3));
 	}
 
 	protected function doDivide($cxt) {
-		$this->doBinaryOp($cxt, '/', 4);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '/', array_pop($cxt->stack), 4));
 	}
 
 	protected function doEndDrag($cxt) {
@@ -995,11 +754,11 @@ class AS2Decompiler {
 	}
 
 	protected function doEquals($cxt) {
-		$this->doBinaryOp($cxt, '==', 8);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '==', array_pop($cxt->stack), 8));
 	}
 
 	protected function doEquals2($cxt) {
-		$this->doBinaryOp($cxt, '==', 8);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '==', array_pop($cxt->stack), 8));
 	}
 
 	protected function doExtends($cxt) {
@@ -1007,149 +766,94 @@ class AS2Decompiler {
 		$subclass = array_pop($cxt->stack);
 		
 		// Subclass.prototype = { __proto__: Superclass.prototype, __constructor__: Superclass };
-		$prototype = new AS2Variable;
-		$prototype->name = 'prototype';
-		$superclassPrototype = new AS2BinaryOperation;
-		$superclassPrototype->operator = '.';
-		$superclassPrototype->operand1 = $superclass;
-		$superclassPrototype->operand2 = $prototype;
-		$superclassPrototype->precedence = 1;
-		$prototypeObject = new AS2ObjectInitializer;
-		$prototypeObject->items = array( '__proto__' => $superclassPrototype, '__constructor__' => $superclass );
-		
-		array_push($cxt->stack, $subclass);
-		array_push($cxt->stack, 'prototype');
-		array_push($cxt->stack, $prototypeObject);
-		return $this->doSetMember($cxt);
+		$prototype = new AS2Identifier('prototype');
+		$subclassPrototype = new AS2BinaryOperation($prototype, '.', $subclass, 1);
+		$superclassPrototype = new AS2BinaryOperation($prototype, '.', $superclass, 1);
+		$prototypeObject = new AS2ObjectInitializer(array( '__proto__' => $superclassPrototype, '__constructor__' => $superclass ));
+		return new AS2BinaryOperation($prototypeObject, '=', $subclassPrototype, 15);
 	}
 
 	protected function doGetMember($cxt) {
 		$name = array_pop($cxt->stack);
+		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
-			$expr = new AS2Variable;
-			$expr->name = $name;
-			array_push($cxt->stack, $expr);
-			$this->doBinaryOp($cxt, '.', 1);
+			$name = new AS2Identifier($name);
+			array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
 		} else {
-			$expr = new AS2ArrayAssessor;
-			$expr->array = array_pop($cxt->stack);
-			$expr->index = $name;
-			array_push($cxt->stack, $expr);
+			array_push($cxt->stack, new AS2ArrayAssessor($name, $object));
 		}
 	}
 
 	protected function doGetProperty($cxt) {
-		static $propertyNames = array('_x', '_y', '_xscale', '_yscale', '_currentframe', '_totalframes', '_alpha', '_visible', '_width', '_height', '_rotation', '_target', '_framesloaded', '_name', '_droptarget', '_url', '_highquality', '_focusrect', '_soundbuftime', '_quality', '_xmouse', '_ymouse' );
-		$index = array_pop($cxt->stack);
-		$expr = new AS2Variable;
-		$expr->name = array_pop($cxt->stack);
-		array_push($cxt->stack, $expr);
-		$this->doBinaryOp($cxt, '.', 1);
+		$id = array_pop($cxt->stack);
+		$object = array_pop($cxt->stack);
+		$name = $this->getPropertyName($id);
+		$var = new AS2Identifier($name);
+		array_push($cxt->stack, new AS2BinaryOperation($var, '.', $object, 1));
 	}
 
 	protected function doGetTime($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'getTimer');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'getTimer', array()));
 	}
 
 	protected function doGetURL($cxt) {
-		$target = $this->readString($cxt);
-		$url = $this->readString($cxt);
-		$flags = ($target == '_level0' || $target == '_level1') ? 0x02 : 0;
-		array_push($cxt->stack, $url);
-		array_push($cxt->stack, $target);
-		$this->doGetURL2($cxt, chr($flags));
+		$url = $cxt->op->op1;
+		$target = $cxt->op->op2;
+		$arguments = array($url, $target);
+		$name = ($target == '_level0' || $target == '_level1') ? 'loadMovie' : 'getURL';
+		return new AS2FunctionCall(null, $name, $arguments);
 	}
 
 	protected function doGetURL2($cxt) {
-		$flags = $this->readUI8($cxt);
-		$method = $flags >> 6;
+		$flags = $cxt->op->op1;		
 		$target = array_pop($cxt->stack);
 		$url = array_pop($cxt->stack);
-		$argumentCount = 0;
-		if($method == 1) {
-			array_push($cxt->stack, 'GET');
-			$argumentCount++;
-		} else if($method == 2) {
-			array_push($cxt->stack, 'POST');
-			$argumentCount++;
+		$arguments = array($url, $target);
+		switch($flags >> 6) {
+			case 1: $arguments[] = 'GET'; break;
+			case 2: $arguments[] = 'POST'; break;
 		}
-		if($flags & 0x02) {
-			// loadVariable or loadMovie
-			if($flags & 0x01) {
-				array_push($cxt->stack, $target);
-				array_push($cxt->stack, $url);
-				$argumentCount += 2;
-				array_push($cxt->stack, $argumentCount);
-				array_push($cxt->stack, 'loadVariable');
-				$this->doCallFunction($cxt);
-			} else {
-				array_push($cxt->stack, $url);
-				$argumentCount += 1;
-				array_push($cxt->stack, $argumentCount);				
-				array_push($cxt->stack, $target);
-				$this->doGetVariable($cxt);
-				array_push($cxt->stack, 'loadMovie');
-				$this->doCallMethod($cxt);
-			}
-		} else {
-			array_push($cxt->stack, $target);
-			array_push($cxt->stack, $url);
-			$argumentCount += 2;
-			array_push($cxt->stack, $argumentCount);
-			array_push($cxt->stack, 'getURL');
-			$this->doCallFunction($cxt);
+		switch($flags & 0x03) {
+			case 2: $name = 'loadMovie'; break;
+			case 3: $name = 'loadVariables'; break;
+			default: $name = 'getURL'; break;
 		}
+		return new AS2FunctionCall(null, $name, $arguments);
 	}
 
 	protected function doGetVariable($cxt) {
-		$expr = new AS2Variable;
-		$expr->name = array_pop($cxt->stack);
-		array_push($cxt->stack, $expr);
+		array_push($cxt->stack, new AS2Identifier(array_pop($cxt->stack)));
 	}
 
 	protected function doGotoFrame($cxt) {
-		$index = $this->readUI16($cxt);
-		array_push($cxt->stack, $index);
-		array_push($cxt->stack, 'gotoAndPlay');
-		return $this->doCallTargetMethod($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'gotoAndPlay', array($cxt->op->op1));
 	}
 
 	protected function doGotoFrame2($cxt) {
-		$flags = $this->readUI16($cxt);
-		if($flags & 0x02) {
-			$sceneBias = $this->readUI16($cxt);
-			$frame = array_pop($cxt->stack);
-			array_push($cxt->stack, $frame + $sceneBias);
+		$flags = $cxt->op->op1;
+		$sceneBias = $cxt->op->op2;
+		$frame = array_pop($cxt->stack);
+		$arguments = array();
+		if($sceneBias !== null) {
+			// TODO: handle scene name 
 		}
-		array_push($cxt->stack, 1);
-		if($flags & 0x01) {
-			array_push($cxt->stack, 'gotoAndPlay');
-		} else {
-			array_push($cxt->stack, 'gotoAndStop');
-		}
-		return $this->doCallTargetMethod($cxt);
+		$arguments[] = $frame;
+		$name = ($flags & 0x01) ? 'gotoAndPlay' : 'gotoAndStop';
+		$object = $cxt->currentTarget;
+		return new AS2FunctionCall($object, $name, $arguments);
 	}
 
 	protected function doGoToLabel($cxt) {
-		$label = $this->readString($cxt);
-		array_push($cxt->stack, $label);
-		array_push($cxt->stack, 'gotoAndPlay');
-		return $this->doCallTargetMethod($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'gotoAndPlay', array($cxt->op->op1));
 	}
 
 	protected function doGreater($cxt) {
-		$this->doBinaryOp($cxt, '>', 7);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '>', array_pop($cxt->stack), 7));
 	}
 
 	protected function doIf($cxt) {
-		$offset = $this->readSI16($cxt);
-		$ctrl = new AS2ConditionalBranch;
-		$ctrl->condition = array_pop($cxt->stack);
-		$ctrl->position = $ctrl->positionIfTrue = $cxt->nextPosition + $offset;
-		$ctrl->positionIfFalse = $cxt->nextPosition;
-		return $ctrl;
+		// the if instruction is 5 bytes long
+		return new AS2ConditionalBranch(array_pop($cxt->stack), $cxt->lastPosition + 5, $cxt->op->op1);
 	}
 
 	protected function doImplementsOp($cxt) {
@@ -1171,74 +875,61 @@ class AS2Decompiler {
 	}
 
 	protected function doInitArray($cxt) {
-		$expr = new AS2ArrayInitializer;
 		$count = array_pop($cxt->stack);
-		for($i = 0; $i < $count; $i++) {
-			$expr->items[] = array_pop($cxt->stack);
-		}
-		array_push($cxt->stack, $expr);
+		$items = array_reverse(array_splice($cxt->stack, -$count));
+		array_push($cxt->stack, new AS2ArrayInitializer($items));
 	}
 
 	protected function doInitObject($cxt) {
-		$expr = new AS2ObjectInitializer;
 		$count = array_pop($cxt->stack);
+		$items = array();
 		for($i = 0; $i < $count; $i++) {
 			$value = array_pop($cxt->stack);
 			$name = array_pop($cxt->stack);
-			$expr->items[$name] = $value;
+			$items[$name] = $value;
 		}
-		array_push($cxt->stack, $expr);
+		array_push($cxt->stack, new AS2ObjectInitializer($items));
 	}
 
 	protected function doInstanceOf($cxt) {
-		$this->doBinaryOp($cxt, 'instanceof', 7);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), 'instanceof', array_pop($cxt->stack), 7));
 	}
 
 	protected function doJump($cxt) {
-		$offset = $this->readSI16($cxt);
-		$ctrl = new AS2UnconditionalBranch;
-		$ctrl->position = $cxt->nextPosition + $offset;
-		return $ctrl;
+		// the jump instruction is also 5 bytes long
+		return new AS2UnconditionalBranch($cxt->lastPosition + 5, $cxt->op->op1);
 	}
 
 	protected function doLess($cxt) {
-		$this->doBinaryOp($cxt, '<', 7);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '<', array_pop($cxt->stack), 7));
 	}
 
 	protected function doLess2($cxt) {
-		$this->doBinaryOp($cxt, '<', 7);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '<', array_pop($cxt->stack), 7));
 	}
 
 	protected function doMBAsciiToChar($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'mbchr');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'mbchr', array_splice($cxt->stack, -1)));
 	}
 
 	protected function doMBCharToAscii($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'mbord');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'mbord', array_splice($cxt->stack, -1)));
 	}
 
 	protected function doMBStringExtract($cxt) {
-		array_push($cxt->stack, 3);
-		array_push($cxt->stack, 'mbsubstring');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'mbsubstring', array_splice($cxt->stack, -3)));
 	}
 
 	protected function doMBStringLength($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'mblength');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'mblength', array_splice($cxt->stack, -1)));
 	}
 
 	protected function doModulo($cxt) {
-		$this->doBinaryOp($cxt, '%', 4);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '%', array_pop($cxt->stack), 4));
 	}
 
 	protected function doMultiply($cxt) {
-		$this->doBinaryOp($cxt, '*', 4);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '*', array_pop($cxt->stack), 4));
 	}
 
 	protected function doNewMethod($cxt) {
@@ -1246,28 +937,27 @@ class AS2Decompiler {
 	}
 
 	protected function doNewObject($cxt) {
-		$this->doCallFunction($cxt);
-		$this->doUnaryOp($cxt, 'new', 1);
+		$name = array_pop($cxt->stack);
+		$argumentCount = array_pop($cxt->stack);
+		$arguments = array_reverse(array_splice($cxt->stack, -$argumentCount));
+		$constructor = new AS2Functioncall(null, $name, $arguments);
+		array_push($cxt->stack, new AS2UnaryOperation('new', $constructor, 3));
 	}
 
 	protected function doNextFrame($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'nextFrame');
-		return $this->doCallTargetMethod($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'nextFrame', array());
 	}
 
 	protected function doNot($cxt) {
-		$this->doUnaryOp($cxt, '!', 3);
+		array_push($cxt->stack, new AS2UnaryOperation('!', array_pop($cxt->stack), 3));
 	}
 
 	protected function doOr($cxt) {
-		$this->doBinaryOp($cxt, '||', 13);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '||', array_pop($cxt->stack), 13));
 	}
 
 	protected function doPlay($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'play');
-		return $this->doCallTargetMethod($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'play', array());
 	}
 
 	protected function doPop($cxt) {
@@ -1280,96 +970,74 @@ class AS2Decompiler {
 	}
 
 	protected function doPrevFrame($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'prevFrame');
-		return $this->doCallTargetMethod($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'prevFrame', array());
 	}
 
 	protected function doPush($cxt) {
-		do {
-			$type = $this->readUI8($cxt);
-			switch($type) {
-				case 0: $value = $this->readString($cxt); break;
-				case 1: $value = $this->readF32($cxt); break;
-				case 2: $value = null; break;
-				case 3: $value = self::$undefined; break;
-				case 4: $value = $cxt->registers[ $this->readUI8($cxt) ]; break;
-				case 5: $value = $this->readUI8($cxt); break;
-				case 6: $value = $this->readF64($cxt); break;
-				case 7: $value = $this->readUI32($cxt); break;
-				case 8: $value = $this->constantPool[ $this->readUI8($cxt) ]; break;
-				case 9: $index = $value = $this->constantPool[ $this->readUI16($cxt) ]; break;
-			}
+		foreach($cxt->op->op1 as $value) {
 			array_push($cxt->stack, $value);
-		} while($cxt->dataRemaining);
+		}
 	}
 
 	protected function doPushDuplicate($cxt) {
-		$index = count($cxt->stack) - 1;
-		array_push($cxt->stack, $cxt->stack[$index]);
+		array_push($cxt->stack, $cxt->stack[ count($cxt->stack) - 1 ]);
 	}
 
 	protected function doRandomNumber($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'random');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'random', array_splice($this->stack, -1)));
 	}
 
 	protected function doRemoveSprite($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'removeMovieClip');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall(null, 'removeMovieClip', array_splice($this->stack, -1));
 	}
 
 	protected function doReturn($cxt) {
-		$expr = new AS2Return;
-		$expr->operand = array_pop($cxt->stack);
-		return $expr;
+		return new AS2Return(array_pop($cxt->stack));
 	}
 
 	protected function doSetMember($cxt) {
 		$value = array_pop($cxt->stack);
-		$this->doGetMember($cxt);
-		array_push($cxt->stack, $value);
-		$this->doBinaryOp($cxt, '=', 15);
-		$expr = array_pop($cxt->stack);
-		return $expr;
+		$name = array_pop($cxt->stack);
+		$object = array_pop($cxt->stack);
+		if(is_string($name) && preg_match('/^\w+$/', $name)) {
+			$name = new AS2Identifier($name);
+			$var = new AS2BinaryOperation($name, '.', $object, 1);
+		} else {
+			$var = new AS2ArrayAssessor($name, $object);
+		}
+		return new AS2BinaryOperation($value, '=', $var, 15);
 	}
 
 	protected function doSetProperty($cxt) {
+		$id = $cxt->op->op1;
 		$value = array_pop($cxt->stack);
-		$this->doGetProperty($cxt);
-		array_push($cxt->stack, $value);
-		$this->doBinaryOp($cxt, '=', 15);
-		$expr = array_pop($cxt->stack);
-		return $expr;
+		$object = array_pop($cxt->stack);
+		$name = new AS2Identifier($this->getPropertyName($id));
+		$var = new AS2BinaryOperation($name, '.', $object, 1);
+		return new AS2BinaryOperation($value, '=', $var, 15);
 	}
 
 	protected function doSetTarget($cxt) {
+		// TODO
 		$name = $this->readString($cxt);
-		array_push($cxt->stack, $name);
-		$this->doSetTarget2($cxt);
+		$this->currentTarget = $name;
 	}
 
 	protected function doSetTarget2($cxt) {
+		// TODO--need to do eval if it's string not a constant
 		$name = array_pop($cxt->stack);
 		if($name) {
-			$expr = new AS2Variable;
-			$expr->name = $name;
-			$cxt->target = $expr;
+			$cxt->currentTarget = new AS2Identifier($name);
 		} else {
-			$cxt->target = null;
+			$cxt->currentTarget = null;
 		}
 	}
 
 	protected function doSetVariable($cxt) {
 		$value = array_pop($cxt->stack);
-		$this->doGetVariable($cxt);
-		array_push($cxt->stack, $value);
-		$this->doBinaryOp($cxt, '=', 15);
-		$expr = array_pop($cxt->stack);
-		return $expr;
+		$name = array_pop($cxt->stack);
+		$var = new AS2Identifier($name);
+		return new AS2BinaryOperation($value, '=', $var, 15);
 	}
 
 	protected function doStackSwap($cxt) {
@@ -1383,131 +1051,74 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		$lockCenter = array_pop($cxt->stack);
 		$constrain = array_pop($cxt->stack);
-		$argumentCount = 0;
+		$arguments = array($lockCenter);
 		if($constrain) {
-			$y2 = array_pop($cxt->stack);
-			$x2 = array_pop($cxt->stack);
-			$y1 = array_pop($cxt->stack);
-			$x1 = array_pop($cxt->stack);
-			
-			array_push($cxt->stack, $y2);
-			array_push($cxt->stack, $x2);
-			array_push($cxt->stack, $y1);
-			array_push($cxt->stack, $x1);
-			$argumentCount += 4;
+			$arguments = array_splice($arguments, 1, 0, array_splice($cxt->stack, -4));
 		}
-		if($lockCenter || $constrain) {
-			array_push($cxt->stack, $lockCenter);
-			$argumentCount++;
-		}
-		array_push($cxt->stack, $object);
-		$argumentCount++;
-		array_push($cxt->stack, $argumentCount);
-		array_push($cxt->stack, 'startDrag');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall($object, 'startDrag', $arguments);
 	}
 
 	protected function doStop($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'stop');
-		return $this->doCallTargetMethod($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'stop', array());
 	}
 
 	protected function doStopSounds($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'stopAllSounds');
-		return $this->doCallFunction($cxt);
+		return new AS2FunctionCall($cxt->currentTarget, 'stopAllSounds', array());
 	}
 
 	protected function doStoreRegister($cxt) {
-		$regIndex = $this->readUI8($cxt);
+		$register = $cxt->op->op1;
 		$stackIndex = count($cxt->stack) - 1;
 		if($stackIndex >= 0) {
 			$value = $cxt->stack[$stackIndex];
 			if($value instanceof AS2Enumeration) {
-				$enumeration = $value;
-				if(isset($cxt->registers[$regIndex])) {
-					$var = $cxt->registers[$regIndex];
-					$enumeration->variable = $var;
-				} else {
-					$var = new AS2Variable;
-					$expr = new AS2VariableDeclaration;
-					$expr->name =& $var->name;
-					$var->name = 'reg' . $regIndex;
-					$cxt->registers[$regIndex] = $var;
-					$enumeration->variable = $expr;
-				}
 			} else {
-				if(isset($cxt->registers[$regIndex])) {
-					array_push($cxt->stack, $cxt->registers[$regIndex]);
-					array_push($cxt->stack, $value);
-					$this->doBinaryOp($cxt, '=', 15);
-					$expr = array_pop($cxt->stack);
-				} else {
-					$var = new AS2Variable;
-					$expr = new AS2VariableDeclaration;
-					$expr->value = $value;
-					$expr->name =& $var->name;
-					$var->name = 'reg' . $regIndex;
-					$cxt->registers[$regIndex] = $var;
-				}
-				return $expr;
 			}
 		}
 	}
 
 	protected function doStrictEquals($cxt) {
-		$this->doBinaryOp($cxt, '===', 8);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '===', array_pop($cxt->stack), 8));
 	}
 
 	protected function doStringAdd($cxt) {
-		$this->doBinaryOp($cxt, '+', 5);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '+', array_pop($cxt->stack), 5));
 	}
 
 	protected function doStringEquals($cxt) {
-		$this->doBinaryOp($cxt, '==', 8);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '==', array_pop($cxt->stack), 8));
 	}
 
 	protected function doStringExtract($cxt) {
-		array_push($cxt->stack, 3);
-		array_push($cxt->stack, 'substring');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'substring', array_splice($cxt->stack, -3)));
 	}
 
 	protected function doStringGreater($cxt) {
-		$this->doBinaryOp($cxt, '>', 7);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '>', array_pop($cxt->stack), 7));
 	}
 
 	protected function doStringLength($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'length');
-		$this->doCallFunction($cxt);
+		array_push($cxt->stack, new AS2FunctionCall(null, 'substring', array_splice($cxt->stack, -1)));
 	}
 
 	protected function doStringLess($cxt) {
-		$this->doBinaryOp($cxt, '<', 7);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '<', array_pop($cxt->stack), 7));
 	}
 
 	protected function doSubtract($cxt) {
-		$this->doBinaryOp($cxt, '-', 5);
+		array_push($cxt->stack, new AS2BinaryOperation(array_pop($cxt->stack), '-', array_pop($cxt->stack), 5));
 	}
 
 	protected function doTargetPath($cxt) {
-		// do nothing
+		array_push($cxt->stack, new AS2FunctionCall(null, 'string', array_splice($cxt->stack, -1)));
 	}
 
 	protected function doToggleQualty($cxt) {
-		array_push($cxt->stack, 0);
-		array_push($cxt->stack, 'toggleHighQuality');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall(null, 'toggleHighQuality', array());
 	}
 
 	protected function doToInteger($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'int');
-		$this->doCallFunction($cxt);
+		return new AS2FunctionCall(null, 'int', array_splice($cxt->stack, -1));
 	}
 
 	protected function doToNumber($cxt) {
@@ -1520,15 +1131,10 @@ class AS2Decompiler {
 				case 'string': $value = is_numeric($value) ? (double) $value : NAN; break;
 			}
 			array_push($cxt->stack, $value);
-		} else if($value == self::$undefined) {
-			$value = 'undefined';
-			array_push($cxt->stack, $value);
+		} else if($value instanceof AVM1Undefined) {
+			array_push($cxt->stack, NAN);
 		} else {
-			array_push($cxt->stack, 'valueOf()');
-			$this->doGetMember($cxt);
-			array_push($cxt->stack, 1);
-			array_push($cxt->stack, 'parseFloat');
-			$this->doCallFunction($cxt);
+			array_push($cxt->stack, new AS2FunctionCall(null, 'parseFloat', array($value)));
 		}
 	}
 
@@ -1542,242 +1148,93 @@ class AS2Decompiler {
 				case 'string': break;
 			}
 			array_push($cxt->stack, $value);
-		} else if($value == self::$undefined) {
-			$value = 'undefined';
-			array_push($cxt->stack, $value);
+		} else if($value instanceof AVM1Undefined) {
+			array_push($cxt->stack, 'undefined');
 		} else {
-			array_push($cxt->stack, 'toString');
-			$this->doGetMember($cxt);
+			array_push($cxt->stack, new AS2FunctionCall($value, 'toString', array()));
 		}
 	}
 
 	protected function doTrace($cxt) {
-		array_push($cxt->stack, 1);
-		array_push($cxt->stack, 'trace');
-		$this->doCallFunction($cxt);
-		return $this->doPop($cxt);
+		return new AS2FunctionCall(null, 'trace', array_splice($cxt->stack, -1));
 	}
 
 	protected function doTry($cxt) {
-		$expr = new AS2Try;
-		$flags = $this->readUI8($cxt);
-		$trySize = $this->readUI16($cxt);
-		$catchSize = $this->readUI16($cxt);
-		$finallySize = $this->readUI16($cxt);
-		if($flags & 0x04) {	// CatchInRegister
-			$catchName = null;
-			$catchRegister = $this->readUI8($cxt);
-		} else {
-			$catchName = $this->readString($cxt);
-			$catchRegister = null;
-		}
-		$cxt->dataRemaining = $trySize + $catchSize + $finallySize;
-		
-		$tryByteCodes = $this->readBytes($cxt, $trySize);
-		$catchByteCodes = ($flags & 0x01) ? $this->readBytes($cxt, $catchSize) : null;
-		$finallyByteCodes = ($flags & 0x02) ? $this->readBytes($cxt, $finallySize) : null;
-		
-		// save the context
-		$cxtS = clone $cxt;
+		$tryOps = $cxt->op->op6;
+		$catchVar = $cxt->op->op5;
+		$catchOps = $cxt->op->op7;
+		$finallyOps = $cxt->op->op8;
 		
 		// decompile try block
-		$function = new AS2Function;
-		$cxt->byteCodes = $tryByteCodes;
-		$cxt->byteCodeLength = $trySize;
-		$cxt->lastPosition = $cxt->nextPosition = 0;
-		$this->decompileFunctionBody($cxt, $function);
-		$expr->tryExpressions = $function->expressions;
+		$try = new AS2Function(null, null);
+		$cxtT = new AS2DecompilerContext;
+		$cxtT->opQueue = $tryByteCodes;
+		$this->decompileFunctionBody($cxtT, $try);
 		
-		if($flags & 0x01) {
+		if($catchOps) {
 			// decompile catch block
-			$function = new AS2Function;
-			if($catchRegister) {
-				if(!isset($cxt->registers[$catchRegister])) {
-					$var = new AS2Variable;
-					$var->name = 'error';
-					$cxt->registers[$catchRegister] = $var;
-				}
-				$expr->catchObject = $cxt->registers[$catchRegister];
-			} else {
-				$var = new AS2Variable;
-				$var->name = $catchName;
-				$expr->catchObject = $var;
+			if($catchVar instanceof AVM1Register) {
+				$catchVar = $catchVar->name ? $catchVar->name : "REG_$catchVar->index";
 			}
-			$cxt->byteCodes = $catchByteCodes;
-			$cxt->byteCodeLength = $catchSize;
-			$cxt->lastPosition = $cxt->nextPosition = 0;
-			$this->decompileFunctionBody($cxt, $function);
-			$expr->catchExpressions = $function->expressions;
+			$catch = new AS2Function(null, array($catchVar));
+			$cxtC->opQueue = $catchOps;
+			$this->decompileFunctionBody($cxtC, $catch);
+		} else {
+			$catch = null;
 		}
-		if($flags & 0x02) {
+		if($finallyOps) {
 			// decompile finally block
-			$function = new AS2Function;
-			$byteCodes = $this->readBytes($cxt, $finallySize);
-			$cxt->byteCodes = $finallyByteCodes;
-			$cxt->byteCodeLength = $finallySize;
-			$cxt->lastPosition = $cxt->nextPosition = 0;
-			$this->decompileFunctionBody($cxt, $function);
-			$expr->finallyExpressions = $function->expressions;
+			$finally = new AS2Function(null, null);
+			$cxtF->opQueue = $finallyOps;
+			$this->decompileFunctionBody($cxtF, $finally);
+		} else {
+			$finally = null;
 		}
-		
-		// restore context
-		$cxt->byteCodes = $cxtS->byteCodes;
-		$cxt->byteCodeLength = $cxtS->byteCodeLength;
-		$cxt->lastPosition = $cxtS->lastPosition;
-		$cxt->nextPosition = $cxtS->nextPosition;
-		$cxt->stack = $cxtS->stack;
-		
-		return $expr;
+		return AS2TryCatch($try, $catch, $finally);
 	}
 
 	protected function doTypeOf($cxt) {
-		$this->doUnaryOp($cxt, 'typeof', 3);
+		array_push($cxt->stack, new AS2UnaryOperation('typeof', array_pop($cxt->stack), 3));
 	}
 
 	protected function doWaitForFrame($cxt) {
-		$frame = $this->readUI16($cxt);
-		array_push($cxt->stack, $frame);
-		return $this->doWaitForFrame2($cxt);
+		$frame = $cxt->op->op1;
+		$operations = $cxt->op->op3;
+		$ifFrameLoaded = new AS2IfFrameLoaded($frame);
+		$cxtF = new AS2DecompilerContext;
+		$cxtF->opQueue = $operations;
+		$this->decompileFunctionBody($cxtF, $ifFrameLoaded);
+		return $ifFrameLoaded;
 	}
 
 	protected function doWaitForFrame2($cxt) {
-		$expr = new AS2IfFrameLoaded;
-		$expr->frame = array_pop($cxt->stack);
-		$skipCount = $this->readUI8($cxt);
-		// calculate the length of the bytecodes based on skipCount
-		$startIndex = $cxt->nextPosition;
-		while($skipCount-- > 0 && $cxt->nextPosition < $cxt->byteCodeLength) {
-			$cxt->dataRemaining = 1;
-			$code = $this->readUI8($cxt);
-			if($code >= 0x80) {
-				$cxt->dataRemaining = 2;
-				$cxt->nextPosition += $this->readUI16($cxt);
-			} 
-		}
-		$size = $cxt->nextPosition - $startIndex;		
-		$cxt->nextPosition = $startIndex;		
-		$cxt->dataRemaining = $size;
-		$byteCodes = $this->readBytes($cxt, $size);
-		$cxt = $this->createContext($byteCodes);
-		$this->decompileFunctionBody($cxt, $expr);
-		return $expr;
+		$operations = $cxt->op->op2;
+		$frame = array_pop($cxt->stack);
+		$ifFrameLoaded = new AS2IfFrameLoaded($frame);
+		$cxtF = new AS2DecompilerContext;
+		$cxtF->opQueue = $operations;
+		$this->decompileFunctionBody($cxtF, $ifFrameLoaded);
+		return $ifFrameLoaded;
 	}
 
 	protected function doWith($cxt) {
-		$expr = new AS2With;
-		$expr->object = array_pop($cxt->stack);
-		$size = $this->readUI16($cxt);
-		$cxt->dataRemaining = $size;
-		$byteCodes = $this->readBytes($cxt, $size);
-		$cxt = $this->createContext($byteCodes);
-		$this->decompileFunctionBody($cxt, $expr);
-		return $expr;
-	}
-	
-	protected function readString($cxt) {
-		$zeroPos = strpos($cxt->byteCodes, "\x00", $cxt->nextPosition);
-		if($zeroPos === false) {
-			$zeroPos = strlen($cxt->byteCodes);
-		}
-		$length = $zeroPos - $cxt->nextPosition;
-		if($length < $cxt->dataRemaining) {
-			$string = substr($cxt->byteCodes, $cxt->nextPosition, $length);
-			$cxt->nextPosition += $length + 1;
-			$cxt->dataRemaining -= $length + 1;
-			return $string;
-		} else {
-			$cxt->dataRemaining = 0;
-		}
-	}
-	
-	protected function readBytes($cxt, $count) {
-		if($count <= $cxt->dataRemaining) {
-			$data = substr($cxt->byteCodes, $cxt->nextPosition, $count);
-			$cxt->nextPosition += $count;
-			$cxt->dataRemaining -= $count;
-			return $data;
-		} else {
-			$cxt->dataRemaining = 0;
-		}
-	}
-	
-	protected function readUI8($cxt) {
-		if($cxt->dataRemaining >= 1) {
-			$value = ord($cxt->byteCodes[$cxt->nextPosition++]);
-			$cxt->dataRemaining--;
-			return $value;
-		}
-	}
-	
-	protected function readUI16($cxt) {
-		if($cxt->dataRemaining >= 2) {
-			$data = substr($cxt->byteCodes, $cxt->nextPosition, 2);
-			$array = unpack('v', $data);
-			$cxt->nextPosition += 2;
-			$cxt->dataRemaining -= 2;
-			return $array[1];
-		} else {
-			$cxt->dataRemaining = 0;
-		}
-	}
-	
-	protected function readSI16($cxt) {
-		$value = $this->readUI16($cxt);
-		if($value !== null) {
-			if($value & 0x00008000) {
-				$value |= -1 << 16;
-			}
-			return $value;
-		}
-	}
-	
-	protected function readUI32($cxt) {
-		if($cxt->dataRemaining >= 4) {
-			$data = substr($cxt->byteCodes, $cxt->nextPosition, 4);
-			$array = unpack('V', $data);
-			$cxt->nextPosition += 4;
-			$cxt->dataRemaining -= 4;
-			return $array[1];
-		} else {
-			$cxt->dataRemaining = 0;
-		}
-	}
-	
-	protected function readF32($cxt) {
-		if($cxt->dataRemaining >= 4) {
-			$data = substr($cxt->byteCodes, $cxt->nextPosition, 4);
-			$array = unpack('f', $data);
-			$cxt->nextPosition += 4;
-			$cxt->dataRemaining -= 4;
-			return $array[1];
-		} else {
-			$cxt->dataRemaining = 0;
-		}
-	}
-	
-	protected function readF64($cxt) {
-		if($cxt->dataRemaining >= 8) {
-			$data = substr($cxt->byteCodes, $cxt->nextPosition, 8);
-			$array = unpack('d', $data);
-			$cxt->nextPosition += 8;
-			$cxt->dataRemaining -= 8;
-			return $array[1];
-		} else {
-			$cxt->dataRemaining = 0;
-		}
+		$operations = $cxt->op->op2;
+		$object = array_pop($cxt->stack);
+		$with = new AS2With($object);
+		$cxtW = new AS2DecompilerContext;
+		$cxtW->opQueue = $operations;
+		$this->decompileFunctionBody($cxtW, $with);
+		return $with;
 	}
 }
 
 class AS2DecompilerContext {
-	public $byteCodes;
-	public $byteCodeLength;
-	public $lastPosition;
-	public $nextPosition;
-	public $dataRemaining;
-
+	public $op;
+	public $opQueue;
+	public $lastPosition = 0;
+	public $nextPosition = 0;
 	public $stack = array();
-	public $registers = array();
-	public $target;
+	public $currentTarget;
 	
 	public $relatedBranch;
 	public $branchOnTrue;
@@ -1786,13 +1243,22 @@ class AS2DecompilerContext {
 class AS2Expression {
 }
 
-class AS2Variable extends AS2Expression {
-	public $name;
+class AS2Identifier extends AS2Expression {
+	public $string;
+	
+	public function __construct($name) {
+		$this->string = $name;
+	}
 }
 
 class AS2VariableDeclaration extends AS2Expression {
 	public $name;
 	public $value;
+	
+	public function __construct($value, $name) {
+		$this->name = $name;
+		$this->value = $value;
+	}
 }
 
 class AS2Operation extends AS2Expression {
@@ -1803,39 +1269,86 @@ class AS2BinaryOperation extends AS2Operation {
 	public $operator;
 	public $operand1;
 	public $operand2;
+	
+	public function __construct($operand2, $operator, $operand1, $precedence) {
+		$this->operator = $operator;
+		$this->operand1 = $operand1;
+		$this->operand2 = $operand2;
+		$this->precedence = $precedence;
+	}
 }
 
 class AS2UnaryOperation extends AS2Operation {
 	public $operator;
 	public $operand;
+	
+	public function __construct($operator, $operand, $precedence) {
+		$this->operator = $operator;
+		$this->operand = $operand;
+		$this->precedence = $precedence;
+	}
 }
 
 class AS2TernaryConditional extends AS2Operation {
 	public $condition;
 	public $valueIfTrue;
 	public $valueIfFalse;
+	
+	public function __construct($condition, $valueIfTrue, $valueIfFalse) {
+		$this->condition = $condition;
+		$this->valueIfTrue = $valueIfTrue;
+		$this->valueIfFalse = $valueIfFalse;
+	}
 }
 
 class AS2Return extends AS2Expression {
-	public $operand;
+	public $value;
+	
+	public function __construct($value) {
+		$this->value = $value;
+	}
 }
 
 class AS2FunctionCall extends AS2Expression {
 	public $name;
-	public $arguments = array();
+	public $arguments;
+	
+	public function __construct($object, $name, $arguments) {
+		if(is_string($name)) {
+			$name = new AS2Identifier($name);
+		}
+		if($object) {
+			$name = new AS2BinaryOperation($name, '.', $object, 1);
+		}
+		$this->name = $name;
+		$this->arguments = $arguments;
+	}
 }
 
 class AS2ArrayInitializer extends AS2Expression {
 	public $items = array();
+	
+	public function __construct($items) {
+		$this->items = $items;
+	}
 }
 
 class AS2ArrayAssessor extends AS2Expression {
 	public $array;
 	public $index;
+	
+	public function __construct($index, $array) {
+		$this->array = $array;
+		$this->index = $index;
+	}
 }
 
 class AS2ObjectInitializer extends AS2Expression {
 	public $items = array();
+	
+	public function __construct($items) {
+		$this->items = $items;
+	}
 }
 
 class AS2Break extends AS2Expression {
@@ -1861,11 +1374,18 @@ class AS2While extends AS2DoWhile {
 class AS2ForIn extends AS2DoWhile {
 }
 
-class AS2Try extends AS2Expression {
+class AS2TryCatch extends AS2Expression {
 	public $tryExpressions;
 	public $catchObject;
 	public $catchExpressions;
 	public $finallyExpressions;
+	
+	public function __construct($try, $catch, $finally) {
+		$this->tryExpressions = $try->expressions;
+		$this->catchObject = $catch->arguments[0];
+		$this->catchExpressions = $catch->expressions;
+		$this->finallyExpressions = $finally->expressions;
+	}
 }
 
 class AS2Throw extends AS2Expression {
@@ -1874,17 +1394,30 @@ class AS2Throw extends AS2Expression {
 class AS2With extends AS2Expression {
 	public $object;
 	public $expressions = array();
+	
+	public function __construct($object) {
+		$this->object = $object;
+	}
 }
 
 class AS2IfFrameLoaded extends AS2Expression {
 	public $frame;
 	public $expressions = array();
+	
+	public function __construct($frame) {
+		$this->frame = $frame;
+	}
 }
 
 class AS2Function extends AS2Expression {
 	public $name;
 	public $arguments = array();
 	public $expressions = array();
+	
+	public function __construct($name, $arguments) {
+		$this->name = $name;
+		$this->arguments = $arguments;
+	}
 }
 
 class AS2FlowControl {
@@ -1897,13 +1430,23 @@ class AS2Enumeration {
 
 class AS2UnconditionalBranch extends AS2FlowControl {
 	public $position;
+	
+	public function __construct($position, $offset) {
+		$this->position = $position + $offset;
+	}
 }
 
 class AS2ConditionalBranch extends AS2FlowControl {
 	public $condition;
 	public $position;
-	public $positionIfTrue = array();
-	public $positionIfFalse = array();
+	public $positionIfTrue;
+	public $positionIfFalse;
+	
+	public function __construct($condition, $position, $offset) {
+		$this->condition = $condition;
+		$this->positionIfTrue = $position + $offset;
+		$this->positionIfFalse = $this->position = $position;
+	}
 }
 
 class AS2BasicBlock {
