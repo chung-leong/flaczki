@@ -24,11 +24,6 @@ class ASSourceCodeDumper {
 	protected function processTags($tags) {
 		foreach($tags as $tag) {
 			if($tag instanceof SWFDoABCTag) {
-				$decoder2 = new AVM2Decoder;
-				$scripts = $decoder2->decode($tag->abcFile);
-				foreach($scripts as $script) {
-					$this->printScript($script);
-				}
 			} else if($tag instanceof SWFDoActionTag || $tag instanceof SWFDoInitActionTag) {
 				// an empty tag would still contain the zero terminator
 				if(strlen($tag->actions) > 1) {
@@ -38,10 +33,8 @@ class ASSourceCodeDumper {
 					} else {
 						echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
 					}
-					$decoder1 = new AVM1Decoder;
-					$operations = $decoder1->decode($tag->actions);
 					$decompiler = new AS2Decompiler;
-					$statements = $decompiler->decompile($operations);
+					$statements = $decompiler->decompile($tag->actions);
 					$this->printStatements($statements);
 				}
 			} else if($tag instanceof SWFPlaceObject2Tag) {
@@ -74,10 +67,8 @@ class ASSourceCodeDumper {
 							}
 						}
 						echo ") {\n";
-						$decoder1 = new AVM1Decoder;
-						$operations = $decoder1->decode($clipAction->actions);
 						$decompiler = new AS2Decompiler;
-						$statements = $decompiler->decompile($operations);
+						$statements = $decompiler->decompile($clipAction->actions);
 						echo "<div class='code-block'>\n";
 						$this->printStatements($statements);
 						echo "</div>}\n";
