@@ -2,741 +2,233 @@
 
 class AS3Decompiler {
 
-	protected $abcFile;
-	
-	protected $names = array();
-	protected $namespaces = array();
-	protected $defaultNamespace;
-	protected $nameThis;
-	protected $nameSuper;
-	
-	protected $global;
-	protected $globalClass;
-	
-	protected $literalNaN;
-	protected $literalTrue;
-	protected $literalFalse;
-	protected $literalNull;
-	protected $literalUndefined;
-	protected $literalOne;
-	
-	protected $typeAny;
-	protected $typeBoolean;
-	protected $typeClass;
-	protected $typeUInt;
-	protected $typeInt;
-	protected $typeString;
-	protected $typeNumber;
-	protected $typeObject;
-	protected $typeArray;
-	protected $typeXML;
-	protected $typeUndefined;
+	protected $imports;
 	
 	public function decompile($abcFile) {
-		$this->abcFile = $abcFile;
+		$decoder = new AVM2Decoder;
+		$scripts = $decoder->decode($abcFile);
+		$packages = array();
 		
-		// set up literals and other fixed objects
-		$this->defaultNamespace = $this->getNamespace(0);
-		
-		$this->nameThis = $this->obtainQName('this');
-		$this->nameSuper = $this->obtainQName('super');
-		
-		$this->typeAny = $this->getName(0);
-		$this->typeBoolean = $this->obtainQName('Boolean');
-		$this->typeClass = $this->obtainQName('Class');
-		$this->typeUInt = $this->obtainQName('uint');
-		$this->typeInt = $this->obtainQName('int');
-		$this->typeString = $this->obtainQName('String');
-		$this->typeNumber = $this->obtainQName('Number');
-		$this->typeObject = $this->obtainQName('Object');
-		$this->typeArray = $this->obtainQName('Array');
-		$this->typeXML = $this->obtainQName('XML');
-		$this->typeUndefined = $this->obtainQName('undefined');
-		
-		$this->literalNaN = new AS3Literal;
-		$this->literalNaN->value = NAN;
-		$this->literalNaN->type = $this->typeNumber;
-		$this->literalTrue = new AS3Literal;
-		$this->literalTrue->value = true;
-		$this->literalTrue->type = $this->typeBoolean;		
-		$this->literalFalse = new AS3Literal;
-		$this->literalFalse->value = false;
-		$this->literalFalse->type = $this->typeBoolean;		
-		$this->literalNull = new AS3Literal;
-		$this->literalNull->type = $this->typeObject;
-		$this->literalUndefined = new AS3Literal;
-		$this->literalUndefined->type = $this->typeAny;
-		$this->literalOne = new AS3Literal;
-		$this->literalOne->type = $this->typeInt;
-		$this->literalOne->value = 1;
-		
-		// attach traits of scripts to global class
-		$globalClass = new AS3Class;
-		$globalClass->name = $this->addQName("GLOBAL");
-		$globalClass->type = $this->typeClass;
-		$globalClass->this = new AS3Variable;
-		$globalClass->this->name = $this->nameThis;
-		$globalClass->this->type = $this->typeClass;
-		$globalClass->members = array();
-		$globalClass->instance = new AS3ClassInstance;
-		$globalClass->instance->name = $globalClass->name;
-		$globalClass->instance->members = array();
-		foreach($abcFile->scriptTable as $script) {
-			$globalClass->instance->members += $this->decodeTraits($script->traits);
+		foreach($scripts as $script) {
+			$packages[] = $this->decompileScript($script);
 		}
-		$globalClass->instance->members[$globalClass->name->index] = $globalClass;
-		
-		// we use object types to infer what properties an object would have during runtime
-		// class objects (the object to which static methods are attached to) themselves 
-		// don't belong to a specific class so this interference isn't possible
-		// to simplify the logic, we'll assigned special classes to them
-		foreach($globalClass->instance->members as $object) {
-			if($object instanceof AS3Class) {
-				$class = $object;
-				$classClass = new AS3Class;
-				$classClass->name = $this->addQName("CLASS:{$class->name->text}");
-				$classClass->type = $this->typeClass;
-				$classClass->members = array();
-				$classClass->instance = $class;
-				$class->type = $classClass->name;
-				$class->this->type = $classClass->name;
-				$globalClass->instance->members[$classClass->name->index] = $classClass;
+		return $packages;
+	}
+	
+	protected function importName($vmName) {
+		$vmNamespace = $vmName->namespace;
+		if($vmNamespace->string) {
+			if(!in_array($vmNamespace->string, $this->imports)) {
+				$this->imports[] = new AS3Identifier($vmNamespace->string);
 			}
 		}
-		
-		$this->global = new AS3Variable;
-		$this->global->type = $globalClass->name;
-		$this->global->name = $this->nameThis;
-		$this->globalClass = $globalClass;
-		
-		$this->decompileMembers($globalClass->instance);
-
-		$this->removeTemporaryMembers($globalClass->instance);	
-		
-		return $globalClass->instance->members;		
+		return new AS3Identifier($vmName->string ? $vmName->string : '*');
 	}
 	
-	protected function removeTemporaryMembers($class) {
-		$maxNameId = count($this->abcFile->multinameTable) - 1;
-		foreach($class->members as $nameId => $member) {
-			if($nameId > $maxNameId || $nameId < 0) {
-				unset($class->members[$nameId]);
-			} else {
-				if($member instanceof AS3Class && $member != $this->globalClass) {
-					$this->removeTemporaryMembers($member);
-					$this->removeTemporaryMembers($member->instance);
-				}
-			}
-		}
-	}
-	
-	protected function getString($index) {
-		$string = $this->abcFile->stringTable[(int) $index];
-		return $string;
-	}
-	
-	protected function getDouble($index) {
-		$string = $this->abcFile->doubleTable[(int) $index];
-		return $string;
-	}
-	
-	protected function getInt($index) {
-		$string = $this->abcFile->intTable[(int) $index];
-		return $string;
-	}
-	
-	protected function getUInt($index) {
-		$string = $this->abcFile->uintTable[(int) $index];
-		return $string;
-	}
-	
-	protected function getNamespace($index) {
-		$index = (int) $index;
-		$namespace =& $this->namespaces[$index];
-		if(!$namespace) {
-			$nsRec = $this->abcFile->namespaceTable[$index];
-			$namespace = new AS3Namespace;
-			$namespace->kind = $nsRec->kind;
-			$namespace->text = $this->getString($nsRec->stringIndex);
-		}
-		return $namespace;
-	}
-	
-	protected function getNamespaceSet($index) {
-		$index = (int) $index;
-		$nssRec = $this->abcFile->namespaceSetTable[$index];
-		$namespaces = array();
-		foreach($nssRec->namespaceIndices as $nsIndex) {
-			$namespaces[] = $this->getNamespace($nsIndex);
-		}
-		return $namespaces;
-	}
-	
-	protected function getName($index) {
-		$index = (int) $index;
-		$name =& $this->names[$index];
-		if(!$name) {
-			$mnRec = $this->abcFile->multinameTable[(int) $index];
-			$name = new AS3Name;
-			switch($mnRec->type) {
-				case 0x0D:
-				case 0x10:
-				case 0x12:
-				case 0x0E:
-				case 0x1C: $name->isAttribute = true; break;
-			}
-			if($mnRec->stringIndex !== null) {
-				$name->text = $this->getString($mnRec->stringIndex);
-			}
-			if($mnRec->namespaceIndex !== null) {
-				$name->namespace = $this->getNamespace($mnRec->namespaceIndex);
-			}
-			if($mnRec->namespaceSetIndex !== null) {
-				$name->namespace = $this->getNamespaceSet($mnRec->namespaceSetIndex);
-			}
-			if($mnRec->typeIndices !== null) {
-				$baseName = $this->getName($mnRec->nameIndex);
-				$types = array();
-				foreach($mnRec->typeIndices as $typeIndex) {
-					$typeName = $this->getName($typeIndex);
-					$types[] = $typeName->text;
-				}
-				$types = implode(', ', $types);
-				$name->text = "{$baseName->text}.<$types>";
-				$name->namespace = $baseName->namespace;
-			}
-			$name->index = $index;
-		}
-		return $name;
-	}
-	
-	protected function findQName($text, $namespace = null) {
-		$nameIndex = array_search($text, $this->abcFile->stringTable, true);
-		foreach($this->abcFile->multinameTable as $mnIndex => $mnRec) {
-			if($mnRec->stringIndex === $nameIndex) {
-				if($namespace) {
-					if($mnRec->namespaceIndex !== null) {
-						$nsRec = $this->abcFile->namespaceTable[$mnRec->namespaceIndex];
-						$nsText = $this->abcFile->stringTable[(int) $nsRec->stringIndex];
-						if(is_array($namespace)) {
-							if(!in_array($nsText, $namespace)) {
-								continue;
-							}
-						} else {
-							if($nsText != $namespace) {
-								continue;
-							}
-						}
-					} else {
-						continue;
-					}
-				}
-				return $this->getName($mnIndex);
-			}
-		}
-		return false;
-	}
-	
-	protected function obtainQName($text) {
-		if(!($name = $this->findQName($text))) {
-			$name = $this->addQName($text);
-		}
-		return $name;
-	}
-	
-	protected function addQName($text, $namespace = null) {
-		$name = new AS3Name;
-		$name->namespace = ($namespace) ? $namespace : $this->defaultNamespace;
-		$name->text = $text;
-		$name->index = max(count($this->names), count($this->abcFile->multinameTable));
-		$names[$name->index] = $name;
-		return $name;
-	}
-	
-	protected function findGName($baseType, $types) {
-		// find the qname of the base type first if it's a multiname
-		if(is_array($baseType->namespace)) {
-			$namespaces = array();
-			foreach($baseType->namespace as $namespace) {
-				$namespaces[] = $namespace->text;
-			}
-			$baseType = $this->findQName($baseType->text, $namespaces);
-		}
-		// find the generic name
-		$typeIndices = array();
-		foreach($types as $type) {
-			$typeIndices[] = $type->index;
-		}
-		foreach($this->abcFile->multinameTable as $mnIndex => $mnRec) {
-			if($mnRec->nameIndex == $baseType->index) {
-				if($mnRec->typeIndices == $typeIndices) {
-					return $this->getName($mnIndex);
-				}
-			}
-		}
-	}
-	
-	protected function getClassInstance($expr) {
-		// each expression should have a type associated with it
-		// type could be AS3Name
-		if($expr) {		
-			$name = $expr->type;
-			$globals = $this->globalClass->instance->members;
-			if(isset($globals[$name->index])) {
-				$class = $globals[$name->index];
-				return $class->instance;
-			}
-		}
-	}
-
-	protected function getParent($expr) {
-		$instance = $this->getClassInstance($expr);
-		if($instance) {
-			return $instance->super;
-		}
-	}
-	
-	protected function getPropertyType($expr, $propName) {
-		if($propName instanceof AS3RuntimeName) {
-			return $this->typeAny;
-		} else {
-			$instance = $this->getClassInstance($expr);
-			if($instance) {
-				if(isset($instance->members[$propName->index])) {
-					$member = $instance->members[$propName->index];
-					return $member->type;
-				} else {
-					return $this->typeUndefined;
-				}
-			} else {
-				return $this->typeAny;
-			}
-		}
-	}
-	
-	protected function searchScopeStack($cxt, $propName, $strict) {
-		// we can't resolve runtime names
-		if(!($propName instanceof AS3RuntimeName)) {
-			for($i = count($cxt->scopeStack) - 1; $i >= 0; $i--) {
-				$expr = $cxt->scopeStack[$i];
-				// scope objects shouldn't have property
-				if(!($expr instanceof AS3Scope)) {
-					$instance = $this->getClassInstance($expr);
-					if(isset($instance->members[$propName->index])) {
-						return $expr;
-					}
-				}
-			}
-		}
-		if(!$strict) {
-			return $this->global;
-		} else {
-			// cannot resolve the property
-			// assume the intention is to access the object at the top of the stack
-			for($i = count($cxt->scopeStack) - 1; $i >= 0; $i--) {
-				$expr = $cxt->scopeStack[$i];
-				if(!($expr instanceof AS3Scope)) {
-					return $expr;
-				}
-			}
-		}
-	}
-	
-	protected function getSlotName($expr, $slotId) {
-		$instance = $this->getClassInstance($expr);
-		if($instance) {
-			$member = $instance->members[-$slotId];
-			return $member->name;
-		}
-	}
-	
-	protected function decodeTraits($traitRecs) {
-		$members = array();
-		foreach($traitRecs as $traitRec) {
-			$member = $this->decodeTrait($traitRec);
-			if($member) {
-				$members[$member->name->index] = $member;
-				if($traitRec->slotId) {
-					// store member at negative slot id as well so we can find it
-					$members[ - $traitRec->slotId] = $member;
-				}
-			}
-		}
-		return $members;
-	}
-	
-	protected function decodeTrait($traitRec) {
-		switch($traitRec->type & 0x0F) {
-			case 0:	return $this->decodeVariable($traitRec);
-			case 6: return $this->decodeConstant($traitRec);
-			case 1:
-			case 2:
-			case 3:	return $this->decodeMethod($traitRec);
-			case 5: return $this->decodeFunction($traitRec);
-			case 4: return $this->decodeClass($traitRec);
-		}
-	}
-	
-	protected function decodeClass($traitRec) {
-		$classRec = $this->abcFile->classTable[$traitRec->data->classIndex];
-		$class = new AS3Class;
-		$class->name = $this->getName($traitRec->nameIndex);
-		$class->members = $this->decodeTraits($classRec->traits);
-		$class->constructor = $this->decodeConstructor($classRec->constructorIndex);
-		$class->constructor->name = $class->name;
-		$class->instance = $this->decodeClassInstance($traitRec->nameIndex);
-		$class->type = $this->typeClass;
-		$class->this = new AS3Variable;
-		$class->this->name = $this->nameThis;
-		$class->this->type = $class->name;
-		return $class;
-	}
-	
-	protected function decodeClassInstance($nameIndex) {
-		foreach($this->abcFile->instanceTable as $instanceRec) {
-			if($instanceRec->nameIndex == $nameIndex) {
-				$instance = new AS3ClassInstance;
-				$instance->name = $this->getName($instanceRec->nameIndex);
-				$instance->members = $this->decodeTraits($instanceRec->traits);
-				$instance->constructor = $this->decodeConstructor($instanceRec->constructorIndex);
-				$instance->constructor->name = $instance->name;
-				$instance->parentName = ($instanceRec->superNameIndex) ? $this->getName($instanceRec->superNameIndex) : null;
-				$instance->flags = $instanceRec->flags;
-				$instance->protectedNamespace = ($instanceRec->flags & 0x08) ? $this->getNamespace($instanceRec->protectedNamespaceIndex) : null;
-				$instance->interfaces = ($instanceRec->interfaceIndices) ? array_map(array($this, 'getName'), $instanceRec->interfaceIndices) : array();
-				$instance->type = $instance->name;
-				$instance->this = new AS3Variable;
-				$instance->this->name = $this->nameThis;
-				$instance->this->type = $instance->name;
-				$instance->super = new AS3Variable;
-				$instance->super->name = $this->nameSuper;
-				$instance->super->type = $instance->parentName;
-				return $instance;
-			}
-		}
-	}
-	
-	protected function decodeVariable($traitRec) {
-		$var = new AS3Variable;
-		$var->type = $this->decodeType($traitRec->data->typeNameIndex);
-		$var->name = $this->getName($traitRec->nameIndex);
-		$var->defaultValue = $this->decodeValue($traitRec->data->valueType, $traitRec->data->valueIndex);
-		return $var;
-	}
-	
-	protected function decodeConstant($traitRec) {
-		$const = new AS3Constant;
-		$const->type = $this->decodeType($traitRec->data->typeNameIndex);
-		$const->name = $this->getName($traitRec->nameIndex);
-		$const->defaultValue = $this->decodeValue($traitRec->data->valueType, $traitRec->data->valueIndex);
-		return $const;
-	}
-
-	protected function decodeMethod($traitRec) {
-		$methodRec = $this->abcFile->methodTable[$traitRec->data->methodIndex];
-		$method = new AS3Method;
-		$name = $this->getName($traitRec->nameIndex);
-		if(($traitRec->type & 0x0F) == 2) {
-			$method->name = $this->addQName("get $name->text", $name->namespace);
-		} else if(($traitRec->type & 0x0F) == 3) {
-			$method->name = $this->addQName("set $name->text", $name->namespace);
-		} else {
-			$method->name = $name;
-		}
-		$method->arguments = $this->decodeMethodArguments($methodRec);
-		$method->type = $this->decodeType($methodRec->returnType);
-		$method->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
-		$method->exceptions = $this->decodeExceptions($methodRec);
-		$method->expressions = array();
-		$method->localVariables = array();
-		return $method;
-	}
-
-	protected function decodeExceptions($methodRec) {
-		$exceptions = array();
-		if($methodRec->body) {
-			foreach($methodRec->body->exceptions as $exceptionRec) {
-				$exception =& $exceptions[$exceptionRec->from];
-				if(!$exception) {
-					$exception = new AS3Exception;
-					$exception->from = $exceptionRec->from;
-					$exception->to = $exceptionRec->to;
-				}
-				$exception->targets[] = $exceptionRec->target;
-				$errorObject = new AS3Variable;
-				$errorObject->type = $this->getName($exceptionRec->typeIndex);
-				$errorObject->name = $this->getName($exceptionRec->variableIndex);
-				$exception->errorObjects[] = $errorObject;
-			}
-		}
-		return $exceptions;
-	}
-
-	protected function decodeFunction($traitRec) {
-		$methodRec = $this->abcFile->methodTable[$traitRec->data->methodIndex];
-		$function = new AS3Function;
-		$function->name = $this->getName($traitRec->nameIndex);
-		$function->arguments = $this->decodeMethodArguments($methodRec);
-		$function->type = $this->decodeType($methodRec->returnType);
-		$function->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
-		$function->exceptions = $this->decodeExceptions($methodRec);
-		$function->expressions = array();
-		$function->localVariables = array();
-		return $function;
-	}
-	
-	protected function decodeConstructor($index) {
-		$methodRec = $this->abcFile->methodTable[$index];
-		$constructor = new AS3Constructor;
-		$constructor->arguments = $this->decodeMethodArguments($methodRec);
-		$constructor->record = $methodRec;
-		$constructor->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
-		$constructor->exceptions = $this->decodeExceptions($methodRec);
-		$constructor->expressions = array();
-		$constructor->localVariables = array();
-		return $constructor;
-	}
-	
-	protected function decodeMethodArguments($methodRec) {
+	protected function importArguments($vmArguments) {
 		$arguments = array();
-		for($i = 0; $i < $methodRec->paramCount; $i++) {
-			$arg = new AS3Variable;
-			$arg->type = $this->decodeType($methodRec->paramTypes[$i]);
-			if(isset($methodRec->paramNameIndices[$i])) {
-				$text = $this->getString($methodRec->paramNameIndices[$i]);
-				$arg->name = $this->addQName($text);
-			} else {
-				$arg->name = $this->addQName("arg$i");
-			}
-			$optionalParamIndex = count($methodRec->optionalParams) - count($methodRec->paramNameIndices) + $i;
-			if(isset($methodRec->optionalParams[$optionalParamIndex])) {
-				$parameter = $methodRec->optionalParams[$optionalParamIndex];
-				$arg->defaultValue = $this->decodeValue($parameter->type, $parameter->index);
-			}			
-			$arguments[] = $arg;
+		foreach($vmArguments as $vmArgument) {
+			$name = new AS3Identifier($vmArgument->name->string);
+			$type = $this->importName($vmArgument->type);
+			$arguments[] = new AS3Argument($name, $type);
 		}
 		return $arguments;
 	}
-		
-	protected function decodeValue($type, $index) {
-		if($type) {
-			switch($type) {
-				case 0x0B: return $this->literalTrue;
-				case 0x0A: return $this->literalFalse; 
-				case 0x0C: return $this->literalNull;
-				case 0x00: return $this->literalUndefined;
-				case 0x08: 
-				case 0x16: 
-				case 0x17: 
-				case 0x18: 
-				case 0x19: 
-				case 0x1A: 
-				case 0x05: return $this->getName($index);
-			}
-			
-			$literal = new AS3Literal;
-			switch($type) {
-				case 0x03: $literal->value = $this->getInt($index); break;
-				case 0x04: $literal->value = $this->getUInt($index); break;
-				case 0x06: $literal->value = $this->getDouble($index); break;
-				case 0x01: $literal->value = $this->getString($index); break;
-			}
-			return $literal;
-		}
-	} 
 	
-	protected function decodeType($index) {
-		return ($index) ? $this->getName($index) : $this->typeAny;
+	protected function getAccessModifier($vmNamespace) {
+		if($vmNamespace instanceof AVM2ProtectedNamespace) {
+			return "protected";
+		} else if($vmNamespace instanceof AVM2PrivateNamespace) {
+			return "private";
+		} else if($vmNamespace instanceof AVM2PackageNamespace) {
+			return "public";
+		} else if($vmNamespace instanceof AVM2InternalNamespace) {
+			return "internal";
+		}
+	}
+				
+	protected function decompileScript($vmScript) {
+		$this->imports = array();
+		$package = new AS3Package;
+		$this->decompileMembers($vmScript->members, null, $package);
+		$package->imports = $this->imports;
+		return $package;
 	}
 	
-	protected function decompileMembers($class) {
-		foreach($class->members as $index => $member) {
-			if($index > 0) {
-				if($member instanceof AS3Function) {
-					$this->decompileMethod(null, $member);
-				} else if($member instanceof AS3Method) {
-					$this->decompileMethod($class->this, $member);
-				} else if($member instanceof AS3Class && $member != $this->globalClass) {
-					$this->decompileMembers($member);
-					$this->decompileMembers($member->instance);
+	protected function decompileMembers($vmMembers, $scope, $container) {
+		$slots = array();
+		foreach($vmMembers as $index => $vmMember) {
+			$name = new AS3Identifier($vmMember->name->string);
+			$access = $this->getAccessModifier($vmMember->name->namespace);
+			
+			if($vmMember->object instanceof AVM2Class) {
+				$member = new AS3Class($name, $access);
+				$this->decompileMembers($vmMember->object->members, 'static', $member);
+				$this->decompileMembers($vmMember->object->instance->members, null, $member);
+				if($access == 'public') {
+					$container->namespace = new AS3Identifier($vmMember->name->namespace->string);
 				}
-			}
-		}
-		if($class->constructor) {
-			//$this->decompileMethod($class->this, $member);
-		}
-		if($class->constructor) {
-			//$this->decompileMethod($class->this, $class->constructor);
-		}
-	}
-	
-	protected function decompileMethod($receiver, $method) {
-		if(isset($method->byteCodes)) {
-			// decode the bytecodes 
-			$decoder = new ABCDecoder;
-			$ops = $decoder->decode($method->byteCodes);
-			unset($method->byteCodes);
-			
-			foreach($ops as $ip => $op) {
-				if(!preg_match('/debug/', $op->name)) {
-					$operands = array();
-					$i = 1;
-					while(1) {
-						$name = "op" . $i++;
-						if(isset($op->$name)) {
-							$operands[] = $op->$name;
-						} else {
-							break;
-						}
-					}
-					$operands = implode(' ', $operands);
-					echo "$ip $op->name $operands\n";
+			} else if($vmMember->object instanceof AVM2Method) {
+				$returnType = $this->importName($vmMember->object->returnType);
+				$arguments = $this->importArguments($vmMember->object->arguments);
+				if($vmMember->type == AVM2ClassMember::MEMBER_GETTER) {
+					$name = new AS3Accessor('get', $name);
+				} else if($vmMember->type == AVM2ClassMember::MEMBER_SETTER) {
+					$name = new AS3Accessor('set', $name);
 				}
-			}
-			
-			// set up execution environment
-			$cxt = new AS3DecompilerContext;
-			$cxt->stack = array();
-			$cxt->scopeStack = array();
-			$cxt->registers = array();
-			$cxt->registers[0] = $receiver;
-			foreach($method->arguments as $index => $arg) {
-				$arg->values = ($arg->defaultValue !== null) ? array($arg->defaultValue) : array();
-				$cxt->registers[$index + 1] = $arg;
-			}
-			// TODO: arguments array
-			$cxt->method = $method;
-			$cxt->ops = $ops;
-			$cxt->currentPosition = 0;
-			
-			// decompile the ops into expressions
-			$expressions = $this->decompileInstructions($cxt);
-		
-			// divide ops into basic blocks
-			$blocks = $this->createBasicBlocks($expressions, $method->exceptions);
-			unset($expressions);
-			
-			// recreate loops and conditional statements
-			$this->structureLoops($blocks, $method);
-			
-			// give local variables names
-			$this->assignVariableNames($method->localVariables);
-		}
-	}
-	
-	protected function assignVariableNames($variables) {
-		$prefixOccurences = array();
-		
-		foreach($variables as $var) {
-			if(!$var->name) {
-				if($var->type && $var->type->text) {
-					$prefix = preg_replace("/\.<.*>/", "", $var->type->text);
+				if($container instanceof AS3Class) {
+					$member = new AS3ClassMethod($name, $arguments, $returnType, $access, $scope);
 				} else {
-					$prefix = "var";
+					$member = new AS3Function($name, $arguments, $returnType, $access);
 				}
-				$prefix = ucfirst($prefix);				
-				$count =& $prefixOccurences[$prefix];
-				$name = new AS3Name;
-				$name->namespace = $this->defaultNamespace;
-				$name->text = "loc$prefix" . (++$count);
-				$var->name = $name;
+				$member->operations = $vmMember->object->body->operations;
+			} else if($vmMember->object instanceof AVM2Variable) {
+				$member = new AS3ClassVariable($name, $vmMember->object->value, $this->importName($vmMember->object->type), $access, $scope);
+			} else if($vmMember->object instanceof AVM2Constant) {
+				$member = new AS3ClassConstant($name, $vmMember->object->value, $this->importName($vmMember->object->type), $access, $scope);
+			}
+			$container->members[] = $member;
+			if($vmMember->slotId) {
+				$slots[$vmMember->slotId] = $member;
 			}
 		}
+		/*foreach($container->members as $member) {
+			if($member instanceof AS3ClassMethod || $member instanceof AS3Function) {
+				$cxt = new AS3DecompilerContext;
+				$cxt->opQueue = $member->operations;
+				unset($member->operations);
+				$this->decompileFunctionBody($cxt, $member);
+			}
+		}*/
 	}
 	
-	protected function decompileInstructions($cxt) {
-		$expressions = array();	
+	protected function decompileClass($vmClass) {
+		$class = new AS3Class;
+		for($i = 0; $i < 2; $i++) {
+			if($i == 0) {
+				$vmMembers = $vmClass->members;
+				$scope = null;
+			} else {
+				$vmMembers = $vmClass->instance->members;
+				$scope = null;
+			}
+			foreach($vmMembers as $vmMember) {
+				$vmObject = $vmMember->object;
+				if($vmObject instanceof AVM2Method) {
+					$member = new AS3ClassMethod;
+					
+				} else if($vmObject instanceof AVM2Variable) {
+					$member = new AS3ClassVariable;
+					$member->type = $this->importName($vmObject->type);
+					$member->value = $vmObject->value;
+				} else if($vmObject instanceof AVM2Constant) {
+					$member = new AS3ClassConstant;
+					$member->type = $this->importName($vmObject->type);
+					$member->value = $vmObject->value;
+				}
+				
+				$vmName = $vmMember->name;
+				$vmNamespace = $vmName->namespace;
+				$member->scope = $scope;
+			}
+		}
+		return $class;
+	}
+	
+	protected function decompileFunctionBody($cxt, $function) {
+		// decompile the ops into statements
+		$statements = array();	
 		$contexts = array($cxt);
-		$exceptions = $cxt->method->exceptions;
+		reset($cxt->opQueue);
+		$cxt->nextAddress = key($cxt->opQueue);
 		while($contexts) {
 			$cxt = array_shift($contexts);
-			while(($expr = $this->decompileInstruction($cxt)) !== false) {
-				if($expr) {
-					if($expr instanceof AS3FlowControl) {
-						if($expr instanceof AS3ConditionalBranch) {
-							// look for ternary conditional operator
-							if($this->decompileTernaryOperator($cxt, $expr)) {
-								// the result is on the stack
-								continue;
-							}
-						
-							// look ahead find any logical statements that should be part of 
-							// the branch's condition
-							$this->decompileBranch($cxt, $expr);
-						
-							// clone the context and add it to the list
-							$cxtT = clone $cxt;
-							$cxtT->currentPosition = $expr->positionIfTrue;
-							$contexts[] = $cxtT;
-							$cxt->currentPosition = $expr->positionIfFalse;
+			while(($stmt = $this->decompileNextInstruction($cxt)) !== false) {				
+				if($stmt) {
+					if(!isset($statements[$cxt->lastAddress])) {
+						if($stmt instanceof AS3DecompilerFlowControl) {
+							if($stmt instanceof AS3DecompilerBranch) {
+								// look for ternary conditional operator
+								if($this->decompileTernaryOperator($cxt, $stmt)) {
+									// the result is on the stack
+									continue;
+								}
 							
-						} else if($expr instanceof AS3UnconditionalBranch) {
-							// jump to the location and continue
-							$cxt->currentPosition = $expr->position;
-						} else if($expr instanceof AS3SwitchLookup) {
-							foreach($expr->casePositions as $casePosition) {
-								$cxtC = clone $cxt;
-								$cxtC->currentPosition = $casePosition;
-								$contexts[] = $cxtC;
+								// look ahead find any logical statements that should be part of 
+								// the branch's condition							
+								$this->decompileBranch($cxt, $stmt);
+							
+								// clone the context and add it to the list
+								$cxtT = clone $cxt;
+								$cxtT->nextAddress = $stmt->addressIfTrue;
+								$contexts[] = $cxtT;
+							} else if($stmt instanceof AS3DecompilerJump) {
+								// jump to the location and continue
+								$cxt->nextAddress = $stmt->address;
 							}
-							$cxt->currentPosition = $expr->defaultPosition;
 						}
-					}
 					
-					if(!isset($expressions[$cxt->lastPosition])) {
-						$expressions[$cxt->lastPosition] = $expr;
+						$statements[$cxt->lastAddress] = $stmt;
 					} else {
 						// we've been here already
 						break;
 					}
 				}
-				if(isset($exceptions[$cxt->currentPosition])) {
-					// branch to the catch blocks
-					$exception = $exceptions[$cxt->currentPosition];
-					foreach($exception->targets as $index => $catchPosition) {
-						$cxtC = clone $cxt;
-						$cxtC->currentPosition = $catchPosition;
-						$cxtC->stack = array($exception->errorObjects[$index]);
-						$cxtC->scopeStack = array();
-						$contexts[] = $cxtC;
-					}
-				}
 			}
 		}
-		return $expressions;
+		
+		// create basic blocks
+		$blocks = $this->createBasicBlocks($statements);
+		unset($statements);
+
+		// look for loops, from the innermost to the outermost
+		$loops = $this->createLoops($blocks, $function);
+		
+		// recreate loops and conditional statements
+		$this->structureLoops($loops, $blocks, $function);
 	}
-	
+
 	protected function decompileBranch($cxt, $branch) {
-		if($branch->position > 0) {
+		if($branch->addressIfTrue > 0) {
 			// find all other conditional branches immediately following this one
 			$cxtT = clone $cxt;
-			$cxtT->currentPosition = $branch->positionIfTrue;
+			$cxtT->nextAddress = $branch->addressIfTrue;
 			$cxtT->relatedBranch = $branch;
 			$cxtT->branchOnTrue = true;
 			$cxtF = clone $cxt;
-			$cxtF->currentPosition = $branch->positionIfFalse;		
+			$cxtF->nextAddress = $branch->addressIfFalse;		
 			$cxtF->relatedBranch = $branch;
 			$cxtF->branchOnTrue = false;
 			$contexts = array($cxtT, $cxtF);
 			$count = 0;
+			$scanned = array();
 			while($contexts) {
 				$cxt = array_shift($contexts);
-				while(($expr = $this->decompileInstruction($cxt)) !== false) {
-					if($expr) {
-						if($expr instanceof AS3ConditionalBranch) {
-							if($cxt->branchOnTrue) {
-								$cxt->relatedBranch->branchIfTrue = $expr;
-							} else {
-								$cxt->relatedBranch->branchIfFalse = $expr;
+				$scanned[$cxt->nextAddress] = true;
+				while(($stmt = $this->decompileNextInstruction($cxt)) !== false) {
+					if($stmt) {
+						if($stmt instanceof AS3DecompilerBranch) {
+							if($stmt->condition instanceof AS3BinaryOperation && $stmt->condition->operand1 instanceof AS3DecompilerEnumeration) {
+								break;
 							}
-							$cxtT = clone $cxt;
-							$cxtT->currentPosition = $expr->positionIfTrue;
-							$cxtT->relatedBranch = $expr;
-							$cxtT->branchOnTrue = true;
-							$contexts[] = $cxtT;
-							$cxt->currentPosition = $expr->positionIfFalse;
-							$cxt->relatedBranch = $expr;
-							$cxt->branchOnTrue = false;
+							if($cxt->branchOnTrue) {
+								$cxt->relatedBranch->branchIfTrue = $stmt;
+							} else {
+								$cxt->relatedBranch->branchIfFalse = $stmt;
+							}
+							
+							if(!isset($scanned[$stmt->addressIfTrue]) && !isset($scanned[$stmt->addressIfFalse])) {
+								$cxtT = clone $cxt;
+								$cxtT->nextAddress = $stmt->addressIfTrue;
+								$cxtT->relatedBranch = $stmt;
+								$cxtT->branchOnTrue = true;
+								$contexts[] = $cxtT;
+								$cxt->nextAddress = $stmt->addressIfFalse;
+								$cxt->relatedBranch = $stmt;
+								$cxt->branchOnTrue = false;
+							} else {
+								break;
+							}
 						} else {
 							break;
 						}
@@ -760,7 +252,7 @@ class AS3Decompiler {
 		if(isset($branch->branchIfTrue)) {
 			$this->collapseDuplicateBranches($branch->branchIfTrue);
 			if($branch->condition === $branch->branchIfTrue->condition) {
-				$branch->positionIfTrue = $branch->branchIfTrue->positionIfTrue;
+				$branch->addressIfTrue = $branch->branchIfTrue->addressIfTrue;
 				if(isset($branch->branchIfTrue->branchIfTrue)) {
 					$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
 				} else {
@@ -771,7 +263,7 @@ class AS3Decompiler {
 		if(isset($branch->branchIfFalse)) {
 			$this->collapseDuplicateBranches($branch->branchIfFalse);
 			if($branch->condition === $branch->branchIfFalse->condition) {
-				$branch->positionIfFalse = $branch->branchIfFalse->positionIfFalse;
+				$branch->addressIfFalse = $branch->branchIfFalse->addressIfFalse;
 				if(isset($branch->branchIfFalse->branchIfFalse)) {
 					$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
 				} else {
@@ -784,14 +276,9 @@ class AS3Decompiler {
 	protected function collapseBranches($branch) {
 		$changed = false;
 		if(isset($branch->branchIfTrue)) {
-			if($branch->branchIfTrue->positionIfFalse == $branch->positionIfFalse) {
-				$logicalExpr = new AS3BinaryOperation;
-				$logicalExpr->operator = '&&';
-				$logicalExpr->operand1 = $branch->condition;
-				$logicalExpr->operand2 = $branch->branchIfTrue->condition;
-				$logicalExpr->precedence = 12;
-				$branch->condition = $logicalExpr;
-				$branch->positionIfTrue = $branch->branchIfTrue->positionIfTrue;
+			if($branch->branchIfTrue->addressIfFalse == $branch->addressIfFalse) {
+				$branch->condition = new AS3BinaryOperation($branch->branchIfTrue->condition, '&&', $branch->condition, 12);
+				$branch->addressIfTrue = $branch->branchIfTrue->addressIfTrue;
 				if(isset($branch->branchIfTrue->branchIfTrue)) {
 					$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
 				} else {
@@ -803,14 +290,9 @@ class AS3Decompiler {
 			}
 		}
 		if(isset($branch->branchIfFalse)) {
-			if($branch->branchIfFalse->positionIfTrue == $branch->positionIfTrue) {
-				$logicalExpr = new AS3BinaryOperation;
-				$logicalExpr->operator = '||';
-				$logicalExpr->operand1 = $branch->condition;
-				$logicalExpr->operand2 = $branch->branchIfFalse->condition;
-				$logicalExpr->precedence = 13;
-				$branch->condition = $logicalExpr;
-				$branch->positionIfFalse = $branch->branchIfFalse->positionIfFalse;
+			if($branch->branchIfFalse->addressIfTrue == $branch->addressIfTrue) {
+				$branch->condition = new AS3BinaryOperation($branch->branchIfFalse->condition, '||', $branch->condition, 13);
+				$branch->addressIfFalse = $branch->branchIfFalse->addressIfFalse;
 				if(isset($branch->branchIfFalse->branchIfFalse)) {
 					$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
 				} else {
@@ -827,23 +309,23 @@ class AS3Decompiler {
 	protected function decompileTernaryOperator($cxt, $branch) {
 		$cxtF = clone $cxt;
 		$cxtT = clone $cxt;
-		$cxtT->currentPosition = $branch->position;
+		$cxtT->nextAddress = $branch->addressIfTrue;
 		$stackHeight = count($cxtF->stack);
 		$uBranch = null;
 		// keep decompiling until we hit an unconditional branch
-		while(($expr = $this->decompileInstruction($cxtF)) !== false) {
-			if($expr) {
-				if($expr instanceof AS3UnconditionalBranch) {
+		while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
+			if($stmt) {
+				if($stmt instanceof AS3DecompilerJump) {
 					// something should have been pushed onto the stack
 					if(count($cxtF->stack) == $stackHeight + 1) {
-						$uBranch = $expr;
+						$uBranch = $stmt;
 						break;
 					} else {
 						return false;
 					}
-				} else if($expr instanceof AS3ConditionalBranch) {
+				} else if($stmt instanceof AS3DecompilerBranch) {
 					// could be a ternary inside a ternary
-					if(!$this->decompileTernaryOperator($cxtF, $expr)) {
+					if(!$this->decompileTernaryOperator($cxtF, $stmt)) {
 						return false;
 					}
 				} else {
@@ -855,146 +337,100 @@ class AS3Decompiler {
 			// the value of the operator when the conditional expression evaluates to false
 			$valueF = end($cxtF->stack);
 			
-			// see where the expression would end up
-			while(($expr = $this->decompileInstruction($cxtF)) !== false) {
-				if($expr) {
-					if($expr instanceof AS3SwitchLookup) {
-						// it's actually a jump to lookupswitch
-						return false;
-					} else {
-						break;
-					}
+			// see where the false branch would end up at
+			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
+				if($stmt) {
+					break;
 				}
 			}
 			
-			// get the value for the branch by decompiling up to the destination of the unconditional jump 
-			while(($expr = $this->decompileInstruction($cxtT)) !== false) {
-				if($expr) {
-					// no expression should be generated
+			// get the value for the true branch by decompiling up to the destination of the unconditional jump 
+			while(($stmt = $this->decompileNextInstruction($cxtT)) !== false) {
+				if($stmt) {
+					// no statement should be generated
 					return false;
 				}
-				if($cxtT->currentPosition == $uBranch->position) {
+				if($cxtT->nextAddress == $uBranch->address) {
 					break;
 				}
 			}
 			if(count($cxtT->stack) == $stackHeight + 1) {			
 				$valueT = array_pop($cxtT->stack);
-				// swap the values if we branch on false
-				$branchOnTrue = ($branch->position == $branch->positionIfTrue);
-				$expr = new AS3TernaryConditional;
-				$expr->condition = $branch->condition;
-				$expr->valueIfTrue = ($branchOnTrue) ? $valueT : $valueF;
-				$expr->valueIfFalse = ($branchOnTrue) ? $valueF : $valueT;
-				$expr->precedence = 14;
-				$expr->type = $this->chooseSpecificType($valueT->type, $valueF->type);
-				// push the expression on to the caller's context  and advance the instruction pointer 
-				// to the jump destination
-				array_push($cxt->stack, $expr);
-				$cxt->currentPosition = $uBranch->position;
+				// push the expression on to the caller's context 
+				// and advance the instruction pointer to the jump destination
+				array_push($cxt->stack, new AS3TernaryConditional($branch->condition, $valueT, $valueF, 14));
+				$cxt->nextAddress = $uBranch->address;
 				return true;
 			}
 		}
 		return false;
 	}
 	
-	protected function chooseSpecificType($type1, $type2 /* ... */) {
-		$types = func_get_args();
-		$topScore = 0;
-		$bestType = null;
-		foreach($types as $index => $type) {
-			if($type === $this->typeUndefined) {
-				$score = 1;
-			} else if($type === $this->typeAny) {
-				$score = 2;
-			} else if($type === $this->typeObject) {
-				$score = 3;
+	public function decompileNextInstruction($cxt) {
+		while($op = current($cxt->opQueue)) {
+			if(key($cxt->opQueue) == $cxt->nextAddress) {
+				$cxt->lastAddress = $cxt->nextAddress;
+				next($cxt->opQueue);
+				$cxt->nextAddress = key($cxt->opQueue);
+				$cxt->op = $op;
+				$method = "do_$op->name";
+				$expr = $this->$method($cxt);
+				if($expr instanceof AS3Expression) {
+					return new AS3BasicStatement($expr);
+				} else {
+					return $expr;
+				}
 			} else {
-				$score = 4;
+				next($cxt->opQueue);
 			}
-			if($score > $topScore) {
-				$bestType = $type;
-			}
-		}
-		return $bestType;
-	}
-	
-	protected function decompileInstruction($cxt) {
-		if(isset($cxt->ops[$cxt->currentPosition])) {
-			$op = $cxt->ops[$cxt->currentPosition];
-			$cxt->nextPosition = $cxt->currentPosition + $op->width;
-			$handler = "do_{$op->name}";
-			$expr = $this->$handler($cxt, $op);
-			$cxt->lastPosition = $cxt->currentPosition;
-			$cxt->currentPosition = $cxt->nextPosition;
-			if($expr instanceof AS3Expression && !$expr->type) {
-				//die("Missing type: $handler {$cxt->lastPosition}");
-			}
-			return $expr;
 		}
 		return false;
 	}
 	
-	protected function createBasicBlocks($expressions, $exceptions) {
-		// find block entry positions
+	protected function createBasicBlocks($statements) {
+		// find block entry addresses
 		$isEntry = array(0 => true);
-		foreach($expressions as $ip => $expr) {
-			if($expr instanceof AS3ConditionalBranch) {
-				$isEntry[$expr->positionIfTrue] = true;
-				$isEntry[$expr->positionIfFalse] = true;
-			} else if($expr instanceof AS3UnconditionalBranch) {
-				$isEntry[$expr->position] = true;
-			} else if($expr instanceof AS3SwitchLookup) {
-				foreach($expr->casePositions as $casePosition) {
-					$isEntry[$casePosition] = true;
-				}
-				$isEntry[$expr->defaultPosition] = true;
+		foreach($statements as $ip => $expr) {
+			if($expr instanceof AS3DecompilerBranch) {
+				$isEntry[$expr->addressIfTrue] = true;
+				$isEntry[$expr->addressIfFalse] = true;
+			} else if($expr instanceof AS3DecompilerJump) {
+				$isEntry[$expr->address] = true;
 			}
 		}
-		foreach($exceptions as $exception) {
-			$isEntry[$exception->from] = true;
-			$isEntry[$exception->to] = true;
-			foreach($exception->targets as $target) {
-				$isEntry[$target] = true;
-			}
-		}		
 		
 		// put nulls into place where there's no statement 
 		foreach($isEntry as $ip => $state) {
-			if(!isset($expressions[$ip])) {
-				$expressions[$ip] = null;
+			if(!isset($statements[$ip])) {
+				$statements[$ip] = null;
 			}
 		}
-		ksort($expressions);
+		ksort($statements);
 
 		$blocks = array();
 		$prev = null;
-		foreach($expressions as $ip => $expr) {
+		foreach($statements as $ip => $expr) {
 			if(isset($isEntry[$ip])) {				
 				if(isset($block)) {
 					$block->next = $ip;
 				}
-				$block = new AS3BasicBlock;
+				$block = new AS3DecompilerBasicBlock;
 				$blocks[$ip] = $block;
 				$block->prev = $prev;
 				$prev = $ip;
 			}
 			if($expr) {
-				$block->expressions[$ip] = $expr;
-				$block->lastExpression =& $block->expressions[$ip];
+				$block->statements[$ip] = $expr;
+				$block->lastStatement =& $block->statements[$ip];
 			}
 		}
 
-		foreach($blocks as $blockPosition => $block) {
-			if($block->lastExpression instanceof AS3ConditionalBranch) {
-				$block->to[] = $block->lastExpression->positionIfTrue;
-				$block->to[] = $block->lastExpression->positionIfFalse;
-			} else if($block->lastExpression instanceof AS3UnconditionalBranch) {
-				$block->to[] = $block->lastExpression->position;
-			} else if($block->lastExpression instanceof AS3SwitchLookup) {
-				foreach($block->lastExpression->casePositions as $casePosition) {
-					$block->to[] = $casePosition;
-				}					
-				$block->to[] = $block->lastExpression->defaultPosition;
+		foreach($blocks as $blockAddress => $block) {
+			if($block->lastStatement instanceof AS3DecompilerBranch) {
+				$block->to[] = $block->lastStatement->addressIfTrue;
+				$block->to[] = $block->lastStatement->addressIfFalse;
+			} else if($block->lastStatement instanceof AS3DecompilerJump) {
+				$block->to[] = $block->lastStatement->address;
 			} else {
 				if($block->next !== null) {
 					$block->to[] = $block->next;
@@ -1002,311 +438,140 @@ class AS3Decompiler {
 			}
 		}
 		
-		foreach($blocks as $blockPosition => $block) {
+		foreach($blocks as $blockAddress => $block) {
 			sort($block->to);
 			foreach($block->to as $to) {
 				$toBlock = $blocks[$to];
-				$toBlock->from[] = $blockPosition;
+				$toBlock->from[] = $blockAddress;
 			}
 		}
 		return $blocks;
-		
 	}
-	
-	protected function structureLoops($blocks, $method) {			
-		$loops = $this->createLoops($blocks);
-		$exceptions = $method->exceptions;
-		$exceptionBlocks = array();
+
+	protected function structureLoops($loops, $blocks, $function) {
 		// convert the loops into either while or do-while
 		foreach($loops as $loop) {
-			if($loop->headerPosition !== null) {
+			if($loop->headerAddress !== null) {
 				// header is the block containing the conditional statement
 				// it is not the first block
-				$headerBlock = $blocks[$loop->headerPosition];
+				$headerBlock = $blocks[$loop->headerAddress];
 				$headerBlock->structured = true;
 				
-				// there should be an unconditional branch into the loop
-				// where it goes to determines if it's a do-while or a while				
-				$entryBlock = $blocks[$loop->entrancePosition];
-				if($entryBlock->lastExpression instanceof AS3UnconditionalBranch) {
-					if($headerBlock->lastExpression->condition instanceof AS3HasNext) {
-						// it's actually a for-in or for-each loop
-						// first, look for the assignments to temporary variable in the block before
-						$condition = $headerBlock->lastExpression->condition;
-						$loopIndex = $loopObject = null;
-						for($setExpr = end($entryBlock->expressions); $setExpr && !($loopIndex && $loopObject); $setExpr = prev($entryBlock->expressions)) {
-							if($setExpr instanceof AS3BinaryOperation && $setExpr->operator == '=') {
-								if($setExpr->operand1 === $condition->index) {
-									$loopIndex = $setExpr->operand2;
-									unset($entryBlock->expressions[key($entryBlock->expressions)]);
-								} else if($setExpr->operand1 === $condition->object) {
-									$loopObject = $setExpr->operand2;
-									unset($entryBlock->expressions[key($entryBlock->expressions)]);
-								}
-							}
-						}
-						
-						// look for assignment to named variable 
-						$firstBlock = $blocks[$headerBlock->lastExpression->position];
-						$loopVar = $loopValue = null;
-						for($setExpr = reset($firstBlock->expressions); $setExpr && !$loopVar; $setExpr = next($firstBlock->expressions)) {
-							if($setExpr instanceof AS3BinaryOperation && $setExpr->operator == '=') {
-								$loopVar = $setExpr->operand1;
-								$loopValue = $setExpr->operand2;
-								unset($firstBlock->expressions[key($firstBlock->expressions)]);
-							}
-						}
-						$condition = new AS3BinaryOperation;
-						$condition->operator = 'in';
-						$condition->operand1 = $loopVar;
-						$condition->operand2 = $loopObject;
-						$condition->precedence = 7;
-						
-						if($loopValue instanceof AS3NextValue) {
-							$expr = new AS3ForEachLoop;
-						} else {
-							$expr = new AS3ForInLoop;
-						}
-						$expr->condition = $condition;
-					} else {
-						// it goes to the beginning of the loop (or just pass the label) so it must be a do-while
-						if($entryBlock->lastExpression->position == $headerBlock->lastExpression->position
-						|| $entryBlock->lastExpression->position == $headerBlock->lastExpression->position + 1) {
-							$expr = new AS3DoWhileLoop;
-						} else {			
-							$expr = new AS3WhileLoop;
-						}
-						$expr->condition = $headerBlock->lastExpression->condition;
-					}
-					$expr->expressions = array();
-					$entryBlock->lastExpression = $expr;
-					$headerBlock->lastExpression = null;
+				if($headerBlock->lastStatement->addressIfFalse == $loop->continueAddress) {
+					// if the loop continues only when the condition is false
+					// then we need to invert the condition
+					$condition = $this->invertCondition($headerBlock->lastStatement->condition);
+				} else {
+					$condition = $headerBlock->lastStatement->condition;
 				}
+				
+				// see if there's an unconditional branch into the loop
+				$entryBlock = $blocks[$loop->entranceAddress];
+				if($entryBlock->lastStatement instanceof AS3DecompilerJump) {
+					if($condition instanceof AS3BinaryOperation && $condition->operand1 instanceof AS3DecompilerEnumeration) {
+						// a for in loop						
+						$stmt = new AS3ForIn;
+						$enumeration = $condition->operand1;
+						$condition = new AS3binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
+					} else {
+						if($entryBlock->lastStatement->address == $headerBlock->lastStatement->addressIfTrue) {
+							// it goes to the beginning of the loop so it must be a do-while
+							$stmt = new AS3DoWhile;
+						} else {			
+							$stmt = new AS3While;
+						}
+					}
+					$entryBlock->lastStatement = $stmt;
+				} else {
+					// we just fall into the loop
+					if($condition instanceof AS3BinaryOperation && $condition->operand1 instanceof AS3DecompilerEnumeration) {
+						// a for in loop						
+						$stmt = new AS3ForIn;
+						$enumeration = $condition->operand1;
+						$condition = new AS3binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
+					} else {
+						if($loop->headerAddress == $loop->continueAddress) {
+							// the conditional statement is at the "bottom" of the loop so it's a do-while
+							$stmt = new AS3DoWhile;
+						} else {
+							$stmt = new AS3While;
+						}
+					}
+					$entryBlock->statements[] = $stmt;
+				}
+				$stmt->condition = $condition;
+
 			} else {
-				// no header--the "loop" is the method itself
-				$method->expressions = array();
-				$expr = $method;
+				// no header--the "loop" is the function itself
+				$stmt = $function;
 			}
 
-			// recreate switch statements first, so breaks in it don't get changed to continues 
-			// when there's a switch inside a loop (the break in the switch would jump to the continue block of the loop)
-			foreach($loop->contentPositions as $blockPosition) {
-				$block = $blocks[$blockPosition];
-				$this->structureSwitch($block, $blocks);
-			}
-			
 			// convert jumps to breaks and continues
-			foreach($loop->contentPositions as $blockPosition) {
-				$block = $blocks[$blockPosition];
-				$this->structureBreakContinue($block, $loop->continuePosition, $loop->breakPosition);
+			foreach($loop->contentAddresses as $blockAddress) {
+				$block = $blocks[$blockAddress];
+				$this->structureBreakContinue($block, $loop->continueAddress, $loop->breakAddress);
 			}
 
 			// recreate if statements
-			foreach($loop->contentPositions as $blockPosition) {
-				$block = $blocks[$blockPosition];
+			foreach($loop->contentAddresses as $blockAddress) {
+				$block = $blocks[$blockAddress];
 				$this->structureIf($block, $blocks);
 			}
 
-			// move stuff into the loop			
-			$try = null;	
-			$exception = null;
-			foreach($loop->contentPositions as $blockPosition) {
-				// don't take stuff from inner loops
-				$block = $blocks[$blockPosition];
+			// mark remaining blocks that hasn't been marked as belonging to the loop
+			foreach($loop->contentAddresses as $blockAddress) {
+				$block = $blocks[$blockAddress];
 				if($block->destination === null) {
-					// see if block is inside a try block
-					if(isset($exceptions[$blockPosition])) {
-						$exception = $exceptions[$blockPosition];
-						$exceptionBlock = new AS3ExceptionBlock;
-						$exceptionBlock->expressions = array();
-						$exceptionBlock->destination =& $expr->expressions;
-						$exceptionBlocks[$exception->from] = $exceptionBlock;
-						
-						$try = new AS3TryBlock;
-						$try->expressions = array();
-						$exceptionBlock->expressions[] = $try;
-						
-						// find blocks that belong in the catch block
-						foreach($exception->targets as $index => $targetPosition) {
-							$catch = new AS3CatchBlock;
-							$catch->expressions = array();
-							$catch->error = $exception->errorObjects[$index];
-							$catchBlock = $blocks[$targetPosition];
-							
-							$prevBlock = $blocks[$catchBlock->prev];
-							
-							// there's always an unconditional branch before the catch to leap over it
-							$endPosition = $prevBlock->lastExpression->position;
-							$prevBlock->lastExpression = null;
-							
-							// move blocks into the catch block until we hit the end position
-							$stack = array($targetPosition);
-							while($stack) {
-								$to = array_pop($stack);
-								$toBlock = $blocks[$to];
-								if($toBlock->destination === null) {								
-									$toBlock->destination =& $catch->expressions;
-									foreach($toBlock->to as $to) {
-										if($to != $endPosition) {
-											array_push($stack, $to);
-										}
-									}
-								}
-							}
-							$exceptionBlock->expressions[] = $catch;
-						}
-					}
-					if($exception) {
-						if($blockPosition < $exception->to) {
-							$block->destination =& $try->expressions;
-							continue;
-						} else {
-							$exception = null;
-							$try = null;
-						}
-					} 
-					$block->destination =& $expr->expressions;
+					$block->destination =& $stmt->statements;
 				}
 			}
 		}
 		
-		// copy expressions to where they belong
+		// copy statements to where they belong
 		foreach($blocks as $ip => $block) {
 			if(is_array($block->destination)) {
-				foreach($block->expressions as $expr) {
-					$block->destination[] = $expr;
-				}
-				if(isset($exceptionBlocks[$ip])) {
-					$exceptionBlock = $exceptionBlocks[$ip];
-					foreach($exceptionBlock->expressions as $expr) {
-						$exceptionBlock->destination[] = $expr;
+				foreach($block->statements as $stmt) {
+					if($stmt) {
+						$block->destination[] = $stmt;
 					}
 				}
 			}
 		}
 	}
 	
-	protected function structureBreakContinue($block, $continuePosition, $breakPosition) {
-		if($block->lastExpression instanceof AS3UnconditionalBranch && !$block->structured) {
-			// if it's a jump to the break position (i.e. to the block right after the while loop) then it's a break 
-			// if it's a jump to the continue position (i.e. the tail block containing the backward jump) then it's a continue 
-			if($block->lastExpression->position === $breakPosition) {
-				$block->lastExpression = new AS3Break;
+	protected function structureBreakContinue($block, $continueAddress, $breakAddress) {
+		if($block->lastStatement instanceof AS3DecompilerJump && !$block->structured) {
+			// if it's a jump to the break address (i.e. to the block right after the while loop) then it's a break 
+			// if it's a jump to the continue address (i.e. the tail block containing the backward jump) then it's a continue 
+			if($block->lastStatement->address === $breakAddress) {
+				$block->lastStatement = new AS3Break;
 				$block->structured;
-			} else if($block->lastExpression->position === $continuePosition) {
-				$block->lastExpression = new AS3Continue;
+			} else if($block->lastStatement->address === $continueAddress) {
+				$block->lastStatement = new AS3Continue;
 				$block->structured;
 			}
 		}
 	}
 		
 	protected function structureIf($block, $blocks) {
-		if($block->lastExpression instanceof AS3ConditionalBranch && !$block->structured) {
-		
-			$tBlock = $blocks[$block->lastExpression->positionIfTrue];
-			$fBlock = $blocks[$block->lastExpression->positionIfFalse];
+		if($block->lastStatement instanceof AS3DecompilerBranch && !$block->structured) {
+			$tBlock = $blocks[$block->lastStatement->addressIfTrue];
+			$fBlock = $blocks[$block->lastStatement->addressIfFalse];
 			
-			$this->structureIf($tBlock, $blocks);
-			$this->structureIf($fBlock, $blocks);
-					
-			$if = new AS3IfLoop;
-			$if->condition = $block->lastExpression->condition;
-			$if->expressionsIfTrue = array();
-			$tBlock->destination =& $if->expressionsIfTrue;
+			$if = new AS3IfElse;
+			// the false block contains the statements inside the if (the conditional jump is there to skip over it)
+			// the condition for the if statement is thus the invert
+			$if->condition = $this->invertCondition($block->lastStatement->condition);
+			$fBlock->destination =& $if->statementsIfTrue;
 			
-			// if there's not other way to enter the block, then the statements must be in an else block
-			if(count($fBlock->from) == 1) {
-				$if->expressionsIfFalse = array();
-				$fBlock->destination =& $if->expressionsIfFalse;
+			// if there's no other way to enter the true block, then its statements must be in an else block
+			if(count($tBlock->from) == 1) {
+				$tBlock->destination =& $if->statementsIfFalse;
+			} else {
+				$if->statementsIfFalse = null;
 			}
-			$block->lastExpression = $if;
+			$block->lastStatement = $if;
 			$block->structured = true;
-		}
-	}
-	
-	protected function structureSwitch($block, $blocks) {
-		// look for an conditional branch into a switch lookup
-		if($block->lastExpression instanceof AS3ConditionalBranch && !$block->structured) {
-			$jumpBlock = $blocks[$block->lastExpression->positionIfTrue];
-			if($jumpBlock->lastExpression instanceof AS3UnconditionalBranch) {
-				$lookupBlock = $blocks[$jumpBlock->lastExpression->position];
-				if($lookupBlock->lastExpression instanceof AS3SwitchLookup && !$lookupBlock->structured) {
-					// find all the conditionals
-					$conditions = array();
-					$conditionBlock = $firstConditionBlock = $block;
-					while($conditionBlock->lastExpression instanceof AS3ConditionalBranch) {
-						$jumpBlock = $blocks[$conditionBlock->lastExpression->positionIfTrue];
-						$conditions[] = $conditionBlock->lastExpression->condition;
-						$conditionBlock->structured = $jumpBlock->structured = true;
-						$conditionBlock->destination = $jumpBlock->destination = false;
-						$conditionBlock = $blocks[$conditionBlock->lastExpression->positionIfFalse];
-					} 
-					$jumpBlock = $conditionBlock;
-					$jumpBlock->structured = true;
-					$jumpBlock->destination = false;
-					
-					$lookupBlock->structured = true;
-					$lookupBlock->destination = false;
-										
-					// go through the cases in reverse, so a case that falls through to the next would not grab blocks belong to the next case
-					$breakPosition = $lookupBlock->next;
-					$casePositions = $lookupBlock->lastExpression->casePositions;
-					$cases = array();
-					for($i = count($casePositions) - 1; $i >= 0; $i--) {
-						$case = new AS3SwitchCase;
-						$case->expressions = array();
-						$condition = ($i < count($conditions)) ? $conditions[$i] : null;
-						$casePosition = $casePositions[$i];
-						
-						// the last instruction should be a strict comparison branch
-						// except for the default case, which has a constant false as condition
-						if($condition instanceof AS3BinaryOperation) {
-							// the lookup object in $block->expressions is only valid to the first case
-							// a different offset is put on the stack before every jump to the lookup instruction
-							// instead generating different expressions from different paths, we'll just assume
-							// the offsets are sequential
-							$case->constant = $condition->operand1;
-						}
-						
-						// move all blocks into the case until we are at the break
-						$stack = array($casePosition);
-						while($stack) {
-							$to = array_pop($stack);
-							$toBlock = $blocks[$to];
-							if($toBlock->destination === null) {								
-								$toBlock->destination =& $case->expressions;
-		
-								// change jumps to break statements
-								$this->structureBreakContinue($toBlock, null, $breakPosition);
-								
-								// structure if statements
-								$this->structureIf($toBlock, $blocks);
-								
-								foreach($toBlock->to as $to) {
-									if($to != $breakPosition) {
-										array_push($stack, $to);
-									}
-								}
-							}
-						}
-						$cases[$i] = $case;
-					}
-					
-					// the expression is set to a local variable before comparisons are make
-					$assignment = reset($firstConditionBlock->expressions);
-					$compareValue = $assignment->operand2;
-
-					$switch = new AS3SwitchLoop;
-					$switch->compareValue = $compareValue;
-					$switch->defaultCase = array_shift($cases);
-					$switch->cases = array_reverse($cases);
-					
-					// the block that jumps to the first conditional startment block
-					// is where the switch loop should be placed
-					$switchBlock = $blocks[$firstConditionBlock->from[0]];
-					$switchBlock->lastExpression = $switch;
-				}
-			}
 		}
 	}
 	
@@ -1314,24 +579,24 @@ class AS3Decompiler {
 		// see which blocks dominates
 		$dominators = array();		
 		$dominatedByAll = array();
-		foreach($blocks as $blockPosition => $block) {
-			$dominatedByAll[$blockPosition] = true;
+		foreach($blocks as $blockAddress => $block) {
+			$dominatedByAll[$blockAddress] = true;
 		}
-		foreach($blocks as $blockPosition => $block) {
-			if($blockPosition == 0) {
-				$dominators[$blockPosition] = array(0 => true);
+		foreach($blocks as $blockAddress => $block) {
+			if($blockAddress == 0) {
+				$dominators[$blockAddress] = array(0 => true);
 			} else {
-				$dominators[$blockPosition] = $dominatedByAll;
+				$dominators[$blockAddress] = $dominatedByAll;
 			}
 		}
 		do {
 			$changed = false;
-			foreach($blocks as $blockPosition => $block) {
+			foreach($blocks as $blockAddress => $block) {
 				foreach($block->from as $from) {
-					$dominatedByBefore = $dominators[$blockPosition];
-					$dominatedBy =& $dominators[$blockPosition];
+					$dominatedByBefore = $dominators[$blockAddress];
+					$dominatedBy =& $dominators[$blockAddress];
 					$dominatedBy = array_intersect_key($dominatedBy, $dominators[$from]);
-					$dominatedBy[$blockPosition] = true;
+					$dominatedBy[$blockAddress] = true;
 					if($dominatedBy != $dominatedByBefore) {
 						$changed = true;
 					}
@@ -1340,37 +605,40 @@ class AS3Decompiler {
 		} while($changed);
 		
 		$loops = array();
-		foreach($blocks as $blockPosition => $block) {
-			if(!$block->structured && $blockPosition != 0) {
+		foreach($blocks as $blockAddress => $block) {
+			if(!$block->structured && $blockAddress != 0) {
 				foreach($block->to as $to) {
 					// a block dominated by what it goes to is a the tail of the loop
 					// that block is the loop header--it contains the conditional statement
-					if(isset($dominators[$blockPosition][$to])) {
+					if(isset($dominators[$blockAddress][$to])) {
 						$headerBlock = $blocks[$to];
-						if($headerBlock->lastExpression instanceof AS3ConditionalBranch) {
-							$loop = new AS3Loop;
-							$loop->headerPosition = $to;
-							$loop->continuePosition = $blockPosition;
-							$loop->breakPosition = $headerBlock->lastExpression->positionIfFalse;
-							$loop->contentPositions = array($loop->headerPosition, $loop->continuePosition);
+						if($headerBlock->lastStatement instanceof AS3DecompilerBranch) {
+							$loop = new AS3DecompilerLoop;
+							$loop->headerAddress = $to;
+							$loop->continueAddress = $blockAddress;
+							$loop->breakAddress = $headerBlock->lastStatement->addressIfFalse;
+							$loop->entranceAddress = $headerBlock->from[0];
+							$loop->contentAddresses = array($loop->headerAddress);
+							if($loop->continueAddress != $loop->headerAddress) {
+								$loop->contentAddresses[] = $loop->continueAddress;
+							}
 							
 							// all blocks that leads to the continue block are in the loop
 							// we won't catch blocks whose last statement is return, but that's okay
-							$stack = array($loop->continuePosition);
+							$stack = array($loop->continueAddress);
 							while($stack) {
-								$fromPosition = array_pop($stack);
-								$fromBlock = $blocks[$fromPosition];
-								foreach($fromBlock->from as $fromPosition) {
-									if(!in_array($fromPosition, $loop->contentPositions)) {
-										$loop->contentPositions[] = $fromPosition;
-										array_push($stack, $fromPosition);
+								$fromAddress = array_pop($stack);
+								$fromBlock = $blocks[$fromAddress];
+								foreach($fromBlock->from as $fromAddress) {									
+									if($fromAddress != $loop->entranceAddress && !in_array($fromAddress, $loop->contentAddresses)) {
+										$loop->contentAddresses[] = $fromAddress;
+										array_push($stack, $fromAddress);
 									}
 								}
 							}
 							
-							sort($loop->contentPositions);
-							$loop->entrancePosition = $headerBlock->from[0];
-							$loops[$blockPosition] = $loop;
+							sort($loop->contentAddresses);
+							$loops[$blockAddress] = $loop;
 							$block->structured = true;
 						}
 					}
@@ -1381,47 +649,74 @@ class AS3Decompiler {
 		// sort the loops, moving innermost ones to the beginning
 		usort($loops, array($this, 'compareLoops'));
 		
-		// add outter loop encompassing the method body
-		$loop = new AS3Loop;
-		$loop->contentPositions = array_keys($blocks);
+		// add outer loop encompassing the function body
+		$loop = new AS3DecompilerLoop;
+		$loop->contentAddresses = array_keys($blocks);
 		$loops[] = $loop;
 		
 		return $loops;
 	}
 	
 	protected function compareLoops($a, $b) {
-		if(in_array($a->headerPosition, $b->contentPositions)) {
+		if(in_array($a->headerAddress, $b->contentAddresses)) {
 			return -1;
-		} else if(in_array($b->headerPosition, $a->contentPositions)) {
+		} else if(in_array($b->headerAddress, $a->contentAddresses)) {
 			return 1;
 		}
 		return 0;
 	}
 	
-	protected function resolveName($cxt, $index) {
-		$name = $this->getName($index);
-		if($name->text !== null && $name->namespace !== null) {
-			return $name;
+	protected function invertBinaryOperator($operator) {
+		switch($operator) {
+			case '==': return '!='; 
+			case '!=': return '==';
+			case '===': return '!==';
+			case '!==': return '===';
+			case '!==': return '===';
+			case '>': return '<=';
+			case '<': return '>=';
+			case '>=': return '<';
+			case '<=': return '>';
 		}
-		$rtName = new AS3RuntimeName;
-		if($name->text !== null) {
-			$rtName->text = $name->text;
-		} else {
-			$rtName->text = array_pop($cxt->stack);
+	}
+	
+	protected function checkSideEffect($expr) {
+		if($expr instanceof AS3Expression) {
+			if($expr instanceof AS3FunctionCall) {
+				return true;
+			}
+			if($expr instanceof AS3Assignment) {
+				return true;
+			}
 		}
-		$rtName->namespace = array_pop($cxt->stack);
-		return $rtName;
+		return false;
 	}
 	
-	protected function do_add($cxt, $op) {
-		$this->do_binary_op($cxt, '+', 5, $this->typeNumber);
+	protected function invertCondition($expr) {
+		if($expr instanceof AS3UnaryOperation) {
+			if($expr->operator == '!') {
+				return $expr->operand;
+			}
+		} else if($expr instanceof AS3BinaryOperation) {
+			if($newOperator = $this->invertBinaryOperator($expr->operator)) {
+				$newExpr = clone $expr;
+				$newExpr->operator = $newOperator;
+				return $newExpr;
+			}
+		}
+		$newExpr = new AS3UnaryOperation('!', $expr, 3);
+		return $newExpr;
 	}
 	
-	protected function do_add_i($cxt, $op) {
-		$this->do_binary_op($cxt, '+', 5, $this->typeInt);
+	protected function do_add($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '+', array_pop($cxt->stack), 5, 'Number'));
 	}
 	
-	protected function do_applytype($cxt, $op) {
+	protected function do_add_i($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '+', array_pop($cxt->stack), 5, 'int'));
+	}
+	
+	protected function do_applytype($cxt) {
 		$types = array();
 		for($i = 0; $i < $op->op1; $i++) {
 			$lookup = array_pop($cxt->stack);
@@ -1435,55 +730,42 @@ class AS3Decompiler {
 		array_push($cxt->stack, $lookup);
 	}
 	
-	protected function do_astype($cxt, $op) {
-		$name = $this->getName($op->op1);
-		$expr = new AS3BinaryOperation;
-		$expr->operator = 'as';
-		$expr->operand2 = $name;
-		$expr->operand1 = array_pop($cxt->stack);
-		$expr->precedence = 7;
-		array_push($cxt->stack, $expr);
+	protected function do_astype($cxt) {
+		$name = $cxt->op->op1;
+		$this->exportNamespace($cxt, $name);
+		$name = new AS3Identifier($name->string);
+		array_push($cxt->stack, new AS3BinaryOperation($name, 'as', array_pop($cxt->stack), 7, $name));
 	}
 	
-	protected function do_astypelate($cxt, $op) {
-		$this->do_binary_op($cxt, 'as', 7, $this->typeAny);
+	protected function do_astypelate($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), 'as', array_pop($cxt->stack), 7, '*'));
 	}
 	
-	protected function do_binary_op($cxt, $operator, $precedence, $type) {
-		$expr = new AS3BinaryOperation;
-		$expr->operator = $operator;
-		$expr->operand2 = array_pop($cxt->stack);
-		$expr->operand1 = array_pop($cxt->stack);
-		$expr->precedence = $precedence;
-		$expr->type = $type;
-		array_push($cxt->stack, $expr);
+	protected function do_bitand($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '&', array_pop($cxt->stack), 9, 'int'));
 	}
 	
-	protected function do_bitand($cxt, $op) {
-		$this->do_binary_op($cxt, '&', 9, $this->typeInt);
+	protected function do_bitnot($cxt) {
+		array_push($cxt->stack, new AS3UnaryOperation('~', array_pop($cxt->stack), 3, 'int'));
 	}
 	
-	protected function do_bitnot($cxt, $op) {
-		$this->do_unary_op($cxt, '~', 3, $this->typeInt);
+	protected function do_bitor($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '|', array_pop($cxt->stack), 11, 'int'));
 	}
 	
-	protected function do_bitor($cxt, $op) {
-		$this->do_binary_op($cxt, '|', 11, $this->typeInt);
+	protected function do_bitxor($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '^', array_pop($cxt->stack), 10, 'int'));
 	}
 	
-	protected function do_bitxor($cxt, $op) {
-		$this->do_binary_op($cxt, '^', 10, $this->typeInt);
-	}
-	
-	protected function do_bkpt($cxt, $op) {
+	protected function do_bkpt($cxt) {
 		// do nothing
 	}
 	
-	protected function do_bkptline($cxt, $op) {
+	protected function do_bkptline($cxt) {
 		// do nothing
 	}
 	
-	protected function do_call($cxt, $op) {
+	protected function do_call($cxt) {
 		$expr = new AS3MethodCall;
 		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->function = new AS3PropertyLookup;
@@ -1493,7 +775,7 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 			
-	protected function do_callmethod($cxt, $op) {
+	protected function do_callmethod($cxt) {
 		$expr = new AS3MethodCall;
 		$expr->args = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
@@ -1503,7 +785,7 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_callproperty($cxt, $op) {
+	protected function do_callproperty($cxt) {
 		$expr = new AS3MethodCall;
 		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
@@ -1513,16 +795,16 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_callproplex($cxt, $op) {
-		$this->do_callproperty($cxt, $op);
+	protected function do_callproplex($cxt) {
+		$this->do_callproperty($cxt);
 	}
 	
-	protected function do_callpropvoid($cxt, $op) {
-		$this->do_callproperty($cxt, $op);
+	protected function do_callpropvoid($cxt) {
+		$this->do_callproperty($cxt);
 		return array_pop($cxt->stack);
 	}
 	
-	protected function do_callstatic($cxt, $op) {
+	protected function do_callstatic($cxt) {
 		$expr = new AS3MethodCall;
 		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
@@ -1532,12 +814,12 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_callstaticvoid($cxt, $op) {
+	protected function do_callstaticvoid($cxt) {
 		$this->callstatic($cxt);
 		return array_pop($cxt->stack);
 	}
 	
-	protected function do_callsuper($cxt, $op) {		
+	protected function do_callsuper($cxt) {		
 		$expr = new AS3MethodCall;
 		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->function = new AS3PropertyLookup;
@@ -1548,29 +830,29 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_callsupervoid($cxt, $op) {
-		$this->do_callsuper($cxt, $op);
-		return $this->do_pop($cxt, $op);
+	protected function do_callsupervoid($cxt) {
+		$this->do_callsuper($cxt);
+		return $this->do_pop($cxt);
 	}
 	
-	protected function do_coerce($cxt, $op) {
+	protected function do_coerce($cxt) {
 		$type = $this->resolveName($cxt, $op->op1);
 		$this->do_convert_x($cxt, $type);
 	}
 	
-	protected function do_checkfilter($cxt, $op) {
+	protected function do_checkfilter($cxt) {
 		// nothing happens
 	}
 	
-	protected function do_coerce_a($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeAny);
+	protected function do_coerce_a($cxt) {
+		$this->do_convert_x($cxt, '*');
 	}
 	
-	protected function do_coerce_s($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeString);
+	protected function do_coerce_s($cxt) {
+		$this->do_convert_x($cxt, 'String');
 	}
 	
-	protected function do_construct($cxt, $op) {
+	protected function do_construct($cxt) {
 		$expr = new AS3ConstructorCall;
 		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->receiver = array_pop($cxt->stack);
@@ -1579,7 +861,7 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_constructprop($cxt, $op) {
+	protected function do_constructprop($cxt) {
 		$expr = new AS3ConstructorCall;
 		$expr->arguments = ($op->op2) ? array_splice($cxt->stack, -$op->op2) : array();
 		$expr->name = $this->resolveName($cxt, $op->op1);
@@ -1588,7 +870,7 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_constructsuper($cxt, $op) {
+	protected function do_constructsuper($cxt) {
 		$expr = new AS3MethodCall;
 		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
 		$expr->function = $this->nameSuper;
@@ -1596,129 +878,125 @@ class AS3Decompiler {
 		return $expr;
 	}
 	
-	protected function do_convert_b($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeBoolean);
+	protected function do_convert_b($cxt) {
+		$this->do_convert_x($cxt, 'Boolean');
 	}
 	
-	protected function do_convert_d($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeNumber);
+	protected function do_convert_d($cxt) {
+		$this->do_convert_x($cxt, 'Number');
 	}
 	
-	protected function do_convert_i($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeInt);
+	protected function do_convert_i($cxt) {
+		$this->do_convert_x($cxt, 'int');
 	}
 	
-	protected function do_convert_o($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeObject);
+	protected function do_convert_o($cxt) {
+		$this->do_convert_x($cxt, 'Object');
 	}
 	
-	protected function do_convert_s($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeString);
+	protected function do_convert_s($cxt) {
+		$this->do_convert_x($cxt, 'String');
 	}
 	
-	protected function do_convert_u($cxt, $op) {
-		$this->do_convert_x($cxt, $this->typeUInt);
+	protected function do_convert_u($cxt) {
+		$this->do_convert_x($cxt, 'uint');
 	}
 	
 	protected function do_convert_x($cxt, $type) {
 		$val = array_pop($cxt->stack);
-		if($val instanceof AS3Literal) {
-			// just set the type
-			$val->type = $type;
-		} else if($val->type != $type) {
-			$expr = new AS3UnaryOperation;
-			$expr->operator = "($type->text)";
-			$expr->operand = $val;
-			$expr->precedence = 3;
-			$expr->type = $type;
+		if($val instanceof AS3Expression) {
+			if($val->type != $type) {
+				$val = new AS3UnaryOperation("($type)", $val, 3, $type);
+			}
 		}
 		array_push($cxt->stack, $val);
 	}
 	
-	protected function do_debug($cxt, $op) {
+	protected function do_debug($cxt) {
 		// do nothing
 	}
 	
-	protected function do_debugfile($cxt, $op) {
+	protected function do_debugfile($cxt) {
 		// do nothing
 	}
 	
-	protected function do_debugline($cxt, $op) {
+	protected function do_debugline($cxt) {
 		// do nothing
 	}
 	
-	protected function do_declocal($cxt, $op) {
-		return $this->do_unary_op_local($cxt, $op->op1, '--', 3, $this->typeNumber);
+	protected function do_declocal($cxt) {
+		return $this->do_unary_op_local($cxt, $op->op1, '--', 3, 'Number');
 	}
 	
-	protected function do_declocal_i($cxt, $op) {
-		return $this->do_unary_op_local($cxt, $op->op1, '--', 3, $this->typeNumber);
+	protected function do_declocal_i($cxt) {
+		return $this->do_unary_op_local($cxt, $op->op1, '--', 3, 'Number');
 	}
 	
-	protected function do_decrement($cxt, $op) {
-		array_push($cxt->stack, $this->literalOne);
-		$this->do_binary_op($cxt, '-', 5, $this->typeNumber);
+	protected function do_decrement($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(1.0, '-', array_pop($cxt->stack), 5, 'Number'));
 	}
 	
-	protected function do_decrement_i($cxt, $op) {
-		array_push($cxt->stack, $this->literalOne);
-		$this->do_binary_op($cxt, '-', 5, $this->typeInt);
+	protected function do_decrement_i($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(1, '-', array_pop($cxt->stack), 5, 'int'));
 	}
 	
-	protected function do_deleteproperty($cxt, $op) {
-		$this->do_getproperty($cxt, $op);
-		$this->do_unary_op($cxt, 'delete', 3, $this->typeBoolean);
+	protected function do_deleteproperty($cxt) {
+		$name = $cxt->op->op1;
+		$name = new AS3Identifier($name->string);
+		$object = array_pop($cxt->stack);
+		$property = new AS3BinaryOperation($name, '.', $object, 1, '*');
+		array_push($cxt->stack, new AS3UnaryOperation('delete', $property, 3, 'Boolean'));
 	}
 	
-	protected function do_divide($cxt, $op) {
-		$this->do_binary_op($cxt, '/', 4, $this->typeNumber);
+	protected function do_divide($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '/', array_pop($cxt->stack), 4, 'Number'));
 	}
 	
-	protected function do_dup($cxt, $op) {
-		array_push($cxt->stack, end($cxt->stack));
+	protected function do_dup($cxt) {
+		array_push($cxt->stack, $cxt->stack[count($cxt->stack) - 1]);
 	}
 	
-	protected function do_dxns($cxt, $op) {
+	protected function do_dxns($cxt) {
 		$xmlNS = $this->getString($op->op1);
 	}
 			
-	protected function do_dxnslate($cxt, $op) {
+	protected function do_dxnslate($cxt) {
 		$xmlNS = array_pop($cxt->stack);
 	}
 	
-	protected function do_equals($cxt, $op) {
-		$this->do_binary_op($cxt, '==', 8, $this->typeBoolean);
+	protected function do_equals($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '==', array_pop($cxt->stack), 8, 'Boolean'));
 	}
 	
 	/* TODO
-	protected function do_esc_xattr($cxt, $op) {
+	protected function do_esc_xattr($cxt) {
 	}*/
 	
 	/* TODO
-	protected function do_esc_xelem($cxt, $op) {
+	protected function do_esc_xelem($cxt) {
 	}*/
 	
-	protected function do_findproperty($cxt, $op) {
+	protected function do_findproperty($cxt) {
 		$name = $this->resolveName($cxt, $op->op1);
 		$object = $this->searchScopeStack($cxt, $name, false);	
 		array_push($cxt->stack, $object);
 	}
 	
-	protected function do_findpropstrict($cxt, $op) {
+	protected function do_findpropstrict($cxt) {
 		$name = $this->resolveName($cxt, $op->op1);
 		$object = $this->searchScopeStack($cxt, $name, true);	
 		array_push($cxt->stack, $object);
 	}
 	
 	/* TODO
-	protected function do_getdescendants($cxt, $op) {
+	protected function do_getdescendants($cxt) {
 	}*/
 	
-	protected function do_getglobalscope($cxt, $op) {
+	protected function do_getglobalscope($cxt) {
 		array_push($cxt->stack, $this->global);
 	}
 	
-	protected function do_getglobalslot($cxt, $op) {
+	protected function do_getglobalslot($cxt) {
 		$expr = new AS3PropertyLookUp;
 		$expr->receiver = $this->global;
 		$expr->name = $this->getSlotName($this->global, $op->op1);
@@ -1726,7 +1004,7 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_getproperty($cxt, $op) {
+	protected function do_getproperty($cxt) {
 		$expr = new AS3PropertyLookUp;
 		$expr->name = $this->resolveName($cxt, $op->op1);
 		$expr->receiver = array_pop($cxt->stack);
@@ -1734,40 +1012,17 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_getlex($cxt, $op) {
-		$expr = new AS3PropertyLookUp;
-		$expr->name = $this->resolveName($cxt, $op->op1);
-		$expr->receiver = $this->searchScopeStack($cxt, $expr->name, true);	
-		$expr->type = $this->getPropertyType($expr->receiver, $expr->name);
-		array_push($cxt->stack, $expr);
+	protected function do_getlex($cxt) {
+		$name = $this->importName($cxt->op->op1);
+		array_push($cxt->stack, $name);
 	}
 	
-	protected function do_getlocal_0($cxt, $op) {
-		$this->do_getlocal_x($cxt, 0);
+	protected function do_getlocal($cxt) {
+		$register = $op->op1;
+		array_push($cxt->stack, $register);
 	}
 	
-	protected function do_getlocal_1($cxt, $op) {
-		$this->do_getlocal_x($cxt, 1);
-	}
-	
-	protected function do_getlocal_2($cxt, $op) {
-		$this->do_getlocal_x($cxt, 2);
-	}
-	
-	protected function do_getlocal_3($cxt, $op) {
-		$this->do_getlocal_x($cxt, 3);
-	}
-	
-	protected function do_getlocal($cxt, $op) {
-		$this->do_getlocal_x($cxt, $op->op1);
-	}
-	
-	protected function do_getlocal_x($cxt, $reg) {
-		$var = $cxt->registers[$reg];
-		array_push($cxt->stack, $var);
-	}
-	
-	protected function do_getslot($cxt, $op) {
+	protected function do_getslot($cxt) {
 		$object = array_pop($cxt->stack);
 		if($object instanceof AS3Scope) {
 			$expr = $object->members[- $op->op1];
@@ -1781,12 +1036,12 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_getscopeobject($cxt, $op) {
-		$object = $cxt->scopeStack[$op->op1];
+	protected function do_getscopeobject($cxt) {
+		$object = $cxt->scopeStack[$cxt->op->op1];
 		array_push($cxt->stack, $object);
 	}
 	
-	protected function do_getsuper($cxt, $op) {
+	protected function do_getsuper($cxt) {
 		$name = $this->resolveName($cxt, $op->op1);
 		$object = array_pop($cxt->stack);
 		$expr = new AS3PropertyLookup;
@@ -1796,251 +1051,224 @@ class AS3Decompiler {
 		array_push($cxt->stack, $expr);
 	}
 		
-	protected function do_greaterthan($cxt, $op) {
-		$this->do_binary_op($cxt, '>', 7, $this->typeBoolean);
+	protected function do_greaterthan($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '>', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 	
-	protected function do_greaterequals($cxt, $op) {
-		$this->do_binary_op($cxt, '>=', 7, $this->typeBoolean);
+	protected function do_greaterequals($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '>=', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 	
-	protected function do_hasnext($cxt, $op) {
-		$expr = new AS3HasNext;
-		$expr->index = array_pop($cxt->stack);
-		$expr->object = array_pop($cxt->stack);
-		$expr->type = $this->typeBoolean;
-		array_push($cxt->stack, $expr);
+	protected function do_hasnext($cxt) {
+		array_push($cxt->stack, new AS3HasNext(array_pop($cxt->stack), array_pop($cxt->stack)));
 	}
 	
-	protected function do_hasnext2($cxt, $op) {
-		array_push($cxt->stack, $cxt->registers[$op->op1]);
-		array_push($cxt->stack, $cxt->registers[$op->op2]);
-		$this->do_hasnext($cxt, $op);
+	protected function do_hasnext2($cxt) {
+		array_push($cxt->stack, new AS3HasNext($cxt->op->op2, $cxt->op->op1));
 	}
 	
-	protected function do_ifeq($cxt, $op) {
-		// invert the logic
-		$this->do_binary_op($cxt, '!=', 8, $this->typeBoolean);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifeq($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '==', array_pop($cxt->stack), 8, 'Boolean');
+		// the if instruction is 4 bytes long
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_iffalse($cxt, $op) {
-		$ctrl = new AS3ConditionalBranch;
-		$ctrl->condition = array_pop($cxt->stack);		
-		$ctrl->positionIfFalse = $ctrl->position = $cxt->nextPosition + $op->op1;
-		$ctrl->positionIfTrue = $cxt->nextPosition;
-		return $ctrl;
+	protected function do_iffalse($cxt) {
+		$condition = new AS3UnaryOperation('!', array_pop($cxt->stack), 3, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifge($cxt, $op) {
-		$this->do_lessthan($cxt, $op);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifge($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '>=', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifgt($cxt, $op) {
-		$this->do_lessequals($cxt, $op);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifgt($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '>', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifle($cxt, $op) {
-		$this->do_greater($cxt, $op);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifle($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '<=', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 		
-	protected function do_iflt($cxt, $op) {
-		$this->do_greaterequals($cxt, $op);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_iflt($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '<', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifne($cxt, $op) {
-		$this->do_equals($cxt, $op);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifne($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '!=', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifnge($cxt, $op) {
-		$this->do_greaterequals($cxt, $op);
-		return $this->do_iffalse($cxt, $op);		
+	protected function do_ifnge($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '>=', array_pop($cxt->stack), 8, 'Boolean');
+		$condition = new AS3UnaryOperation('!', $condition, 3, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifngt($cxt, $op) {
-		$this->do_greaterthan($cxt, $op);
-		return $this->do_iffalse($cxt, $op);		
+	protected function do_ifngt($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '>', array_pop($cxt->stack), 8, 'Boolean');
+		$condition = new AS3UnaryOperation('!', $condition, 3, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifnle($cxt, $op) {
-		$this->do_lessequals($cxt, $op);
-		return $this->do_iffalse($cxt, $op);		
+	protected function do_ifnle($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '<=', array_pop($cxt->stack), 8, 'Boolean');
+		$condition = new AS3UnaryOperation('!', $condition, 3, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifnlt($cxt, $op) {
-		$this->do_lessthan($cxt, $op);
-		return $this->do_iffalse($cxt, $op);		
+	protected function do_ifnlt($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '<', array_pop($cxt->stack), 8, 'Boolean');
+		$condition = new AS3UnaryOperation('!', $condition, 3, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_ifstricteq($cxt, $op) {
-		$this->do_binary_op($cxt, '!==', 8, $this->typeBoolean);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifstricteq($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '===', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}	
 	
-	protected function do_ifstrictne($cxt, $op) {
-		$this->do_strictequals($cxt, $op);
-		return $this->do_iffalse($cxt, $op);
+	protected function do_ifstrictne($cxt) {
+		$condition = new AS3BinaryOperation(array_pop($cxt->stack), '!==', array_pop($cxt->stack), 8, 'Boolean');
+		return new AS3DecompilerBranch($condition, $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_iftrue($cxt, $op) {
-		$ctrl = new AS3ConditionalBranch;
-		$ctrl->condition = array_pop($cxt->stack);
-		$ctrl->positionIfTrue = $ctrl->position = $cxt->nextPosition + $op->op1;
-		$ctrl->positionIfFalse = $cxt->nextPosition;
-		return $ctrl;
+	protected function do_iftrue($cxt) {
+		return new AS3DecompilerBranch(array_pop($cxt->stack), $cxt->lastAddress + 4, $cxt->op->op1);
 	}
 	
-	protected function do_inclocal($cxt, $op) {
-		return $this->do_unary_op_local($cxt, $op->op1, '++', 3, $this->typeNumber);
+	protected function do_inclocal($cxt) {
+		return new AS3UnaryOperation($cxt->op->op1, '++', 3, 'Number');
 	}
 	
-	protected function do_inclocal_i($cxt, $op) {
-		return $this->do_unary_op_local($cxt, $op->op1, '++', 3, $this->typeNumber);
+	protected function do_inclocal_i($cxt) {
+		return new AS3UnaryOperation($cxt->op->op1, '++', 3, 'int');
 	}
 	
-	protected function do_in($cxt, $op) {
-		$this->do_binary_op($cxt, 'in', 7, $this->typeBoolean);
+	protected function do_in($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), 'in', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 
-	protected function do_increment($cxt, $op) {
-		array_push($cxt->stack, $this->literalOne);
-		$this->do_binary_op($cxt, '+', 5, $this->typeNumber);
+	protected function do_increment($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(1.0, '+', array_pop($cxt->stack), 5, 'Number'));
 	}
 	
-	protected function do_increment_i($cxt, $op) {
-		array_push($cxt->stack, $this->literalOne);
-		$this->do_binary_op($cxt, '+', 5, $this->typeInt);
+	protected function do_increment_i($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(1, '+', array_pop($cxt->stack), 5, 'int'));
 	}
 	
-	protected function do_initproperty($cxt, $op) {
-		return $this->do_setproperty($cxt, $op);
+	protected function do_initproperty($cxt) {
+		return $this->do_setproperty($cxt);
 	}
 	
-	protected function do_instanceof($cxt, $op) {
-		$this->do_binary_op($cxt, 'in', 7, $this->typeBoolean);
+	protected function do_instanceof($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), 'instanceof', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 	
-	protected function do_istype($cxt, $op) {
-		$name = $this->resolveName($cxt, $op->op1);
-		$expr = new AS3BinaryOperation;
-		$expr->operator = 'is';
-		$expr->operand1 = array_pop($cxt->stack);
-		$expr->operand2 = $name;
-		$expr->precedence = 7;
-		array_push($cxt->stack, $expr);
+	protected function do_istype($cxt) {
+		$name = $this->importName($cxt, $cxt->op->op1);
+		array_push($cxt->stack, new AS3BinaryOperation($name, 'is', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 
-	protected function do_istypelate($cxt, $op) {
-		$this->do_binary_op($cxt, 'is', 7, $this->typeBoolean);
+	protected function do_istypelate($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), 'is', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 	
-	protected function do_jump($cxt, $op) {
-		$ctrl = new AS3UnconditionalBranch;
-		$ctrl->position = $cxt->nextPosition + $op->op1;
-		return $ctrl;
+	protected function do_jump($cxt) {
+		return new AS3DecompilerJump($cxt->lastAddress, $cxt->op->op1);
 	}
 	
-	protected function do_kill($cxt, $op) {
-		unset($cxt->registers[$op->op1]);
+	protected function do_kill($cxt) {
+		unset($cxt->registerDeclared[$cxt->op->op1->index]);
 	}
 	
-	protected function do_label($cxt, $op) {
+	protected function do_label($cxt) {
 		// do nothing
 	}
 	
-	protected function do_lf32($cxt, $op) {
+	protected function do_lf32($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_lf64($cxt, $op) {
+	protected function do_lf64($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_li16($cxt, $op) {
+	protected function do_li16($cxt) {
 		// ignore--Alchemy instruction
 	}
 
-	protected function do_li32($cxt, $op) {
+	protected function do_li32($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_li8($cxt, $op) {
+	protected function do_li8($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_lessequals($cxt, $op) {
-		$this->do_binary_op($cxt, '<=', 7, $this->typeBoolean);
+	protected function do_lessequals($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '<=', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 	
-	protected function do_lessthan($cxt, $op) {
-		$this->do_binary_op($cxt, '<', 7, $this->typeBoolean);
+	protected function do_lessthan($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '<', array_pop($cxt->stack), 7, 'Boolean'));
 	}
 	
-	protected function do_lookupswitch($cxt, $op) {
-		$ctrl = new AS3SwitchLookup;
-		$ctrl->defaultPosition = $cxt->currentPosition + $op->op1;
-		$ctrl->casePositions = array();
-		for($i = 0, $j = 3; $i <= $op->op2; $i++, $j++) {
-			$name = "op" . $j;
-			$ctrl->casePositions[] = $cxt->currentPosition + $op->$name;
-		}
-		$ctrl->index = array_pop($cxt->stack);
-		return $ctrl;
+	protected function do_lookupswitch($cxt) {
+		return new AS3DecompilerSwitch($cxt->lastAddress, $cxt->op->op1, $cxt->op->op3);
 	}
 	
-	protected function do_lshift($cxt, $op) {
-		$this->do_binary_op($cxt, '<<', 6, $this->typeInt);
+	protected function do_lshift($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '<<', array_pop($cxt->stack), 6, 'int'));
 	}
 			
-	protected function do_modulo($cxt, $op) {
-		$this->do_binary_op($cxt, '%', 4, $this->typeNumber);
+	protected function do_modulo($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '%', array_pop($cxt->stack), 4, 'Number'));
 	}
 			
-	protected function do_multiply($cxt, $op) {
-		$this->do_binary_op($cxt, '*', 4, $this->typeNumber);
+	protected function do_multiply($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '*', array_pop($cxt->stack), 4, 'Number'));
 	}
 			
-	protected function do_multiply_i($cxt, $op) {
-		$this->do_binary_op($cxt, '*', 4, $this->typeInt);
+	protected function do_multiply_i($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '*', array_pop($cxt->stack), 4, 'int'));
 	}
 	
-	protected function do_negate($cxt, $op) {
-		$this->do_unary_op($cxt, '-', 3, $this->typeNumber);
+	protected function do_negate($cxt) {
+		array_push($cxt->stack, new AS3UnaryOperation('-', array_pop($cxt->stack), 3, 'Number'));
 	}
 	
-	protected function do_negate_i($cxt, $op) {
-		$this->do_unary_op($cxt, '-', 3, $this->typeInt);
+	protected function do_negate_i($cxt) {
+		array_push($cxt->stack, new AS3UnaryOperation('-', array_pop($cxt->stack), 3, 'int'));
 	}
 	
-	protected function do_newarray($cxt, $op) {
-		$expr = new AS3NewArray;
-		$expr->values = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
-		$expr->type = $this->typeArray;
-		array_push($cxt->stack, $expr);
+	protected function do_newarray($cxt) {
+		$count = $cxt->op->op1;
+		$items = ($count) ? array_splice($cxt->stack, -$count) : array();
+		array_push($cxt->stack, new AS3ArrayInitializer($items));
 	}
 	
-	protected function do_newactivation($cxt, $op) {
+	protected function do_newactivation($cxt) {
 		$expr = new AS3Scope;
-		$expr->type = $this->typeObject;
+		$expr->type = 'Object';
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_newcatch($cxt, $op) {
+	protected function do_newcatch($cxt) {
 		$expr = new AS3Scope;
-		$expr->type = $this->typeObject;
+		$expr->type = 'Object';
 		array_push($cxt->stack, $expr);
 	}
 	
-	protected function do_newclass($cxt, $op) {
+	protected function do_newclass($cxt) {
 		// TODO
 	}
 	
-	protected function do_newfunction($cxt, $op) {
+	protected function do_newfunction($cxt) {
 		$methodRec = $this->abcFile->methodTable[$op->op1];
 		$method = new AS3Method;
 		$method->arguments = $this->decodeMethodArguments($methodRec);
@@ -2053,201 +1281,115 @@ class AS3Decompiler {
 		array_push($cxt->stack, $method);
 	}
 	
-	protected function do_newobject($cxt, $op) {
-		$expr = new AS3NewObject;
-		$expr->names = array();
-		$expr->values = array();
-		$expr->type = $this->typeObject;
-		$pairs = $op->op1;
-		for($i = 0; $i < $pairs; $i++) {
-			$expr->values[] = array_pop($cxt->stack);
-			$expr->names[] = array_pop($cxt->stack);
-		}
-		array_push($cxt->stack, $expr);
+	protected function do_newobject($cxt) {
+		$count = $cxt->op->op1 * 2;
+		$items = ($count) ? array_splice($cxt->stack, -$count) : array();
+		array_push($cxt->stack, new AS3ObjectInitializer($items));
 	}
 	
-	protected function do_nextname($cxt, $op) {
-		array_pop($cxt->stack);
-		array_pop($cxt->stack);
-		$expr = new AS3NextName;
-		$expr->type = $this->typeString;
-		array_push($cxt->stack, $expr);
+	protected function do_nextname($cxt) {
+		array_push($cxt->stack, new AS3DecompilerNextName(array_pop($cxt->stack), array_pop($cxt->stack)));
 	}
 	
-	protected function do_nextvalue($cxt, $op) {		
-		array_pop($cxt->stack);
-		array_pop($cxt->stack);
-		$expr = new AS3NextValue;
-		array_push($cxt->stack, $expr);
+	protected function do_nextvalue($cxt) {		
+		array_push($cxt->stack, new AS3DecompilerNextValue(array_pop($cxt->stack), array_pop($cxt->stack)));
 	}
 	
-	protected function do_nop($cxt, $op) {
+	protected function do_nop($cxt) {
 	}
 	
-	protected function do_not($cxt, $op) {
-		$val = array_pop($cxt->stack);
-		$changed = false;
-		if($val instanceof AS3BinaryOperation) {
-			switch($val->operator) {
-				case '==': $newOperator = '!='; break;
-				case '!=': $newOperator = '=='; break;
-				case '===': $newOperator = '!=='; break;
-				case '!==': $newOperator = '==='; break;
-				case '!==': $newOperator = '==='; break;
-				case '>': $newOperator = '<='; break;
-				case '<': $newOperator = '>='; break;
-				case '>=': $newOperator = '<'; break;
-				case '<=': $newOperator = '>'; break;
-				default: $newOperator = null;
-			}
-			if($newOperator) {
-				$val->operator = $newOperator;
-				$changed = true;
-			}
-		} else if($val instanceof AS3UnaryOperation) {
-			if($val->operator == '!') {
-				$val = $val->operand;
-				$changed = true;
+	protected function do_not($cxt) {
+		array_push($cxt->stack, new AS3UnaryOperation('!', array_pop($cxt->stack), 3, 'Boolean'));
+	}
+	
+	protected function do_pop($cxt) {
+		$expr = array_pop($cxt->stack);
+		if(!$cxt->stack) {
+			if($this->checkSideEffect($expr)) {
+				return $expr;
 			}
 		}
-		array_push($cxt->stack, $val);
-		if(!$changed) {
-			$this->do_unary_op($cxt, '!', 3, $this->typeBoolean);
-		}
 	}
 	
-	protected function do_pop($cxt, $op) {
-		$val = array_pop($cxt->stack);
-		if($val instanceof AS3MethodCall) {
-			return $val;
-		}
+	protected function do_pushbyte($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 	
-	protected function do_pushbyte($cxt, $op) {
-		$expr = new AS3Literal;
-		$expr->value = $op->op1;
-		$expr->type = $this->typeInt;
-		array_push($cxt->stack, $expr);
-	}
-	
-	protected function do_popscope($cxt, $op) {
+	protected function do_popscope($cxt) {
 		array_pop($cxt->scopeStack);
 	}
 	
-	protected function do_pushdouble($cxt, $op) {
-		$float = $this->getDouble($op->op1);
-		$expr = new AS3Literal;
-		$expr->value = $float;
-		$expr->type = $this->typeNumber;
-		array_push($cxt->stack, $expr);
+	protected function do_pushdouble($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 
-	protected function do_pushfalse($cxt, $op) {
-		array_push($cxt->stack, $this->literalFalse);
+	protected function do_pushfalse($cxt) {
+		array_push($cxt->stack, false);
 	}
 	
-	protected function do_pushint($cxt, $op) {
-		$expr = new AS3Literal;
-		$expr->value = $this->getInt($op->op1);
-		$expr->type = $this->typeInt;
-		array_push($cxt->stack, $expr);
+	protected function do_pushint($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 	
-	protected function do_pushnamespace($cxt, $op) {
-		$expr = new AS3Literal;
-		$expr->value = $this->getNamespace($op->op1);
-		$expr->type = $this->typeString;
-		array_push($cxt->stack, $namespace);
+	protected function do_pushnamespace($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 			
-	protected function do_pushnan($cxt, $op) {
-		array_push($cxt->stack, $this->literalNaN);
+	protected function do_pushnan($cxt) {
+		array_push($cxt->stack, NAN);
 	}
 			
-	protected function do_pushnull($cxt, $op) {
-		array_push($cxt->stack, $this->literalNull);
+	protected function do_pushnull($cxt) {
+		array_push($cxt->stack, null);
 	}
 			
-	protected function do_pushscope($cxt, $op) {
+	protected function do_pushscope($cxt) {
 		$val = array_pop($cxt->stack);
 		array_push($cxt->scopeStack, $val);
 	}
 	
-	protected function do_pushshort($cxt, $op) {
-		$expr = new AS3Literal;
-		$expr->value = $op->op1;
-		$expr->type = $this->typeUInt;
-		array_push($cxt->stack, $expr);
+	protected function do_pushshort($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 	
-	protected function do_pushstring($cxt, $op) {
-		$expr = new AS3Literal;
-		$expr->value = $this->getString($op->op1);
-		$expr->type = $this->typeString;
-		array_push($cxt->stack, $expr);
+	protected function do_pushstring($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 	
-	protected function do_pushtrue($cxt, $op) {
-		array_push($cxt->stack, $this->literalTrue);
+	protected function do_pushtrue($cxt) {
+		array_push($cxt->stack, true);
 	}
 	
-	protected function do_pushundefined($cxt, $op) {
-		array_push($cxt->stack, $this->literalUndefined);
+	protected function do_pushundefined($cxt) {
+		array_push($cxt->stack, AVM2Undefined::$singleton);
 	}
 	
-	protected function do_pushuint($cxt, $op) {
-		$expr = new AS3Literal;
-		$expr->value = $this->getUInt($op->op1);
-		$expr->type = $this->typeUInt;
-		array_push($cxt->stack, $expr);
+	protected function do_pushuint($cxt) {
+		array_push($cxt->stack, $cxt->op->op1);
 	}
 	
-	protected function do_pushwith($cxt, $op) {
+	protected function do_pushwith($cxt) {
 		$object = array_pop($cxt->stack);
 		array_push($cxt->scopeStack, $object);
 	}
 	
-	protected function do_returnvalue($cxt, $op) {
-		$ctrl = new AS3Return;
-		$ctrl->value = array_pop($cxt->stack);
-		return $ctrl;
+	protected function do_returnvalue($cxt) {
+		return new AS3Return(array_pop($cxt->stack));
 	}
 	
-	protected function do_returnvoid($cxt, $op) {
-		$ctrl = new AS3Return;
-		return $ctrl;
+	protected function do_returnvoid($cxt) {
+		return new AS3Return(AVM2Undefined::$singleton);
 	}
 	
-	protected function do_rshift($cxt, $op) {
-		$this->do_binary_op($cxt, '>>', 6, $this->typeInt);
+	protected function do_rshift($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '>>', array_pop($cxt->stack), 6, 'int'));
 	}
 	
-	protected function do_setglobalslot($cxt, $op) {
+	protected function do_setglobalslot($cxt) {
 		// TODO		
 	}
 	
-	protected function do_setlocal_0($cxt, $op) {
-		return $this->do_setlocal_x($cxt, 0);
-	}
-	
-	protected function do_setlocal_1($cxt, $op) {
-		$val = array_pop($cxt->stack);
-		return $this->do_setlocal_x($cxt, 1);
-	}
-	
-	protected function do_setlocal_2($cxt, $op) {
-		return $this->do_setlocal_x($cxt, 2);
-	}
-	
-	protected function do_setlocal_3($cxt, $op) {
-		return $this->do_setlocal_x($cxt, 3);
-	}
-	
-	protected function do_setlocal($cxt, $op) {
-		return $this->do_setlocal_x($cxt, $op->op1);
-	}
-	
-	protected function do_setlocal_x($cxt, $reg) {
+	protected function do_setlocal($cxt) {
 		$val = array_pop($cxt->stack);
 		$var =& $cxt->registers[$reg];
 		if($val instanceof AS3Scope) {
@@ -2264,9 +1406,9 @@ class AS3Decompiler {
 		}
 	}
 	
-	protected function do_setproperty($cxt, $op) {
+	protected function do_setproperty($cxt) {
 		$val = array_pop($cxt->stack);
-		$this->do_getproperty($cxt, $op);
+		$this->do_getproperty($cxt);
 		$var = array_pop($cxt->stack);
 		return $this->do_set($cxt, $var, $val);
 	}
@@ -2298,354 +1440,433 @@ class AS3Decompiler {
 		return $expr;
 	}
 
-	protected function do_setslot($cxt, $op) {
+	protected function do_setslot($cxt) {
 		$val = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
 		if($object instanceof AS3Scope) {
 			$object->members[- $op->op1] = $val;
 		} else {
-			$this->do_getslot($cxt, $op);
+			$this->do_getslot($cxt);
 			$var = array_pop($cxt->stack);
 			return $this->do_set($cxt, $var, $val);
 		}
 	}
 
-	protected function do_setsuper($cxt, $op) {
+	protected function do_setsuper($cxt) {
 	}
 
-	protected function do_sf_32($cxt, $op) {
+	protected function do_sf_32($cxt) {
 		// ignore--Alchemy instruction
 	}
 
-	protected function do_sf_64($cxt, $op) {
+	protected function do_sf_64($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_si_16($cxt, $op) {
+	protected function do_si_16($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_si_32($cxt, $op) {
+	protected function do_si_32($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_si_8($cxt, $op) {
+	protected function do_si_8($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_subtract($cxt, $op) {
-		$this->do_binary_op($cxt, '-', 5, $this->typeNumber);
+	protected function do_subtract($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '-', array_pop($cxt->stack), 5, 'Number'));
 	}
 	
-	protected function do_subtract_i($cxt, $op) {
-		$this->do_binary_op($cxt, '-', 5, $this->typeInt);
+	protected function do_subtract_i($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '-', array_pop($cxt->stack), 5, 'int'));
 	}
 
-	protected function do_strictequals($cxt, $op) {
-		$this->do_binary_op($cxt, '===', 8, $this->typeBoolean);
+	protected function do_strictequals($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '===', array_pop($cxt->stack), 8, 'Boolean'));
 	}
 	
-	protected function do_swap($cxt, $op) {
+	protected function do_swap($cxt) {
 		$val1 = array_pop($cxt->stack);
 		$val2 = array_pop($cxt->stack);
 		array_push($cxt->stack, $val1);
 		array_push($cxt->stack, $val2);
 	}
 	
-	protected function do_sxi_1($cxt, $op) {
+	protected function do_sxi_1($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_sxi_16($cxt, $op) {
+	protected function do_sxi_16($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_sxi_8($cxt, $op) {
+	protected function do_sxi_8($cxt) {
 		// ignore--Alchemy instruction
 	}
 	
-	protected function do_throw($cxt, $op) {
-		$val = array_pop($cxt->stack);
-		$expr = new AS3Throw;
-		$expr->errorObject = $val;
-		return $expr;
+	protected function do_throw($cxt) {
+		return new AS3Throw(array_pop($cxt->stack));
 	}
 	
-	protected function do_typeof($cxt, $op) {
-		$this->do_unary_op($cxt, 'typeof', 3, $this->typeString);
+	protected function do_typeof($cxt) {
+		array_push($cxt->stack, new AS3UnaryOperation('typeof', array_pop($cxt->stack), 3, 'String'));
 	}
 	
-	protected function do_unary_op($cxt, $operator, $precedence, $type, $postfix = false) {
-		$expr = new AS3UnaryOperation;
-		$expr->operator = $operator;
-		$expr->precedence = $precedence;
-		$expr->postfix = $postfix;
-		$expr->operand = array_pop($cxt->stack);
-		$expr->type = $type;
-		array_push($cxt->stack, $expr);
+	protected function do_urshift($cxt) {
+		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '>>>', array_pop($cxt->stack), 6, 'uint'));
 	}
-	
-	protected function do_unary_op_local($cxt, $reg, $operator, $precedence, $type, $postfix = false) {
-		$expr = new AS3UnaryOperation;
-		$expr->operator = $operator;
-		$expr->precedence = $precedence;
-		$expr->postfix = $postfix;
-		$expr->operand = $cxt->registers[$reg];
-		$expr->type = $type;
-		return $expr;
-	}
-	
-	protected function do_urshift($cxt, $op) {
-		$this->do_binary_op($cxt, '>>>', 6, $this->typeUInt);
-	}
-
 }
 
-class AS3DecompilerContext {
-	public $stack;
-	public $registers;
-	public $scopeStack;
-	public $currentPosition;
-	public $nextPosition;
-	public $ops;
-	public $relatedBranch;
-	public $branchOnTrue;
-	public $method;
-}
-
-class AS3Namespace {
-	const NS_REGULAR		= 0x08;
-	const NS_PACKAGE		= 0x16;
-	const NS_INTERNAL		= 0x17;
-	const NS_PROTECTED		= 0x18;
-	const NS_EXPLICIT		= 0x19;
-	const NS_STATIC_PROTECTED	= 0x1A;
-	const NS_PRIVATE		= 0x05;
-
-	public $kind;
-	public $text;
-}
-
-class AS3Name {
-	public $namespace;
-	public $text;
-	public $isAttribute;
-	public $index;
-}
-
-class AS3Expression  {
+class AS3Expression {
 	public $type;
 }
 
-class AS3RuntimeName {
-	public $namespace;
-	public $text;
+class AS3SimpleStatement {
 }
 
-class AS3Literal extends AS3Expression {
+class AS3CompoundStatement {
+}
+
+class AS3BasicStatement extends AS3SimpleStatement {
+	public $expression;
+	
+	public function __construct($expr) {
+		$this->expression = $expr;
+	}
+}
+
+class AS3Identifier extends AS3Expression {
+	public $string;
+	
+	public function __construct($name) {
+		$this->string = $name;
+	}
+}
+
+class AS3VariableDeclaration extends AS3Expression {
+	public $name;
 	public $value;
+	
+	public function __construct($value, $name, $type) {
+		if(is_string($name)) {
+			$name = new AS3Identifier($name);
+		}
+		$this->name = $name;
+		$this->value = $value;
+	}
 }
 
 class AS3Operation extends AS3Expression {
-	public $operator;
 	public $precedence;
-}
-
-class AS3Constant extends AS3Variable {
-}
-
-class AS3Variable extends AS3Expression {
-	public $name;
-	public $values;
-	public $defaultValue;
-}
-
-class AS3Scope extends AS3Expression {
-	public $members;
-}
-
-class AS3Class extends AS3Expression {
-	public $name;
-	public $constructor;
-	public $members;
-	public $instance;
-	public $this;
-}
-
-class AS3ClassInstance extends AS3Expression {
-	const CLASS_SEALED		= 0x01;
-	const CLASS_FINAL		= 0x02;
-	const CLASS_INTERFACE		= 0x04;
-	const CLASS_PROTECTED_NS	= 0x08;
-
-	public $name;
-	public $parentName;
-	public $constructor;
-	public $interfaces;
-	public $protectedNamespace;
-	public $flags;
-	public $this;
-	public $super;
-}
-
-class AS3Method extends AS3Expression {
-	public $name;
-	public $arguments;
-	public $type;
-	public $expressions;
-	public $exceptions;
-	public $localVariables;
-}
-
-class AS3Function extends AS3Method {
-}
-
-class AS3Constructor extends AS3Method {
-}
-
-class AS3UnaryOperation extends AS3Operation {
-	public $operator;
-	public $operand;
-	public $postfix;
 }
 
 class AS3BinaryOperation extends AS3Operation {
 	public $operator;
 	public $operand1;
 	public $operand2;
+	
+	public function __construct($operand2, $operator, $operand1, $precedence, $type) {
+		$this->operator = $operator;
+		$this->operand1 = $operand1;
+		$this->operand2 = $operand2;
+		$this->precedence = $precedence;
+		$this->type = $type;
+	}
+}
+
+class AS3Assignment extends AS3BinaryOperation {
+
+	public function __construct($operand2, $operand1, $type) {
+		$this->operator = '=';
+		$this->operand1 = $operand1;
+		$this->operand2 = $operand2;
+		$this->precedence = 15;
+		$this->type = $type;
+	}
+}
+
+class AS3UnaryOperation extends AS3Operation {
+	public $operator;
+	public $operand;
+	
+	public function __construct($operator, $operand, $precedence, $type) {
+		$this->operator = $operator;
+		$this->operand = $operand;
+		$this->precedence = $precedence;
+		$this->type = $type;
+	}
 }
 
 class AS3TernaryConditional extends AS3Operation {
 	public $condition;
 	public $valueIfTrue;
 	public $valueIfFalse;
+	
+	public function __construct($condition, $valueIfTrue, $valueIfFalse, $type) {
+		$this->condition = $condition;
+		$this->valueIfTrue = $valueIfTrue;
+		$this->valueIfFalse = $valueIfFalse;
+		$this->precedence = 14;
+		$this->type = $type;
+	}
 }
 
-class AS3HasNext extends AS3Expression {
+class AS3ArrayAccess extends AS3Operation {
+	public $array;
 	public $index;
-	public $object;
+	
+	public function __construct($index, $array, $type) {
+		$this->array = $array;
+		$this->index = $index;
+		$this->precedence = 1;
+		$this->type = $type;
+	}
 }
 
-class AS3NextName extends AS3Expression {
-}
-
-class AS3NextValue extends AS3Expression {
-}
-
-class AS3PropertyLookUp extends AS3Operation {
-	public $receiver;
+class AS3FunctionCall extends AS3Expression {
 	public $name;
-}
-
-class AS3MethodCall extends AS3Operation {
 	public $arguments;
-	public $function;
+	
+	public function __construct($object, $name, $arguments, $type) {
+		if(is_string($name)) {
+			$name = new AS3Identifier($name);
+		}
+		if($object) {
+			$name = new AS3BinaryOperation($name, '.', $object, 1);
+		}
+		$this->name = $name;
+		$this->arguments = $arguments;
+		$this->type = $type;
+	}
 }
 
-class AS3ConstructorCall extends AS3MethodCall {
+class AS3ArrayInitializer extends AS3Expression {
+	public $items = array();
+	
+	public function __construct($items) {
+		$this->items = $items;
+		$this->type = 'Array';
+	}
 }
 
-class AS3Throw {
-	public $errorObject;
+class AS3ObjectInitializer extends AS3Expression {
+	public $items = array();
+	
+	public function __construct($items) {
+		$this->items = $items;
+		$this->type = 'Object';
+	}
 }
 
-class AS3Return {
+class AS3Return extends AS3SimpleStatement {
 	public $value;
+	
+	public function __construct($value) {
+		$this->value = $value;
+	}
 }
 
-class AS3Break {
+class AS3Throw extends AS3SimpleStatement {
+	public $object;
+	
+	public function __construct($object) {
+		$this->object = $object;
+	}
 }
 
-class AS3Continue {
+class AS3Break extends AS3SimpleStatement {
 }
 
-class AS3NewObject extends AS3Operation {
-	public $names;
-	public $values;
+class AS3Continue extends AS3SimpleStatement {
 }
 
-class AS3NewArray extends AS3Operation {
-	public $values;
-}
-
-class AS3Kill extends AS3Expression {
-}
-
-class AS3IfLoop extends AS3Expression {
+class AS3IfElse extends AS3CompoundStatement {
 	public $condition;
-	public $expressionsIfTrue;
-	public $expressionsIfFalse;
+	public $statementsIfTrue = array();
+	public $statementsIfFalse = array();
 }
 
-class AS3WhileLoop extends AS3Expression {
+class AS3DoWhile extends AS3CompoundStatement {
 	public $condition;
-	public $expressions;
+	public $statements = array();
 }
 
-class AS3ForEachLoop extends AS3Expression {
+class AS3While extends AS3DoWhile {
+}
+
+class AS3ForIn extends AS3DoWhile {
+}
+
+class AS3TryCatch extends AS3CompoundStatement {
+	public $tryStatements;
+	public $catchObject;
+	public $catchStatements;
+	public $finallyStatements;
+	
+	public function __construct($try, $catch, $finally) {
+		$this->tryStatements = $try->statements;
+		$this->catchObject = $catch->arguments[0];
+		$this->catchStatements = $catch->statements;
+		$this->finallyStatements = $finally->statements;
+	}
+}
+
+class AS3Function extends AS3CompoundStatement {
+	public $access;
+	public $scope;
+	public $name;
+	public $arguments = array();
+	public $statements = array();
+	public $returnType;
+	
+	public function __construct($name, $arguments, $returnType, $access, $scope) {
+		$this->name = $name;
+		$this->arguments = $arguments;
+		$this->returnType = $returnType;
+		$this->access = $access;
+		$this->scope = $scope;
+	}
+}
+
+class AS3Argument extends AS3SimpleStatement {
+	public $name;
+	public $type;
+	public $defaultValue;
+	
+	public function __construct($name, $type, $defaultValue) {
+		$this->name = $name;
+		$this->type = $type;
+		$this->defaultValue = $defaultValue;
+	}
+}
+
+class AS3Accessor extends AS3SimpleStatement {
+	public $type;
+	public $name;
+	
+	public function __construct($type, $name) {
+		$this->type = $type;
+		$this->name = $name;
+	}
+}
+
+class AS3Package extends AS3CompoundStatement {
+	public $namespace;
+	public $imports = array();
+	public $members = array();
+}
+
+class AS3Class extends AS3CompoundStatement {
+	public $access;
+	public $name;
+	public $members = array();
+	
+	public function __construct($name, $access) {
+		$this->access = $access;
+		$this->name = $name;
+	}
+}
+
+class AS3ClassMethod extends AS3CompoundStatement {
+	public $access;
+	public $scope;
+	public $name;
+	public $arguments;
+	public $returnType;
+	public $statements;
+	
+	public function __construct($name, $arguments, $returnType, $access, $scope) {
+		$this->name = $name;
+		$this->arguments = $arguments;
+		$this->returnType = $returnType;
+		$this->access = $access;
+		$this->scope = $scope;
+	}
+}
+
+class AS3ClassConstant extends AS3SimpleStatement {
+	public $access;
+	public $scope;
+	public $name;
+	public $value;
+	public $type;
+	
+	public function __construct($name, $value, $type, $access, $scope) {
+		$this->access = $access;
+		$this->scope = $scope;
+		$this->name = $name;
+		$this->value = $value;
+		$this->type = $type;
+	}
+}
+
+class AS3ClassVariable extends AS3SimpleStatement {
+	public $access;
+	public $scope;
+	public $name;
+	public $value;
+	public $type;
+	
+	public function __construct($name, $value, $type, $access, $scope) {
+		$this->access = $access;
+		$this->scope = $scope;
+		$this->name = $name;
+		$this->value = $value;
+		$this->type = $type;
+	}
+}
+
+// structures used in the decompiling process
+
+class AS3DecompilerContext {
+	public $op;
+	public $opQueue;
+	public $lastAddress = 0;
+	public $nextAddress = 0;
+	public $stack = array();
+	public $registerDeclared = array();
+	
+	public $relatedBranch;
+	public $branchOnTrue;
+}
+
+class AS3DecompilerFlowControl {
+}
+
+class AS3DecompilerEnumeration {
+	public $container;
+	public $variable;
+	
+	public function __construct($container) {
+		$this->container = $container;
+	}
+}
+
+class AS3DecompilerJump extends AS3DecompilerFlowControl {
+	public $address;
+	
+	public function __construct($address, $offset) {
+		$this->address = $address + $offset;
+	}
+}
+
+class AS3DecompilerBranch extends AS3DecompilerFlowControl {
 	public $condition;
-	public $expressions;
+	public $addressIfTrue;
+	public $addressIfFalse;
+	
+	public function __construct($condition, $address, $offset) {
+		$this->condition = $condition;
+		$this->addressIfTrue = $address + $offset;
+		$this->addressIfFalse = $address;
+	}
 }
 
-class AS3ForInLoop extends AS3Expression {
-	public $condition;
-	public $expressions;
-}
-
-class AS3DoWhileLoop extends AS3WhileLoop {
-}
-
-class AS3SwitchLoop {
-	public $compareValue;
-	public $cases;
-	public $defaultCase;
-}
-
-class AS3SwitchCase {
-	public $constant;
-	public $expressions;
-}
-
-class AS3TryBlock {
-	public $expressions;
-}
-
-class AS3CatchBlock {
-	public $error;
-	public $expressions;
-}
-
-class AS3FinallyBlock {
-	public $expressions;
-}
-
-class AS3FlowControl {
-}
-
-class AS3Label extends AS3FlowControl {
-	public $position;
-}
-
-class AS3UnconditionalBranch extends AS3FlowControl {
-	public $position;
-}
-
-class AS3ConditionalBranch extends AS3FlowControl {
-	public $condition;
-	public $position;
-	public $positionIfTrue;
-	public $positionIfFalse;
-}
-
-class AS3SwitchLookup extends AS3FlowControl {
-	public $index;
-	public $defaultPosition;
-	public $casePositions;
-}
-
-class AS3BasicBlock {
-	public $expressions = array();
-	public $lastExpression;
+class AS3DecompilerBasicBlock {
+	public $statements = array();
+	public $lastStatement;
 	public $from = array();
 	public $to = array();
 	public $structured = false;
@@ -2654,24 +1875,12 @@ class AS3BasicBlock {
 	public $next;
 }
 
-class AS3ExceptionBlock {
-	public $expressions;
-	public $destination;
-}
-
-class AS3Exception {
-	public $from;
-	public $to;
-	public $targets = array();
-	public $errorObjects = array();
-}
-
-class AS3Loop {
-	public $contentPositions;
-	public $headerPosition;
-	public $continuePosition;
-	public $breakPosition;
-	public $entrancePosition;
+class AS3DecompilerLoop {
+	public $contentAddresses = array();
+	public $headerAddress;
+	public $continueAddress;
+	public $breakAddress;
+	public $entranceAddress;
 }
 
 ?>

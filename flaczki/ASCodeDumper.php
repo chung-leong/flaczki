@@ -229,6 +229,8 @@ class ASCodeDumper {
 			echo "private ";
 		} else if($name->namespace instanceof AVM2PackageNamespace) {
 			echo "public ";
+		} else if($name->namespace instanceof AVM2InternalNamespace) {
+			echo "internal ";
 		}
 		if($static) {
 			echo "static ";

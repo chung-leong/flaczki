@@ -24,6 +24,9 @@ class ASSourceCodeDumper {
 	protected function processTags($tags) {
 		foreach($tags as $tag) {
 			if($tag instanceof SWFDoABCTag) {
+				$decompiler = new AS3Decompiler;
+				$packages = $decompiler->decompile($tag->abcFile);
+				$this->printStatements($packages);
 			} else if($tag instanceof SWFDoActionTag || $tag instanceof SWFDoInitActionTag) {
 				// an empty tag would still contain the zero terminator
 				if(strlen($tag->actions) > 1) {
@@ -95,6 +98,11 @@ class ASSourceCodeDumper {
 			}
 		}
 	}
+	
+	protected function printPackages($packages) {
+		foreach($packages as $package) {
+		}
+	}
 					
 	protected function printExpression($expr, $precedence = null) {
 		$type = gettype($expr);
@@ -119,17 +127,21 @@ class ASSourceCodeDumper {
 				echo "<span class='null'>null</span>";
 				break;
 			case 'object':
-				if($expr instanceof AS2Identifier) {
+				if($expr instanceof AS2Identifier || $expr instanceof AS3Identifier) {
 					echo "<span class='name'>$expr->string</span>";
-				} else if($expr instanceof AVM1Undefined) {
+				} else if($expr instanceof AVM1Undefined || $expr instanceof AVM2Undefined) {
 					echo "<span class='undefined'>undefined</span>";
-				} else if($expr instanceof AVM1Register) {
+				} else if($expr instanceof AVM1Register || $expr instanceof AVM2Register) {
 					if($expr->name) {
 						$text = $expr->name;
 					} else {
 						$text = "REG_$expr->index";
 					}
 					echo "<span class='register'>$text</span>";
+				} else if($expr instanceof AS3Argument) {
+					$this->printExpression($expr->name);
+					echo ":";
+					$this->printExpression($expr->type);
 				} else if($expr instanceof AS2Function) {
 					echo "<span class='keyword'>function</span>";
 					$this->printExpression($expr->name);
@@ -138,7 +150,7 @@ class ASSourceCodeDumper {
 					echo ") {<div class='code-block'>\n";
 					$this->printStatements($expr->statements);
 					echo "</div>}";
-				} else if($expr instanceof AS2FunctionCall) {
+				} else if($expr instanceof AS2FunctionCall || $expr instanceof AS3FunctionCall) {
 					$this->printExpression($expr->name);
 					echo "(";
 					$this->printExpressions($expr->arguments);
@@ -150,7 +162,7 @@ class ASSourceCodeDumper {
 						echo " = ";
 						$this->printExpression($expr->value);
 					}
-				} else if($expr instanceof AS2ArrayInitializer) {
+				} else if($expr instanceof AS2ArrayInitializer || $expr instanceof AS3ArrayInitializer) {
 					if($expr->items) {
 						echo "[ ";
 						$this->printExpressions($expr->items);
@@ -158,7 +170,7 @@ class ASSourceCodeDumper {
 					} else {
 						echo "[]";
 					}
-				} else if($expr instanceof AS2ObjectInitializer) {
+				} else if($expr instanceof AS2ObjectInitializer || $expr instanceof AS3ObjectInitializer) {
 					if($expr->items) {
 						echo "{ ";
 						$count = 0;
@@ -174,7 +186,7 @@ class ASSourceCodeDumper {
 					} else {
 						echo "{}";
 					}
-				} else if($expr instanceof AS2Operation) {
+				} else if($expr instanceof AS2Operation || $expr instanceof AS3Operation) {
 					static $noSpace = array('.' => true, '!' => true, '~' => true, '++' => true, '--' => true);
 					$needParentheses = ($precedence !== null && $expr instanceof AS2Operation && $precedence < $expr->precedence);
 					if($needParentheses) {
@@ -217,26 +229,56 @@ class ASSourceCodeDumper {
 	}
 	
 	protected function printStatement($stmt) {
-		if($stmt instanceof AS2SimpleStatement) {
-			if($stmt instanceof AS2BasicStatement) {
+		if($stmt instanceof AS2SimpleStatement || $stmt instanceof AS3SimpleStatement) {
+			if($stmt instanceof AS2BasicStatement || $stmt instanceof AS3BasicStatement) {
 				$this->printExpression($stmt->expression);
-			} else if($stmt instanceof AS2Break) {
+			} else if($stmt instanceof AS2Break || $stmt instanceof AS3Break) {
 				echo "<span class='keyword'>break</span>";
-			} else if($stmt instanceof AS2Continue) {
+			} else if($stmt instanceof AS2Continue || $stmt instanceof AS3Continue) {
 				echo "<span class='keyword'>continue</span>";
-			} else if($stmt instanceof AS2Return) {
+			} else if($stmt instanceof AS2Return || $stmt instanceof AS3Return) {
 				echo "<span class='keyword'>return</span>";
-				if(!($stmt->value instanceof AVM1Undefined)) {
+				if(!($stmt->value instanceof AVM1Undefined) && !($stmt->value instanceof AVM2Undefined)) {
 					echo " ";
 					$this->printExpression($stmt->value);
 				}
-			} else if($stmt instanceof AS2Throw) {
+			} else if($stmt instanceof AS2Throw || $stmt instanceof AS3Throw) {
 				echo "<span class='keyword'>throw</span>(";
 				$this->printExpression($stmt->object);
 				echo ")";
+			} else if($stmt instanceof AS3ClassVariable) {
+				if($stmt->access) {
+					echo "<span class='keyword'>$stmt->access</span> ";
+				}
+				if($stmt->scope) {
+					echo "<span class='keyword'>$stmt->scope</span> ";
+				}
+				echo "<span class='keyword'>var</span> ";
+				$this->printExpression($stmt->name);
+				echo ":";
+				$this->printExpression($stmt->type);
+				if(!($stmt->value instanceof AVM2Undefined)) {
+					echo " = ";
+					$this->printExpression($stmt->value);
+				}
+			} else if($stmt instanceof AS3ClassConstant) {
+				if($stmt->access) {
+					echo "<span class='keyword'>$stmt->access</span> ";
+				}
+				if($stmt->scope) {
+					echo "<span class='keyword'>$stmt->scope</span> ";
+				}
+				echo "<span class='keyword'>const</span> ";
+				$this->printExpression($stmt->name);
+				echo ":";
+				$this->printExpression($stmt->type);
+				if(!($stmt->value instanceof AVM2Undefined)) {
+					echo " = ";
+					$this->printExpression($stmt->value);
+				}
 			}
 			echo ";";
-		} else if($stmt instanceof AS2CompoundStatement) {
+		} else if($stmt instanceof AS2CompoundStatement || $stmt instanceof AS3CompoundStatement) {
 			if($stmt instanceof AS2IfElse) {
 				echo "<span class='keyword'>if</span>(";
 				$this->printExpression($stmt->condition);
@@ -300,15 +342,67 @@ class ASSourceCodeDumper {
 				echo ") {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->statements);
 				echo "</div>}\n";
+			} else if($stmt instanceof AS3Package) {
+				echo "<span class='keyword'>package</span> <span class='name'>";
+				$this->printExpression($stmt->namespace);
+				echo "</span> {\n<div class='code-block'>\n";
+				foreach($stmt->imports as $import) {
+					echo "<div><span class='keyword'>import</span> ";
+					$this->printExpression($import);
+					echo ";</div>";
+				}
+				foreach($stmt->members as $member) {
+					if($member->access == 'public') {
+						echo "<div>\n";
+						$this->printStatement($member);
+						echo "</div>\n";
+					}
+				}
+				echo "</div>}\n";
+				foreach($stmt->members as $member) {
+					if($member->access != 'public') {
+						echo "<div>\n";
+						$this->printStatement($member);
+						echo "</div>\n";
+					}
+				}
+			} else if($stmt instanceof AS3Class) {
+				if($stmt->access) {
+					echo "<span class='keyword'>$stmt->access</span> ";
+				}
+				echo "<span class='keyword'>class</span> <span class='name'>";
+				$this->printExpression($stmt->name);
+				echo "</span> {\n<div class='code-block'>\n";
+				$this->printStatements($stmt->members);
+				echo "</div>}\n";
+			} else if($stmt instanceof AS3ClassMethod || $stmt instanceof AS3Function) {
+				if($stmt->access) {
+					echo "<span class='keyword'>$stmt->access</span> ";
+				}
+				if($stmt->scope) {
+					echo "<span class='keyword'>$stmt->scope</span> ";
+				}
+				echo "<span class='keyword'>function</span> ";
+				$this->printExpression($stmt->name);
+				echo "(";
+				$this->printExpressions($stmt->arguments);
+				echo ")";
+				echo ":";
+				$this->printExpression($stmt->returnType);
+				if($stmt->statements) {
+					
+				} else {
+					echo ";";
+				}
 			}
 		}
 	}
 	
 	protected function printStatements($statements) {
 		foreach($statements as $stmt) {
-			echo "<div>";
+			echo "<div>\n";
 			$this->printStatement($stmt);
-			echo "</div>";
+			echo "</div>\n";
 		}
 	}
 }

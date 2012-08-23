@@ -2,14 +2,10 @@
 
 class AS2Decompiler {
 	
-	protected $constantPool;
-
 	public function decompile($actions) {
-		$this->constantPool = null;
-		
-		$decoder1 = new AVM1Decoder;
+		$decoder = new AVM1Decoder;
 		$cxt = new AS2DecompilerContext;
-		$cxt->opQueue = $decoder1->decode($actions);
+		$cxt->opQueue = $decoder->decode($actions);
 		$function = new AS2Function(null, null);
 		$this->decompileFunctionBody($cxt, $function);
 		return $function->statements;
@@ -681,7 +677,6 @@ class AS2Decompiler {
 	}
 
 	protected function doConstantPool($cxt) {
-		$this->constantPool = $cxt->op->op2;
 	}
 
 	protected function doDecrement($cxt) {
