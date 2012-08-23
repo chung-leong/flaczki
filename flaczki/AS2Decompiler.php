@@ -4,11 +4,12 @@ class AS2Decompiler {
 	
 	protected $constantPool;
 
-	public function decompile($operations) {
+	public function decompile($actions) {
 		$this->constantPool = null;
 		
+		$decoder1 = new AVM1Decoder;
 		$cxt = new AS2DecompilerContext;
-		$cxt->opQueue = $operations;
+		$cxt->opQueue = $decoder1->decode($actions);
 		$function = new AS2Function(null, null);
 		$this->decompileFunctionBody($cxt, $function);
 		return $function->statements;
