@@ -88,6 +88,7 @@ class AVM2Decoder {
 		$script = new AVM2Script;
 		$script->initializer = $this->methodTable[$scriptRec->initializerIndex];
 		$script->members = $this->decodeTraits($scriptRec->traits);
+		$script->slots = $this->decodeSlots($script->members);
 		return $script;
 	}
 	
@@ -95,6 +96,7 @@ class AVM2Decoder {
 		$class = new AVM2Class;
 		$class->constructor = $this->methodTable[$classRec->constructorIndex];
 		$class->members = $this->decodeTraits($classRec->traits);
+		$class->slots = $this->decodeSlots($class->members);
 		return $class;
 	}
 	
@@ -104,6 +106,7 @@ class AVM2Decoder {
 		$instance->constructor = $this->methodTable[$instanceRec->constructorIndex];
 		$instance->constructor->name = $instance->name;
 		$instance->members = $this->decodeTraits($instanceRec->traits);
+		$instance->slots = $this->decodeSlots($instance->members);
 		if($instanceRec->superNameIndex) {
 			$instance->parentName = $this->nameTable[$instanceRec->superNameIndex];
 		}
@@ -160,6 +163,16 @@ class AVM2Decoder {
 			$members[] = $member;
 		}
 		return $members;
+	}
+	
+	protected function decodeSlots($members) {
+		$slots = array();
+		foreach($members as $member) {
+			if($member->slotId) {
+				$slots[$member->slotId] = $member;
+			}
+		}
+		return $slots;
 	}
 	
 	protected function decodeMethod($methodRec) {
@@ -466,77 +479,77 @@ class AVM2Decoder {
 		);
 
 		static $operandHandlers = array(
-			0x53 => 'decodeU30',
-			0x86 => 'decodeNameIndex',
-			0xf2 => 'decodeU30',
-			0x41 => 'decodeU30',
-			0x43 => 'decodeMethodIndexAndArgumentCount',
-			0x46 => 'decodeNameIndexAndArgumentCount',
-			0x4c => 'decodeNameIndexAndArgumentCount',
-			0x4f => 'decodeNameIndexAndArgumentCount',
-			0x44 => 'decodeMethodIndexAndArgumentCount',
-			0x45 => 'decodeNameIndexAndArgumentCount',
-			0x4e => 'decodeNameIndexAndArgumentCount',
-			0x80 => 'decodeNameIndex',
-			0x42 => 'decodeU30',
-			0x4a => 'decodeNameIndexAndArgumentCount',
-			0x49 => 'decodeU30',
-			0xef => 'decodeDebugOperands',
-			0xf1 => 'decodeStringIndex',
-			0xf0 => 'decodeU30',
-			0x94 => 'decodeRegisterIndex',
-			0xc3 => 'decodeRegisterIndex',
-			0x6a => 'decodeNameIndex',
-			0x06 => 'decodetringIndex',
-			0x5e => 'decodeNameIndex',
-			0x5d => 'decodeNameIndex',
-			0x59 => 'decodeNameIndex',
-			0x6e => 'decodeU30',
-			0x60 => 'decodeNameIndex',
-			0x62 => 'decodeRegisterIndex',
-			0x66 => 'decodeNameIndex',
-			0x65 => 'decodeU30',
-			0x6c => 'decodeU30',
 			0x04 => 'decodeNameIndex',
-			0x32 => 'decodeTwoRegisterIndices',
-			0x13 => 'decodeS24',
-			0x12 => 'decodeS24',
-			0x18 => 'decodeS24',
-			0x17 => 'decodeS24',
-			0x16 => 'decodeS24',
-			0x15 => 'decodeS24',
-			0x14 => 'decodeS24',
-			0x0f => 'decodeS24',
-			0x0e => 'decodeS24',
-			0x0d => 'decodeS24',
+			0x05 => 'decodeNameIndex',
+			0x06 => 'decodetringIndex',
+			0x08 => 'decodeRegisterIndex',
 			0x0c => 'decodeS24',
+			0x0d => 'decodeS24',
+			0x0e => 'decodeS24',
+			0x0f => 'decodeS24',
+			0x10 => 'decodeS24',
+			0x11 => 'decodeS24',
+			0x12 => 'decodeS24',
+			0x13 => 'decodeS24',
+			0x14 => 'decodeS24',
+			0x15 => 'decodeS24',
+			0x16 => 'decodeS24',
+			0x17 => 'decodeS24',
+			0x18 => 'decodeS24',
 			0x19 => 'decodeS24',
 			0x1a => 'decodeS24',
-			0x11 => 'decodeS24',
-			0x92 => 'decodeRegisterIndex',
-			0xc2 => 'decodeRegisterIndex',
-			0x68 => 'decodeNameIndex',
-			0xb2 => 'decodeNameIndex',
-			0x10 => 'decodeS24',
-			0x08 => 'decodeRegisterIndex',
 			0x1b => 'decodeSwitchOperands',
-			0x56 => 'decodeU30',
-			0x5a => 'decodeExceptionIndex',
-			0x58 => 'decodeClassIndex',
-			0x40 => 'decodeMethodIndex',
-			0x55 => 'decodeU30',
 			0x24 => 'decodeS8',
-			0x2f => 'decodeDoubleIndex',
-			0x2d => 'decodeIntIndex',
-			0x31 => 'decodeNamespaceIndex',
 			0x25 => 'decodeS30',
 			0x2c => 'decodeStringIndex',
+			0x2d => 'decodeIntIndex',
 			0x2e => 'decodeUIntIndex',
-			0x6f => 'decodeU30',
-			0x63 => 'decodeRegisterIndex',
+			0x2f => 'decodeDoubleIndex',
+			0x31 => 'decodeNamespaceIndex',
+			0x32 => 'decodeTwoRegisterIndices',
+			0x40 => 'decodeMethodIndex',
+			0x41 => 'decodeU30',
+			0x42 => 'decodeU30',
+			0x43 => 'decodeMethodIndexAndArgumentCount',
+			0x44 => 'decodeMethodIndexAndArgumentCount',
+			0x45 => 'decodeNameIndexAndArgumentCount',
+			0x46 => 'decodeNameIndexAndArgumentCount',
+			0x49 => 'decodeU30',
+			0x4a => 'decodeNameIndexAndArgumentCount',
+			0x4c => 'decodeNameIndexAndArgumentCount',
+			0x4e => 'decodeNameIndexAndArgumentCount',
+			0x4f => 'decodeNameIndexAndArgumentCount',
+			0x53 => 'decodeU30',
+			0x55 => 'decodeU30',
+			0x56 => 'decodeU30',
+			0x58 => 'decodeClassIndex',
+			0x59 => 'decodeNameIndex',
+			0x5a => 'decodeExceptionIndex',
+			0x5d => 'decodeNameIndex',
+			0x5e => 'decodeNameIndex',
+			0x60 => 'decodeNameIndex',
 			0x61 => 'decodeNameIndex',
+			0x62 => 'decodeRegisterIndex',
+			0x63 => 'decodeRegisterIndex',
+			0x65 => 'decodeU30',
+			0x66 => 'decodeNameIndex',
+			0x68 => 'decodeNameIndex',
+			0x6a => 'decodeNameIndex',
+			0x6c => 'decodeU30',
 			0x6d => 'decodeU30',
-			0x05 => 'decodeNameIndex',
+			0x6e => 'decodeU30',
+			0x6f => 'decodeU30',
+			0x80 => 'decodeNameIndex',
+			0x86 => 'decodeNameIndex',
+			0x92 => 'decodeRegisterIndex',
+			0x94 => 'decodeRegisterIndex',
+			0xb2 => 'decodeNameIndex',
+			0xc2 => 'decodeRegisterIndex',
+			0xc3 => 'decodeRegisterIndex',
+			0xef => 'decodeDebugOperands',
+			0xf0 => 'decodeU30',
+			0xf1 => 'decodeStringIndex',
+			0xf2 => 'decodeU30',
 		);
 		
 		$this->registers = $registers;
@@ -834,22 +847,35 @@ class AVM2Register {
 	public $name;
 }
 
+class AVM2ActivionObject {
+	public $slots = array();
+	public $members = array();
+}
+
+class AVM2GlobalScope {
+	public $slots = array();
+	public $members = array();
+}
+
 class AVM2ClassInstance {
 	public $name;
 	public $interfaces;
 	public $constructor;
 	public $members;
+	public $slots;
 }
 
 class AVM2Class {
 	public $constructor;
 	public $members;
 	public $instance;
+	public $slots;
 }
 
 class AVM2Script {
 	public $initializer;
 	public $members;
+	public $slots;
 }
 
 class AVM2Method {
