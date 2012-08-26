@@ -486,42 +486,79 @@ class AS3Decompiler {
 					$condition = $headerBlock->lastStatement->condition;
 				}
 				
-				// see if there's an unconditional branch into the loop
 				$entryBlock = $blocks[$loop->entranceAddress];
-				if($entryBlock->lastStatement instanceof AS3DecompilerJump) {
-					if($condition instanceof AS3BinaryOperation && $condition->operand1 instanceof AS3DecompilerEnumeration) {
-						// a for in loop						
-						$stmt = new AS3ForIn;
-						$enumeration = $condition->operand1;
-						$condition = new AS3binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
-					} else {
-						if($entryBlock->lastStatement->address == $headerBlock->lastStatement->addressIfTrue) {
-							// it goes to the beginning of the loop so it must be a do-while
-							$stmt = new AS3DoWhile;
-						} else {			
-							$stmt = new AS3While;
+				if($condition instanceof AS3DecompilerHasNext) {
+					//  a for-in or for-each loop
+					$stmt = new AS3ForIn;
+					
+					// first, look for the assignments to temporary variable in the block before
+					$condition = $headerBlock->lastStatement->condition;
+					$loopIndex = $loopObject = null;
+					for($setStmt = end($entryBlock->statements); $setStmt && !($loopIndex && $loopObject); $setStmt = prev($entryBlock->statements)) {
+						if($setStmt instanceof AS3BasicStatement) {
+							if($setStmt->expression instanceof AS3Assignment) { 
+								if($setStmt->expression->operand1 === $condition->index) {
+									$loopIndex = $setStmt->expression->operand2;
+									unset($entryBlock->statements[key($entryBlock->statements)]);
+								} else if($setStmt->expression->operand1 === $condition->object) {
+									$loopObject = $setStmt->expression->operand2;
+									unset($entryBlock->statements[key($entryBlock->statements)]);
+								}
+							} else if($setStmt->expression instanceof AS3VariableDeclaration) {
+								if($setStmt->expression->name === $condition->index) {
+									$loopIndex = $setStmt->expression->value;
+									unset($entryBlock->statements[key($entryBlock->statements)]);
+								} else if($setStmt->expression->name === $condition->object) {
+									$loopObject = $setStmt->expression->value;
+									unset($entryBlock->statements[key($entryBlock->statements)]);
+								}
+							}
 						}
 					}
-					$entryBlock->lastStatement = $stmt;
+						
+					// look for assignment to named variable 
+					$firstBlock = $blocks[$headerBlock->lastStatement->addressIfTrue];
+					$loopVar = $loopValue = null;
+					for($setStmt = reset($firstBlock->statements); $setStmt && !$loopVar; $setStmt = next($firstBlock->statements)) {
+						if($setStmt instanceof AS3BasicStatement) {
+							if($setStmt->expression instanceof AS3Assignment) {
+								$loopVar = $setStmt->expression->operand1;
+								$loopValue = $setStmt->expression->operand2;
+								unset($firstBlock->statements[key($firstBlock->statements)]);
+							} else if($setStmt->expression instanceof AS3VariableDeclaration) {
+								$loopVar = $setStmt->expression->name;
+								$loopValue = $setStmt->expression->value;
+								unset($firstBlock->statements[key($firstBlock->statements)]);
+							}
+						}
+					}
+					if($loopValue instanceof AS3TypeCoercion) {
+						$loopValue = $loopValue->value;
+					}
+					$condition = new AS3BinaryOperation($loopObject, 'in', $loopVar, 7);
+					if($loopValue instanceof AS3DecompilerNextValue) {
+						$stmt = new AS3ForEach;
+					} else {
+						$stmt = new AS3ForIn;
+					}
 				} else {
-					// we just fall into the loop
-					if($condition instanceof AS3BinaryOperation && $condition->operand1 instanceof AS3DecompilerEnumeration) {
-						// a for in loop						
-						$stmt = new AS3ForIn;
-						$enumeration = $condition->operand1;
-						$condition = new AS3binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
+					// it's a do-while if the conditional statement is at the "bottom" of the loop
+					if($loop->headerAddress == $loop->continueAddress + 1) {
+						$stmt = new AS3DoWhile;
 					} else {
-						if($loop->headerAddress == $loop->continueAddress) {
-							// the conditional statement is at the "bottom" of the loop so it's a do-while
-							$stmt = new AS3DoWhile;
-						} else {
-							$stmt = new AS3While;
-						}
+						$stmt = new AS3While;
 					}
-					$entryBlock->statements[] = $stmt;
 				}
 				$stmt->condition = $condition;
-
+				
+				// see if there's an unconditional branch into the loop
+				if($entryBlock->lastStatement instanceof AS3DecompilerJump) {
+					// replace the jump
+					$entryBlock->lastStatement = $stmt;
+				} else {
+					// we just fall into the loop--put the statement at the end
+					$entryBlock->statements[] = $stmt;
+				}
 			} else {
 				// no header--the "loop" is the function itself
 				$stmt = $function;
@@ -925,11 +962,11 @@ class AS3Decompiler {
 	}
 	
 	protected function do_declocal($cxt) {
-		return $this->do_unary_op_local($cxt, $op->op1, '--', 3);
+		return new AS3UnaryOperation('--', $cxt->op->op1, 3);
 	}
 	
 	protected function do_declocal_i($cxt) {
-		return $this->do_unary_op_local($cxt, $op->op1, '--', 3);
+		return new AS3UnaryOperation('--', $cxt->op->op1, 3);
 	}
 	
 	protected function do_decrement($cxt) {
@@ -1138,11 +1175,11 @@ class AS3Decompiler {
 	}
 	
 	protected function do_inclocal($cxt) {
-		return new AS3UnaryOperation($cxt->op->op1, '++', 3);
+		return new AS3UnaryOperation('++', $cxt->op->op1, 3);
 	}
 	
 	protected function do_inclocal_i($cxt) {
-		return new AS3UnaryOperation($cxt->op->op1, '++', 3);
+		return new AS3UnaryOperation('++', $cxt->op->op1, 3);
 	}
 	
 	protected function do_in($cxt) {
@@ -1385,13 +1422,15 @@ class AS3Decompiler {
 	
 	protected function do_setlocal($cxt) {
 		$value = array_pop($cxt->stack);
-		$var = $cxt->op->op1;
-		$type = ($value instanceof AS3TypeCoercion) ? $value->type : '*';
-		if(isset($cxt->registerTypes[$var->index])) {
-			return new AS3Assignment($value, $var);
-		} else {
-			$cxt->registerTypes[$var->index] = $type;
-			return new AS3VariableDeclaration($value, $var, $type);
+		if(!($value instanceof AVM2ActivionObject || $value instanceof AVM2GlobalScope)) {
+			$var = $cxt->op->op1;
+			$type = ($value instanceof AS3TypeCoercion) ? $value->type : '*';
+			if(isset($cxt->registerTypes[$var->index])) {
+				return new AS3Assignment($value, $var);
+			} else {
+				$cxt->registerTypes[$var->index] = $type;
+				return new AS3VariableDeclaration($value, $var, $type);
+			}
 		}
 	}
 	
@@ -1629,7 +1668,9 @@ class AS3FunctionCall extends AS3Expression {
 			$name = new AS3Identifier($name);
 		}
 		if($object) {
-			$name = new AS3BinaryOperation($name, '.', $object, 1, '*');
+			if(!($object instanceof AVM2GlobalScope)) {
+				$name = new AS3BinaryOperation($name, '.', $object, 1, '*');
+			}
 		}
 		$this->name = $name;
 		$this->arguments = $arguments;

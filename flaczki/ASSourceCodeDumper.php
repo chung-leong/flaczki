@@ -219,6 +219,10 @@ class ASSourceCodeDumper {
 						echo isset($noSpace[$expr->operator]) ? $expr->operator : " $expr->operator ";
 						$this->printExpression($expr->operand2, $expr->precedence);
 					} else if($expr instanceof AS2UnaryOperation || $expr instanceof AS3UnaryOperation) {
+						if(!is_string($expr->operator)) {
+							dump($expr);
+							exit;
+						}
 						echo isset($noSpace[$expr->operator]) ? $expr->operator : " $expr->operator ";
 						$this->printExpression($expr->operand, $expr->precedence);
 					} else if($expr instanceof AS2TernaryConditional || $expr instanceof AS3TernaryConditional) {
