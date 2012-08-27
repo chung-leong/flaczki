@@ -136,7 +136,8 @@ class ASSourceCodeDumper {
 				break;
 			case 'object':
 				if($expr instanceof AS2Identifier || $expr instanceof AS3Identifier) {
-					echo "<span class='name'>$expr->string</span>";
+					$text = htmlspecialchars($expr->string);
+					echo "<span class='name'>$text</span>";
 				} else if($expr instanceof AVM1Undefined || $expr instanceof AVM2Undefined) {
 					echo "<span class='undefined'>undefined</span>";
 				} else if($expr instanceof AVM1Register || $expr instanceof AVM2Register) {

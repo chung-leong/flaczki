@@ -32,14 +32,26 @@ class AS3Decompiler {
 	}
 	
 	protected function importName($vmName) {
-		if(!isset($this->nameMap[$vmName->string])) {
-			$this->nameMap[$vmName->string] = $vmName;
-			if($vmName->string && $vmName->namespace->string) {
-				$qname = "{$vmName->namespace->string}.{$vmName->string}";
-				$this->imports[] = new AS3Identifier($qname);
+		if($vmName instanceof AVM2QName) {
+			if(!isset($this->nameMap[$vmName->string])) {
+				$this->nameMap[$vmName->string] = $vmName;
+				if($vmName->string && $vmName->namespace->string) {
+					$qname = "{$vmName->namespace->string}.{$vmName->string}";
+					$this->imports[] = new AS3Identifier($qname);
+				}
 			}
+			return new AS3Identifier($vmName->string ? $vmName->string : '*');
+		} else if($vmName instanceof AVMGenericName) {
+			$name = $this->importName($vmName->name);
+			$name = $name->string;
+			$types = array();
+			foreach($vmName->types as $vmTypeName) {
+				$type = $this->importName($vmTypeName);
+				$types[] = $type->string;
+			}
+			$types = implode(', ', $types);
+			return new AS3Identifier("{$name}.<$types>");
 		}
-		return new AS3Identifier($vmName->string ? $vmName->string : '*');
 	}
 	
 	protected function importArguments($vmArguments) {
@@ -392,17 +404,19 @@ class AS3Decompiler {
 			if($cxt->opAddresses[$cxt->addressIndex] != $cxt->nextAddress) {
 				$cxt->addressIndex = array_search($cxt->nextAddress, $cxt->opAddresses);
 			}
-			$op = $cxt->opQueue[$cxt->nextAddress];
-			$cxt->lastAddress = $cxt->nextAddress;
-			$cxt->addressIndex++;
-			$cxt->nextAddress = (isset($cxt->opAddresses[$cxt->addressIndex])) ? $cxt->opAddresses[$cxt->addressIndex] : null;
-			$cxt->op = $op;
-			$method = "do_$op->name";
-			$expr = $this->$method($cxt);
-			if($expr instanceof AS3Expression) {
-				return new AS3BasicStatement($expr);
-			} else {
-				return $expr;
+			if($cxt->addressIndex !== false) {
+				$op = $cxt->opQueue[$cxt->nextAddress];
+				$cxt->lastAddress = $cxt->nextAddress;
+				$cxt->addressIndex++;
+				$cxt->nextAddress = (isset($cxt->opAddresses[$cxt->addressIndex])) ? $cxt->opAddresses[$cxt->addressIndex] : null;
+				$cxt->op = $op;
+				$method = "do_$op->name";
+				$expr = $this->$method($cxt);
+				if($expr instanceof AS3Expression) {
+					return new AS3BasicStatement($expr);
+				} else {
+					return $expr;
+				}
 			}
 		}
 		return false;
@@ -776,14 +790,15 @@ class AS3Decompiler {
 	
 	protected function do_applytype($cxt) {
 		$types = array();
-		$count = $cxt->op->op1;
+		$count = $cxt->op->op1;		
 		for($i = 0; $i < $count; $i++) {
-			$lookup = array_pop($cxt->stack);
-			$types[] = $lookup->name;
+			$type = array_pop($cxt->stack);
+			$types[] = $type->string;
 		}
-		$lookup = array_pop($cxt->stack);
-		$baseType = $lookup->name;
-		array_push($cxt->stack, $lookup);
+		$types = implode(', ', $types);
+		$baseType = array_pop($cxt->stack);
+		$baseType = $baseType->string;
+		array_push($cxt->stack, new AS3Identifier("$baseType.<$types>"));
 	}
 	
 	protected function do_astype($cxt) {
@@ -1462,8 +1477,8 @@ class AS3Decompiler {
 				return new AS3VariableDeclaration($value, $var, $type);
 			}
 		} else {
-			echo "do_setslot";
-			exit;
+			//echo "do_setslot";
+			//exit;
 		}
 	}
 
@@ -1726,10 +1741,19 @@ class AS3DoWhile extends AS3CompoundStatement {
 	public $statements = array();
 }
 
-class AS3While extends AS3DoWhile {
+class AS3While extends AS3CompoundStatement {
+	public $condition;
+	public $statements = array();
 }
 
-class AS3ForIn extends AS3DoWhile {
+class AS3ForIn extends AS3CompoundStatement {
+	public $condition;
+	public $statements = array();
+}
+
+class AS3ForEach extends AS3CompoundStatement {
+	public $condition;
+	public $statements = array();
 }
 
 class AS3TryCatch extends AS3CompoundStatement {
@@ -1900,6 +1924,9 @@ class AS3DecompilerBranch extends AS3DecompilerFlowControl {
 	}
 }
 
+class AS3DecompilerSwitch extends AS3DecompilerFlowControl {
+}
+
 class AS3DecompilerHasNext {
 	public $object;
 	public $index;
@@ -1911,15 +1938,9 @@ class AS3DecompilerHasNext {
 }
 
 class AS3DecompilerNextName {
-
-	public function __construct($index, $object) {
-	}
 }
 
 class AS3DecompilerNextValue {
-
-	public function __construct($index, $object) {
-	}
 }
 
 class AS3DecompilerBasicBlock {
