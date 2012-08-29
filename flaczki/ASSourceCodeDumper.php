@@ -148,7 +148,7 @@ class ASSourceCodeDumper {
 					}
 					echo "<span class='register'>$text</span>";
 				} else if($expr instanceof AS3TypeCoercion) {
-					$this->printExpression($expr->value);
+					$this->printExpression($expr->value, $precedence);
 				} else if($expr instanceof AS3Argument) {
 					$this->printExpression($expr->name);
 					echo ":";
@@ -211,7 +211,17 @@ class ASSourceCodeDumper {
 					}
 				} else if($expr instanceof AS2Operation || $expr instanceof AS3Operation) {
 					static $noSpace = array('.' => true, '!' => true, '~' => true, '++' => true, '--' => true);
-					$needParentheses = ($precedence !== null && $expr instanceof AS2Operation && $precedence < $expr->precedence);
+					if($precedence !== null) {
+						if($expr instanceof AS2Operation && $precedence < $expr->precedence) {
+							$needParentheses = true;
+						} else if($expr instanceof AS3Operation && $precedence < $expr->precedence) {
+							$needParentheses = true;
+						} else {
+							$needParentheses = false;
+						}
+					} else {
+						$needParentheses = false;
+					}
 					if($needParentheses) {
 						echo "(";
 					}
@@ -220,10 +230,6 @@ class ASSourceCodeDumper {
 						echo isset($noSpace[$expr->operator]) ? $expr->operator : " $expr->operator ";
 						$this->printExpression($expr->operand2, $expr->precedence);
 					} else if($expr instanceof AS2UnaryOperation || $expr instanceof AS3UnaryOperation) {
-						if(!is_string($expr->operator)) {
-							dump($expr);
-							exit;
-						}
 						echo isset($noSpace[$expr->operator]) ? $expr->operator : " $expr->operator ";
 						$this->printExpression($expr->operand, $expr->precedence);
 					} else if($expr instanceof AS2TernaryConditional || $expr instanceof AS3TernaryConditional) {
