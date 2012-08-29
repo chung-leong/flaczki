@@ -771,9 +771,7 @@ class AVM2QName extends AVM2Name {
 	public $string;
 }
 
-class AVM2QNameA extends AVM2Name {
-	public $namespace;
-	public $string;
+class AVM2QNameA extends AVM2QName {
 }
 
 class AVM2RTQName extends AVM2Name {

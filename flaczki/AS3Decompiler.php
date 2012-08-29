@@ -66,12 +66,12 @@ class AS3Decompiler {
 	
 	protected function resolveName($cxt, $vmName) {
 		if($vmName instanceof AVM2QName || $vmName instanceof AVM2Multiname) {
-			return new AS3Identifier($vmName->string);
+			return new AS3Identifier($vmName->string ? $vmName->string : '*');
 		} else if($vmName instanceof AVM2RTQName || $vmName instanceof AVM2MultinameL) {
 			$name = array_pop($cxt->stack);
 			return $name;
 		} else {
-			dump_name($vmName);
+			dump($vmName);
 			echo "resolveName";
 			exit;
 		}
@@ -1168,13 +1168,15 @@ class AS3Decompiler {
 		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '==', array_pop($cxt->stack), 8));
 	}
 	
-	/* TODO
 	protected function do_esc_xattr($cxt) {
-	}*/
+		$value = array_pop($cxt->stack);
+		array_push($cxt->stack, new AS3FunctionCall($value, 'toString', array()));
+	}
 	
-	/* TODO
 	protected function do_esc_xelem($cxt) {
-	}*/
+		$value = array_pop($cxt->stack);
+		array_push($cxt->stack, new AS3FunctionCall($value, 'toString', array()));
+	}
 	
 	protected function do_findproperty($cxt) {
 		$object = $this->searchScopeStack($cxt, $cxt->op->op1);
@@ -1186,9 +1188,15 @@ class AS3Decompiler {
 		array_push($cxt->stack, $object);
 	}
 	
-	/* TODO
 	protected function do_getdescendants($cxt) {
-	}*/
+		$name = $this->resolveName($cxt, $cxt->op->op1);
+		$object = array_pop($cxt->stack);
+		if($name instanceof AS3Identifier) {
+			array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
+		} else {
+			array_push($cxt->stack, new AS3ArrayAccess($name, $object));
+		}
+	}
 	
 	protected function do_getglobalscope($cxt) {
 		array_push($cxt->stack, $this->global);
@@ -1227,9 +1235,10 @@ class AS3Decompiler {
 	
 	protected function do_getslot($cxt) {
 		$object = array_pop($cxt->stack);
-		if($object instanceof AVM2ActivionObject) {
+		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope) {
 			array_push($cxt->stack, $object->slots[$cxt->op->op1]);
 		} else {
+			dump($object);
 			echo "do_getslot";
 			exit;
 		}
@@ -1624,7 +1633,7 @@ class AS3Decompiler {
 		$slotId = $cxt->op->op1;
 		$value = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
-		if($object instanceof AVM2ActivionObject) {
+		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope) {
 			if(isset($object->slots[$slotId])) {
 				$var = $object->slots[$slotId];
 				return new AS3Assignment($value, $var);
