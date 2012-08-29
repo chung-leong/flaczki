@@ -1205,7 +1205,7 @@ class AS2Decompiler {
 		$cxtT->opQueue = $tryBody->operations;
 		$this->decompileFunctionBody($cxtT, $try);
 		
-		if($catchOps) {
+		if($catchBody) {
 			// decompile catch block
 			if($catchVar instanceof AVM1Register) {
 				$catchVar = $catchVar->name ? $catchVar->name : "REG_$catchVar->index";
@@ -1216,7 +1216,7 @@ class AS2Decompiler {
 		} else {
 			$catch = null;
 		}
-		if($finallyOps) {
+		if($finallyBody) {
 			// decompile finally block
 			$finally = new AS2Function(null, null);
 			$cxtF->opQueue = $finallyBody->operations;
@@ -1224,7 +1224,7 @@ class AS2Decompiler {
 		} else {
 			$finally = null;
 		}
-		return AS2TryCatch($try, $catch, $finally);
+		return new AS2TryCatch($try, $catch, $finally);
 	}
 
 	protected function doTypeOf($cxt) {
@@ -1441,9 +1441,9 @@ class AS2TryCatch extends AS2CompoundStatement {
 	
 	public function __construct($try, $catch, $finally) {
 		$this->tryStatements = $try->statements;
-		$this->catchObject = $catch->arguments[0];
-		$this->catchStatements = $catch->statements;
-		$this->finallyStatements = $finally->statements;
+		$this->catchObject = ($catch) ? $catch->arguments[0] : null;
+		$this->catchStatements = ($catch) ? $catch->statements : null;
+		$this->finallyStatements = ($finally) ? $finally->statements : null;
 	}
 }
 
