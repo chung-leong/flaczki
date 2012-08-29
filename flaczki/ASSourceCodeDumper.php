@@ -107,11 +107,6 @@ class ASSourceCodeDumper {
 		}
 	}
 	
-	protected function printPackages($packages) {
-		foreach($packages as $package) {
-		}
-	}
-					
 	protected function printExpression($expr, $precedence = null) {
 		$type = gettype($expr);
 		switch($type) {
@@ -247,6 +242,16 @@ class ASSourceCodeDumper {
 					if($needParentheses) {
 						echo ")";
 					}
+				} else if($expr instanceof AS3Function) {
+					echo "<span class='keyword'>function</span>";
+					echo "(";
+					$this->printExpressions($expr->arguments);
+					echo ")";
+					echo ":";
+					$this->printExpression($expr->returnType);				
+					echo " {\n<div class='code-block'>\n";
+					$this->printStatements($expr->statements);
+					echo "</div>}";
 				} else {
 					echo "!!!" . get_class($expr) . "!!!";
 				}
@@ -372,9 +377,11 @@ class ASSourceCodeDumper {
 				$this->printStatements($stmt->statements);
 				echo "</div>}\n";
 			} else if($stmt instanceof AS3Package) {
-				echo "<span class='keyword'>package</span> <span class='name'>";
-				$this->printExpression($stmt->namespace);
-				echo "</span> {\n<div class='code-block'>\n";
+				echo "<span class='keyword'>package</span> ";
+				if($stmt->namespace) {
+					$this->printExpression($stmt->namespace);
+				}
+				echo " {\n<div class='code-block'>\n";
 				foreach($stmt->imports as $import) {
 					echo "<div><span class='keyword'>import</span> ";
 					$this->printExpression($import);
@@ -413,7 +420,9 @@ class ASSourceCodeDumper {
 					echo "<span class='keyword'>$modifier</span> ";
 				}
 				echo "<span class='keyword'>function</span> ";
-				$this->printExpression($stmt->name);
+				if($stmt->name) {
+					$this->printExpression($stmt->name);
+				}
 				echo "(";
 				$this->printExpressions($stmt->arguments);
 				echo ")";

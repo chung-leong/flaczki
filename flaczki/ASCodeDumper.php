@@ -275,6 +275,23 @@ class ASCodeDumper {
 					echo "<div class='code-block'>\n";
 					$this->printOperations($operand->operations);
 					echo "</div>}";
+				} else if($operand instanceof AVM2Method) {
+					echo "function(";
+					foreach($operand->arguments as $index => $argument) {
+						echo ($index > 0) ? ",\n" : "";
+						$this->printName($argument->name);
+						echo ":";
+						$this->printName($argument->type);
+						if($argument->value) {
+							echo " = ";
+							$this->printOperand($argument->value);
+						}
+					}
+					echo "):";
+					$this->printName($operand->returnType);
+					echo " {<div class='code-block'>\n";
+					$this->printOperations($operand->body->operations);
+					echo "</div>}";
 				} else if($operand instanceof AVM1Register || $operand instanceof AVM2Register) {
 					if($operand->name) {
 						$text = "(REG_$operand->index, $operand->name)";

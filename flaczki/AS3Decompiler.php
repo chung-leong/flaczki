@@ -71,10 +71,28 @@ class AS3Decompiler {
 			$name = array_pop($cxt->stack);
 			return $name;
 		} else {
-			dump($vmName);
+			dump_name($vmName);
 			echo "resolveName";
 			exit;
 		}
+	}
+	
+	protected function getType($cxt, $value) {
+		if($value instanceof AS3TypeCoercion) {
+			return $value->type;
+		} else if($value instanceof AVM2Register) {
+			if(isset($cxt->registerTypes[$value->index])) {
+				return $cxt->registerTypes[$value->index];
+			}
+		} else if(is_scalar($value)) {
+			switch(gettype($value)) {
+				case 'string': return 'String';
+				case 'integer': return 'int';
+				case 'double': return 'Number';
+				case 'boolean': return 'Boolean';
+			}
+		}
+		return '*';
 	}
 	
 	protected function searchScopeStack($cxt, $vmName) {
@@ -265,12 +283,15 @@ class AS3Decompiler {
 								$cxt->relatedBranch->branchIfFalse = $stmt;
 							}
 							
-							if(!isset($scanned[$stmt->addressIfTrue]) || !isset($scanned[$stmt->addressIfFalse])) {
+							if(!isset($scanned[$stmt->addressIfTrue])) {
 								$cxtT = clone $cxt;
 								$cxtT->nextAddress = $stmt->addressIfTrue;
 								$cxtT->relatedBranch = $stmt;
 								$cxtT->branchOnTrue = true;
 								$contexts[] = $cxtT;
+								$hasSubbranches = true;
+							}
+							if(!isset($scanned[$stmt->addressIfFalse])) {
 								$cxt->nextAddress = $stmt->addressIfFalse;
 								$cxt->relatedBranch = $stmt;
 								$cxt->branchOnTrue = false;
@@ -296,11 +317,8 @@ class AS3Decompiler {
 				} while($changed);
 				//unset($branch->branchIfTrue, $branch->branchIfFalse);
 
-				// update the instruction pointer and clear the stack
+				// update the instruction pointer 
 				$callerCxt->nextAddress = $branch->addressIfFalse;
-				while($callerCxt->stack) {
-					array_pop($callerCxt->stack);
-				}
 			}
 		}
 	}
@@ -417,8 +435,6 @@ class AS3Decompiler {
 	
 	protected function decompileTernaryOperator($cxt, $branch) {
 		$cxtF = clone $cxt;
-		$cxtT = clone $cxt;
-		$cxtT->nextAddress = $branch->addressIfTrue;
 		$stackHeight = count($cxtF->stack);
 		$uBranch = null;
 		// keep decompiling until we hit an unconditional branch
@@ -434,6 +450,7 @@ class AS3Decompiler {
 					}
 				} else if($stmt instanceof AS3DecompilerBranch) {
 					// could be a ternary inside a ternary
+					$count = count($cxtF->stack);
 					if(!$this->decompileTernaryOperator($cxtF, $stmt)) {
 						return false;
 					}
@@ -446,14 +463,9 @@ class AS3Decompiler {
 			// the value of the operator when the conditional expression evaluates to false
 			$valueF = end($cxtF->stack);
 			
-			// see where the false branch would end up at
-			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
-				if($stmt) {
-					break;
-				}
-			}
-			
 			// get the value for the true branch by decompiling up to the destination of the unconditional jump 
+			$cxtT = clone $cxt;
+			$cxtT->nextAddress = $branch->addressIfTrue;
 			while(($stmt = $this->decompileNextInstruction($cxtT)) !== false) {
 				if($stmt) {
 					// no statement should be generated
@@ -1218,7 +1230,6 @@ class AS3Decompiler {
 		if($object instanceof AVM2ActivionObject) {
 			array_push($cxt->stack, $object->slots[$cxt->op->op1]);
 		} else {
-			dump($object);
 			echo "do_getslot";
 			exit;
 		}
@@ -1454,16 +1465,19 @@ class AS3Decompiler {
 	}
 	
 	protected function do_newfunction($cxt) {
-		$methodRec = $this->abcFile->methodTable[$op->op1];
-		$method = new AS3Method;
-		$method->arguments = $this->decodeMethodArguments($methodRec);
-		$method->type = $this->decodeType($methodRec->returnType);
-		$method->byteCodes = ($methodRec->body) ? $methodRec->body->byteCodes : '';		
-		$method->exceptions = $this->decodeExceptions($methodRec);
-		$method->expressions = array();
-		$method->localVariables = array();
-		$this->decompileMethod(null, $method);
-		array_push($cxt->stack, $method);
+		$vmMethod = $cxt->op->op1;
+		$returnType = $this->importName($vmMethod->returnType);
+		$arguments = $this->importArguments($vmMethod->arguments);
+		$function = new AS3Function(null, $arguments, $returnType, array());
+		$cxtF = new AS3DecompilerContext;
+		$cxtF->opQueue = $vmMethod->body->operations;
+		$registerTypes = array();
+		foreach($arguments as $index => $argument) {
+			$registerTypes[$index + 1] = $argument->type;
+		}
+		$cxtF->registerTypes = $registerTypes;
+		$this->decompileFunctionBody($cxtF, $function);
+		array_push($cxt->stack, $function);
 	}
 	
 	protected function do_newobject($cxt) {
@@ -1580,7 +1594,7 @@ class AS3Decompiler {
 		$value = array_pop($cxt->stack);
 		if(!($value instanceof AVM2ActivionObject || $value instanceof AVM2GlobalScope)) {
 			$var = $cxt->op->op1;
-			$type = ($value instanceof AS3TypeCoercion) ? $value->type : '*';
+			$type = $this->getType($cxt, $value);
 			if(isset($cxt->registerTypes[$var->index])) {
 				return new AS3Assignment($value, $var);
 			} else {
@@ -1618,12 +1632,12 @@ class AS3Decompiler {
 				$var = new AVM2Register;
 				$var->name = "SLOT$slotId";
 				$object->slots[$slotId] = $var;
-				$type = ($value instanceof AS3TypeCoercion) ? $value->type : '*';
+				$type = $this->getType($cxt, $value);
 				return new AS3VariableDeclaration($value, $var, $type);
 			}
 		} else {
-			//echo "do_setslot";
-			//exit;
+			dump_backtrace();
+			exit;
 		}
 	}
 
@@ -1646,22 +1660,27 @@ class AS3Decompiler {
 
 	protected function do_sf_32($cxt) {
 		// ignore--Alchemy instruction
+		array_splice($cxt->stack, -2);
 	}
 
 	protected function do_sf_64($cxt) {
 		// ignore--Alchemy instruction
+		array_splice($cxt->stack, -2);
 	}
 	
 	protected function do_si_16($cxt) {
 		// ignore--Alchemy instruction
+		array_splice($cxt->stack, -2);
 	}
 	
 	protected function do_si_32($cxt) {
 		// ignore--Alchemy instruction
+		array_splice($cxt->stack, -2);
 	}
 	
 	protected function do_si_8($cxt) {
 		// ignore--Alchemy instruction
+		array_splice($cxt->stack, -2);
 	}
 	
 	protected function do_subtract($cxt) {
@@ -1929,19 +1948,17 @@ class AS3TryCatch extends AS3CompoundStatement {
 }
 
 class AS3Function extends AS3CompoundStatement {
-	public $access;
-	public $scope;
+	public $modifiers;
 	public $name;
 	public $arguments;
 	public $statements = array();
 	public $returnType;
 	
-	public function __construct($name, $arguments, $returnType, $access, $scope) {
+	public function __construct($name, $arguments, $returnType, $modifiers) {
 		$this->name = $name;
 		$this->arguments = $arguments;
 		$this->returnType = $returnType;
-		$this->access = $access;
-		$this->scope = $scope;
+		$this->modifiers = $modifiers;
 	}
 }
 
@@ -2102,9 +2119,19 @@ class AS3DecompilerHasNext {
 }
 
 class AS3DecompilerNextName {
+
+	public function __construct($index, $object) {
+		$this->object = $object;
+		$this->index = $index;
+	}
 }
 
 class AS3DecompilerNextValue {
+
+	public function __construct($index, $object) {
+		$this->object = $object;
+		$this->index = $index;
+	}
 }
 
 class AS3DecompilerBasicBlock {
