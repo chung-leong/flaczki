@@ -282,11 +282,8 @@ class ASSourceCodeDumper {
 				$this->printExpression($stmt->object);
 				echo ")";
 			} else if($stmt instanceof AS3ClassVariable) {
-				if($stmt->access) {
-					echo "<span class='keyword'>$stmt->access</span> ";
-				}
-				if($stmt->scope) {
-					echo "<span class='keyword'>$stmt->scope</span> ";
+				foreach($stmt->modifiers as $modifier) {
+					echo "<span class='keyword'>$modifier</span> ";
 				}
 				echo "<span class='keyword'>var</span> ";
 				$this->printExpression($stmt->name);
@@ -297,11 +294,8 @@ class ASSourceCodeDumper {
 					$this->printExpression($stmt->value);
 				}
 			} else if($stmt instanceof AS3ClassConstant) {
-				if($stmt->access) {
-					echo "<span class='keyword'>$stmt->access</span> ";
-				}
-				if($stmt->scope) {
-					echo "<span class='keyword'>$stmt->scope</span> ";
+				foreach($stmt->modifiers as $modifier) {
+					echo "<span class='keyword'>$modifier</span> ";
 				}
 				echo "<span class='keyword'>const</span> ";
 				$this->printExpression($stmt->name);
@@ -387,7 +381,7 @@ class ASSourceCodeDumper {
 					echo ";</div>";
 				}
 				foreach($stmt->members as $member) {
-					if($member->access == 'public') {
+					if(in_array('public', $member->modifiers)) {
 						echo "<div>\n";
 						$this->printStatement($member);
 						echo "</div>\n";
@@ -395,27 +389,28 @@ class ASSourceCodeDumper {
 				}
 				echo "</div>}\n";
 				foreach($stmt->members as $member) {
-					if($member->access != 'public') {
+					if(!in_array('public', $member->modifiers)) {
 						echo "<div>\n";
 						$this->printStatement($member);
 						echo "</div>\n";
 					}
 				}
 			} else if($stmt instanceof AS3Class) {
-				if($stmt->access) {
-					echo "<span class='keyword'>$stmt->access</span> ";
+				foreach($stmt->modifiers as $modifier) {
+					echo "<span class='keyword'>$modifier</span> ";
 				}
-				echo "<span class='keyword'>class</span> <span class='name'>";
+				if($stmt instanceof AS3Interface) {
+					echo "<span class='keyword'>interface</span> ";
+				} else {
+					echo "<span class='keyword'>class</span> ";
+				}
 				$this->printExpression($stmt->name);
-				echo "</span> {\n<div class='code-block'>\n";
+				echo " {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->members);
 				echo "</div>}\n";
 			} else if($stmt instanceof AS3ClassMethod || $stmt instanceof AS3Function) {
-				if($stmt->access) {
-					echo "<span class='keyword'>$stmt->access</span> ";
-				}
-				if($stmt->scope) {
-					echo "<span class='keyword'>$stmt->scope</span> ";
+				foreach($stmt->modifiers as $modifier) {
+					echo "<span class='keyword'>$modifier</span> ";
 				}
 				echo "<span class='keyword'>function</span> ";
 				$this->printExpression($stmt->name);

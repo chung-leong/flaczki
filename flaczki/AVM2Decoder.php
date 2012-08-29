@@ -107,6 +107,7 @@ class AVM2Decoder {
 		$instance->constructor->name = $instance->name;
 		$instance->members = $this->decodeTraits($instanceRec->traits);
 		$instance->slots = $this->decodeSlots($instance->members);
+		$instance->flags = $instanceRec->flags;
 		if($instanceRec->superNameIndex) {
 			$instance->parentName = $this->nameTable[$instanceRec->superNameIndex];
 		}
@@ -131,6 +132,7 @@ class AVM2Decoder {
 			$member->name = $this->nameTable[$traitRec->nameIndex];
 			$member->slotId = $traitRec->slotId;
 			$member->type = $traitRec->type & 0x0F;
+			$member->flags = $traitRec->type >> 4;
 			switch($member->type) {
 				case 0:	
 					$object = new AVM2Variable;
@@ -813,16 +815,20 @@ class AVM2Metadata {
 }
 
 class AVM2ClassMember {
-	const MEMBER_VARIABLE = 0;
-	const MEMBER_CONSTANT = 6;
-	const MEMBER_METHOD = 1;
-	const MEMBER_GETTER = 2;
-	const MEMBER_SETTER = 3;
-	const MEMBER_FUNCTION = 5;
-	const MEMBER_CLASS = 4;
+	const TYPE_VARIABLE = 0;
+	const TYPE_CONSTANT = 6;
+	const TYPE_METHOD = 1;
+	const TYPE_GETTER = 2;
+	const TYPE_SETTER = 3;
+	const TYPE_FUNCTION = 5;
+	const TYPE_CLASS = 4;
+	
+	const ATTR_FINAL = 0x01;
+	const ATTR_OVERRIDE = 0x02;
 
 	public $name;
 	public $type;
+	public $flags;
 	public $object;
 	public $slotId;
 	public $metadata;
@@ -858,6 +864,10 @@ class AVM2GlobalScope {
 }
 
 class AVM2ClassInstance {
+	const ATTR_SEALED = 0x01;
+	const ATTR_FINAL = 0x02;
+	const ATTR_INTERFACE = 0x04;
+
 	public $name;
 	public $interfaces;
 	public $constructor;

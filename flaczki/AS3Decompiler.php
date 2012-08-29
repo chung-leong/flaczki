@@ -77,18 +77,6 @@ class AS3Decompiler {
 		}
 	}
 	
-	protected function getAccessModifier($vmNamespace) {
-		if($vmNamespace instanceof AVM2ProtectedNamespace) {
-			return "protected";
-		} else if($vmNamespace instanceof AVM2PrivateNamespace) {
-			return "private";
-		} else if($vmNamespace instanceof AVM2PackageNamespace) {
-			return "public";
-		} else if($vmNamespace instanceof AVM2InternalNamespace) {
-			return "internal";
-		}
-	}
-	
 	protected function searchScopeStack($cxt, $vmName) {
 		for($i = count($cxt->scopeStack) - 1; $i >= 0; $i--) {
 			$scopeObject = $vmObject = $cxt->scopeStack[$i];
@@ -121,27 +109,55 @@ class AS3Decompiler {
 		$scope = ($vmObject instanceof AVM2Class) ? 'static' : null;
 		foreach($vmMembers as $index => $vmMember) {
 			$name = new AS3Identifier($vmMember->name->string);
-			$access = $this->getAccessModifier($vmMember->name->namespace);
+			$modifiers = array();
+			
+			// add inherietance modifier
+			if($vmMember->flags & AVM2ClassMember::ATTR_FINAL) {
+				$modifiers[] = "final";
+			}
+			if($vmMember->flags & AVM2ClassMember::ATTR_OVERRIDE) {
+				$modifiers[] = "override";
+			}
+			
+			// add access modifier
+			$vmNamespace = $vmMember->name->namespace;
+			if($vmNamespace instanceof AVM2ProtectedNamespace) {
+				$modifiers[] = "protected";
+			} else if($vmNamespace instanceof AVM2PrivateNamespace) {
+				$modifiers[] = "private";
+			} else if($vmNamespace instanceof AVM2PackageNamespace) {
+				$modifiers[] = "public";
+				if($container instanceof AS3Package) {
+					$container->namespace = ($vmNamespace->string) ? new AS3Identifier($vmNamespace->string) : null;
+				}
+			} else if($vmNamespace instanceof AVM2InternalNamespace) {
+				$modifiers[] = "internal";
+			}
+			
+			// add scope modifier
+			if($scope) {
+				$modifiers[] = $scope;
+			}
 			
 			if($vmMember->object instanceof AVM2Class) {
-				$member = new AS3Class($name, $access);
+				if(!($vmMember->object->instance->flags & AVM2ClassInstance::ATTR_SEALED)) {
+					$modifiers[] = "dynamic";
+				}			
+				$member = ($vmMember->object->instance->flags & AVM2ClassInstance::ATTR_INTERFACE) ? new AS3Interface($name, $modifiers) : new AS3Class($name, $modifiers);
 				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member);
 				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member);
-				if($access == 'public') {
-					$container->namespace = new AS3Identifier($vmMember->name->namespace->string);
-				}
 			} else if($vmMember->object instanceof AVM2Method) {
 				$returnType = $this->importName($vmMember->object->returnType);
 				$arguments = $this->importArguments($vmMember->object->arguments);
-				if($vmMember->type == AVM2ClassMember::MEMBER_GETTER) {
+				if($vmMember->type == AVM2ClassMember::TYPE_GETTER) {
 					$name = new AS3Accessor('get', $name);
-				} else if($vmMember->type == AVM2ClassMember::MEMBER_SETTER) {
+				} else if($vmMember->type == AVM2ClassMember::TYPE_SETTER) {
 					$name = new AS3Accessor('set', $name);
 				}
 				if($container instanceof AS3Class) {
-					$member = new AS3ClassMethod($name, $arguments, $returnType, $access, $scope);
+					$member = new AS3ClassMethod($name, $arguments, $returnType, $modifiers);
 				} else {
-					$member = new AS3Function($name, $arguments, $returnType, $access);
+					$member = new AS3Function($name, $arguments, $returnType, $modifiers);
 				}
 				if($vmMember->object->body) {
 					$cxt = new AS3DecompilerContext;
@@ -156,9 +172,9 @@ class AS3Decompiler {
 					$this->decompileFunctionBody($cxt, $member);
 				}
 			} else if($vmMember->object instanceof AVM2Variable) {
-				$member = new AS3ClassVariable($name, $vmMember->object->value, $this->importName($vmMember->object->type), $access, $scope);
+				$member = new AS3ClassVariable($name, $vmMember->object->value, $this->importName($vmMember->object->type), $modifiers);
 			} else if($vmMember->object instanceof AVM2Constant) {
-				$member = new AS3ClassConstant($name, $vmMember->object->value, $this->importName($vmMember->object->type), $access, $scope);
+				$member = new AS3ClassConstant($name, $vmMember->object->value, $this->importName($vmMember->object->type), $modifiers);
 			}
 			$container->members[] = $member;
 			if($vmMember->slotId) {
@@ -1002,7 +1018,8 @@ class AS3Decompiler {
 		$argumentCount = $cxt->op->op1;
 		$arguments = ($argumentCount > 0) ? array_splice($cxt->stack, -$argumentCount) : array();
 		$object = array_pop($cxt->stack);
-		array_push($cxt->stack, $object);
+		$constructor = new AS3FunctionCall(null, $object, $arguments);
+		array_push($cxt->stack, new AS3UnaryOperation('new', $constructor, 1));
 	}
 	
 	protected function do_constructprop($cxt) {		
@@ -1111,7 +1128,11 @@ class AS3Decompiler {
 	protected function do_deleteproperty($cxt) {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		$property = new AS3BinaryOperation($name, '.', $object, 1);
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+			$property = new AS3BinaryOperation($name, '.', $object, 1);
+		} else {
+			$property = $name;
+		}
 		array_push($cxt->stack, new AS3UnaryOperation('delete', $property, 3));
 	}
 	
@@ -1124,7 +1145,7 @@ class AS3Decompiler {
 	}
 	
 	protected function do_dxns($cxt) {
-		$xmlNS = $this->getString($op->op1);
+		$xmlNS = $cxt->op->op1;
 	}
 			
 	protected function do_dxnslate($cxt) {
@@ -1172,10 +1193,14 @@ class AS3Decompiler {
 	protected function do_getproperty($cxt) {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if($name instanceof AS3Identifier) {
-			array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+			if($name instanceof AS3Identifier) {
+				array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
+			} else {
+				array_push($cxt->stack, new AS3ArrayAccess($name, $object));
+			}
 		} else {
-			array_push($cxt->stack, new AS3ArrayAccess($name, $object));
+			array_push($cxt->stack, $name);
 		}
 	}
 	
@@ -1459,7 +1484,12 @@ class AS3Decompiler {
 	}
 	
 	protected function do_not($cxt) {
-		array_push($cxt->stack, new AS3Negation(array_pop($cxt->stack)));
+		$value = array_pop($cxt->stack);
+		if($value instanceof AS3Negation) {
+			array_push($cxt->stack, $value->operand);
+		} else {
+			array_push($cxt->stack, new AS3Negation($value));
+		}
 	}
 	
 	protected function do_pop($cxt) {
@@ -1564,10 +1594,14 @@ class AS3Decompiler {
 		$value = array_pop($cxt->stack);
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if($name instanceof AS3Identifier) {
-			$var = new AS3BinaryOperation($name, '.', $object, 1);
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+			if($name instanceof AS3Identifier) {
+				$var = new AS3BinaryOperation($name, '.', $object, 1);
+			} else {
+				$var = new AS3ArrayAccess($name, $object);
+			}
 		} else {
-			$var = new AS3ArrayAccess($name, $object);
+			$var = $name;
 		}
 		return new AS3Assignment($value, $var);
 	}
@@ -1598,10 +1632,14 @@ class AS3Decompiler {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
 		$object = new AS3Identifier("super");
-		if($name instanceof AS3Identifier) {
-			$var = new AS3BinaryOperation($name, '.', $object, 1);
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+			if($name instanceof AS3Identifier) {
+				$var = new AS3BinaryOperation($name, '.', $object, 1);
+			} else {
+				$var = new AS3ArrayAccess($name, $object);
+			}
 		} else {
-			$var = new AS3ArrayAccess($name, $object);
+			$var = $name;
 		}
 		return new AS3Assignment($value, $var);
 	}
@@ -1936,62 +1974,60 @@ class AS3Package extends AS3CompoundStatement {
 }
 
 class AS3Class extends AS3CompoundStatement {
-	public $access;
+	public $modifiers;
 	public $name;
 	public $members = array();
+	public $interfaces = array();
 	
-	public function __construct($name, $access) {
-		$this->access = $access;
+	public function __construct($name, $modifiers) {
+		$this->modifiers = $modifiers;
 		$this->name = $name;
 	}
 }
 
+class AS3Interface extends AS3Class {
+}
+
 class AS3ClassMethod extends AS3CompoundStatement {
-	public $access;
-	public $scope;
+	public $modifiers;
 	public $name;
 	public $arguments;
 	public $returnType;
 	public $statements = array();
 	
-	public function __construct($name, $arguments, $returnType, $access, $scope) {
+	public function __construct($name, $arguments, $returnType, $modifiers) {
 		$this->name = $name;
 		$this->arguments = $arguments;
 		$this->returnType = $returnType;
-		$this->access = $access;
-		$this->scope = $scope;
+		$this->modifiers = $modifiers;
 	}
 }
 
 class AS3ClassConstant extends AS3SimpleStatement {
-	public $access;
-	public $scope;
+	public $modifiers;
 	public $name;
 	public $value;
 	public $type;
 	
-	public function __construct($name, $value, $type, $access, $scope) {
-		$this->access = $access;
-		$this->scope = $scope;
+	public function __construct($name, $value, $type, $modifiers) {
 		$this->name = $name;
 		$this->value = $value;
 		$this->type = $type;
+		$this->modifiers = $modifiers;
 	}
 }
 
 class AS3ClassVariable extends AS3SimpleStatement {
-	public $access;
-	public $scope;
+	public $modifiers;
 	public $name;
 	public $value;
 	public $type;
 	
-	public function __construct($name, $value, $type, $access, $scope) {
-		$this->access = $access;
-		$this->scope = $scope;
+	public function __construct($name, $value, $type, $modifiers) {
 		$this->name = $name;
 		$this->value = $value;
 		$this->type = $type;
+		$this->modifiers = $modifiers;
 	}
 }
 

@@ -165,9 +165,9 @@ class ASCodeDumper {
 				echo "<div>\n";
 				$this->printMemberModifiers($member->name, $static);
 				echo "function ";
-				if($member->type == AVM2ClassMember::MEMBER_GETTER) {
+				if($member->type == AVM2ClassMember::TYPE_GETTER) {
 					echo "get ";
-				} else if($member->type == AVM2ClassMember::MEMBER_SETTER) {
+				} else if($member->type == AVM2ClassMember::TYPE_SETTER) {
 					echo "set ";
 				}
 				$this->printName($member->name);
