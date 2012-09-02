@@ -164,6 +164,22 @@ class AS3Decompiler {
 				$member = ($vmMember->object->instance->flags & AVM2ClassInstance::ATTR_INTERFACE) ? new AS3Interface($name, $modifiers) : new AS3Class($name, $modifiers);
 				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member);
 				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member);
+				
+				$arguments = $this->importArguments($vmMember->object->constructor->arguments);
+				$constructor = new AS3ClassMethod($name, $arguments, null, array('public'));
+				if($vmMember->object->instance->constructor->body) {
+					$cxt = new AS3DecompilerContext;
+					$cxt->opQueue = $vmMember->object->instance->constructor->body->operations;
+					
+					// set register types of arguments
+					$registerTypes = array();
+					foreach($arguments as $index => $argument) {
+						$registerTypes[$index + 1] = $argument->type;
+					}
+					$cxt->registerTypes = $registerTypes;
+					$this->decompileFunctionBody($cxt, $constructor);
+				}
+				$member->members[] = $constructor;
 			} else if($vmMember->object instanceof AVM2Method) {
 				$returnType = $this->importName($vmMember->object->returnType);
 				$arguments = $this->importArguments($vmMember->object->arguments);
@@ -233,6 +249,13 @@ class AS3Decompiler {
 							} else if($stmt instanceof AS3DecompilerJump) {
 								// jump to the location and continue
 								$cxt->nextAddress = $stmt->address;
+							} else if($stmt instanceof AS3DecompilerSwitch) {
+								foreach($stmt->caseAddresses as $caseAddress) {
+									$cxtC = clone $cxt;
+									$cxtC->nextAddress = $caseAddress;
+									$contexts[] = $cxtC;
+								}
+								$cxt->nextAddress = $stmt->defaultAddress;
 							}
 						}
 					
@@ -513,16 +536,21 @@ class AS3Decompiler {
 	protected function createBasicBlocks($statements) {
 		// find block entry addresses
 		$isEntry = array(0 => true);
-		foreach($statements as $ip => $expr) {
-			if($expr instanceof AS3DecompilerBranch) {
-				$isEntry[$expr->addressIfTrue] = true;
-				$isEntry[$expr->addressIfFalse] = true;
-			} else if($expr instanceof AS3DecompilerJump) {
-				$isEntry[$expr->address] = true;
+		foreach($statements as $ip => $stmt) {
+			if($stmt instanceof AS3DecompilerBranch) {
+				$isEntry[$stmt->addressIfTrue] = true;
+				$isEntry[$stmt->addressIfFalse] = true;
+			} else if($stmt instanceof AS3DecompilerJump) {
+				$isEntry[$stmt->address] = true;
+			} else if($stmt instanceof AS3DecompilerSwitch) {
+				foreach($stmt->caseAddresses as $address) {
+					$isEntry[$address] = true;
+				}
+				$isEntry[$stmt->defaultAddress] = true;
 			}
 		}
 		
-		// put nulls into place where there's no statement 
+		// put nulls into places where there's no statement 
 		foreach($isEntry as $ip => $state) {
 			if(!isset($statements[$ip])) {
 				$statements[$ip] = null;
@@ -532,7 +560,7 @@ class AS3Decompiler {
 
 		$blocks = array();
 		$prev = null;
-		foreach($statements as $ip => $expr) {
+		foreach($statements as $ip => $stmt) {
 			if(isset($isEntry[$ip])) {				
 				if(isset($block)) {
 					$block->next = $ip;
@@ -542,18 +570,24 @@ class AS3Decompiler {
 				$block->prev = $prev;
 				$prev = $ip;
 			}
-			if($expr) {
-				$block->statements[$ip] = $expr;
+			if($stmt) {
+				$block->statements[$ip] = $stmt;
 				$block->lastStatement =& $block->statements[$ip];
 			}
 		}
 
 		foreach($blocks as $blockAddress => $block) {
-			if($block->lastStatement instanceof AS3DecompilerBranch) {
-				$block->to[] = $block->lastStatement->addressIfTrue;
-				$block->to[] = $block->lastStatement->addressIfFalse;
-			} else if($block->lastStatement instanceof AS3DecompilerJump) {
-				$block->to[] = $block->lastStatement->address;
+			$stmt = $block->lastStatement;
+			if($stmt instanceof AS3DecompilerBranch) {
+				$block->to[] = $stmt->addressIfTrue;
+				$block->to[] = $stmt->addressIfFalse;
+			} else if($stmt instanceof AS3DecompilerJump) {
+				$block->to[] = $stmt->address;
+			} else if($stmt instanceof AS3DecompilerSwitch) {
+				foreach($stmt->caseAddresses as $address) {
+					$block->to[] = $address;
+				}
+				$block->to[] = $stmt->defaultAddress;
 			} else {
 				if($block->next !== null) {
 					$block->to[] = $block->next;
@@ -666,6 +700,13 @@ class AS3Decompiler {
 				$stmt = $function;
 			}
 
+			// recreate switch statements first, so breaks in it don't get changed to continues 
+			// when there's a switch inside a loop (the break in the switch would jump to the continue block of the loop)
+			foreach($loop->contentAddresses as $blockAddress) {
+				$block = $blocks[$blockAddress];
+				$this->structureSwitch($block, $blocks);
+			}
+			
 			// convert jumps to breaks and continues
 			foreach($loop->contentAddresses as $blockAddress) {
 				$block = $blocks[$blockAddress];
@@ -742,6 +783,93 @@ class AS3Decompiler {
 			}
 			$block->lastStatement = $if;
 			$block->structured = true;
+		}
+	}
+	
+	protected function structureSwitch($block, $blocks) {
+		// look for a branch into a switch lookup
+		if($block->lastStatement instanceof AS3DecompilerBranch && !$block->structured) {
+			// condition evaluating to false means we go into the case 
+			$jumpBlock = $blocks[$block->lastStatement->addressIfFalse];
+			if($jumpBlock->lastStatement instanceof AS3DecompilerJump) {
+				$lookupBlock = $blocks[$jumpBlock->lastStatement->address];
+				if($lookupBlock->lastStatement instanceof AS3DecompilerSwitch && !$lookupBlock->structured) {
+					// find all the conditionals
+					$conditions = array();
+					$conditionBlock = $firstConditionBlock = $block;
+					while($conditionBlock->lastStatement instanceof AS3DecompilerBranch) {
+						$jumpBlock = $blocks[$conditionBlock->lastStatement->addressIfFalse];
+						$conditions[] = $conditionBlock->lastStatement->condition;
+						$conditionBlock->structured = $jumpBlock->structured = true;
+						$conditionBlock->destination = $jumpBlock->destination = false;
+						$conditionBlock = $blocks[$conditionBlock->lastStatement->addressIfTrue];
+					} 
+					$jumpBlock = $conditionBlock;
+					$jumpBlock->structured = true;
+					$jumpBlock->destination = false;
+					
+					$lookupBlock->structured = true;
+					$lookupBlock->destination = false;
+										
+					// go through the cases in reverse, so a case that falls through to the next would not grab blocks belong to the next case
+					$breakAddress = $lookupBlock->next;
+					$caseAddresses = $lookupBlock->lastStatement->caseAddresses;
+					$cases = array();
+					for($i = count($caseAddresses) - 1; $i >= 0; $i--) {
+						$case = new AS3SwitchCase;
+						$case->statements = array();
+						$condition = ($i < count($conditions)) ? $conditions[$i] : null;
+						$caseAddress = $caseAddresses[$i];
+						
+						// the last instruction should be a strict comparison branch
+						// except for the default case, which has a constant false as condition
+						if($condition instanceof AS3BinaryOperation) {
+							// the lookup object in $block->statements is only valid to the first case
+							// a different offset is put on the stack before every jump to the lookup instruction
+							// instead generating different statements from different paths, we'll just assume
+							// the offsets are sequential
+							$case->constant = $condition->operand1;
+						}
+						
+						// move all blocks into the case until we are at the break
+						$stack = array($caseAddress);
+						while($stack) {
+							$to = array_pop($stack);
+							$toBlock = $blocks[$to];
+							if($toBlock->destination === null) {								
+								$toBlock->destination =& $case->statements;
+		
+								// change jumps to break statements
+								$this->structureBreakContinue($toBlock, null, $breakAddress);
+								
+								// structure if statements
+								$this->structureIf($toBlock, $blocks);
+								
+								foreach($toBlock->to as $to) {
+									if($to != $breakAddress) {
+										array_push($stack, $to);
+									}
+								}
+							}
+						}
+						$cases[$i] = $case;
+					}
+					
+					// the statement is set to a local variable before comparisons are make
+					$assignment = reset($firstConditionBlock->statements);
+					$compareValue = $assignment->expression->value;
+
+					$switch = new AS3Switch;
+					$switch->compareValue = $compareValue;
+					$switch->defaultCase = array_shift($cases);
+					$switch->cases = array_reverse($cases);
+					
+					// the block that jumps to the first conditional startment block
+					// is where the switch loop should be placed
+					$switchBlock = $blocks[$firstConditionBlock->from[0]];
+					$switchBlock->lastStatement = $switch;
+				}
+			}
 		}
 	}
 	
@@ -1048,11 +1176,11 @@ class AS3Decompiler {
 	}
 	
 	protected function do_constructsuper($cxt) {
-		$expr = new AS3MethodCall;
-		$expr->arguments = ($op->op1) ? array_splice($cxt->stack, -$op->op1) : array();
-		$expr->function = $this->nameSuper;
-		$expr->receiver = array_pop($cxt->stack);
-		return $expr;
+		$argumentCount = $cxt->op->op1;
+		$arguments = ($argumentCount > 0) ? array_splice($cxt->stack, -$argumentCount) : array();
+		$object = array_pop($cxt->stack);
+		$name = new AS3Identifier('super');
+		return new AS3FunctionCall(null, $name, $arguments);
 	}
 	
 	protected function do_convert_b($cxt) {
@@ -1426,7 +1554,7 @@ class AS3Decompiler {
 	}
 	
 	protected function do_lookupswitch($cxt) {
-		return new AS3DecompilerSwitch($cxt->lastAddress, $cxt->op->op1, $cxt->op->op3);
+		return new AS3DecompilerSwitch(array_pop($cxt->stack), $cxt->lastAddress, $cxt->op->op3, $cxt->op->op1);
 	}
 	
 	protected function do_lshift($cxt) {
@@ -1942,6 +2070,17 @@ class AS3ForEach extends AS3CompoundStatement {
 	public $statements = array();
 }
 
+class AS3Switch extends AS3CompoundStatement {
+	public $compareValue;
+	public $cases = array();
+	public $defaultCase;
+}
+
+class AS3SwitchCase extends AS3CompoundStatement {
+	public $constant;
+	public $statements = array();
+}
+
 class AS3TryCatch extends AS3CompoundStatement {
 	public $tryStatements;
 	public $catchObject;
@@ -2077,15 +2216,6 @@ class AS3DecompilerContext {
 class AS3DecompilerFlowControl {
 }
 
-class AS3DecompilerEnumeration {
-	public $container;
-	public $variable;
-	
-	public function __construct($container) {
-		$this->container = $container;
-	}
-}
-
 class AS3DecompilerJump extends AS3DecompilerFlowControl {
 	public $address;
 	
@@ -2115,6 +2245,20 @@ class AS3DecompilerBranch extends AS3DecompilerFlowControl {
 }
 
 class AS3DecompilerSwitch extends AS3DecompilerFlowControl {
+	public $index;
+	public $caseAddresses;
+	public $defaultAddress;
+
+	public function __construct($index, $address, $caseOffsets, $defaultOffset) {
+		$this->index = $index;
+		$this->caseAddresses = array();
+		foreach($caseOffsets as $caseOffset) {
+			if($caseOffset != $defaultOffset) {
+				$this->caseAddresses[] = $address + $caseOffset;
+			}
+		}
+		$this->defaultAddress = $address + $defaultOffset;
+	}
 }
 
 class AS3DecompilerHasNext {

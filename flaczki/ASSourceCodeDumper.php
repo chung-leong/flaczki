@@ -348,6 +348,21 @@ class ASSourceCodeDumper {
 				echo "</div>} while(";
 				$this->printExpression($stmt->condition);
 				echo ");\n";
+			} else if($stmt instanceof AS3Switch) {
+				echo "<span class='keyword'>switch</span>(";
+				$this->printExpression($stmt->compareValue);
+				echo ") {\n<div class='code-block'>\n";
+				foreach($stmt->cases as $case) {
+					echo "<span class='keyword'>case</span> ";
+					$this->printExpression($case->constant);
+					echo ": ";
+					$this->printStatements($case->statements);
+				}
+				if($stmt->defaultCase) {
+					echo "<span class='keyword'>default:</span>";
+					$this->printStatements($stmt->defaultCase->statements);
+				}
+				echo "</div>}\n";
 			} else if($stmt instanceof AS2TryCatch || $stmt instanceof AS3TryCatch) {
 				echo "<span class='keyword'>try</span> {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->tryStatements);

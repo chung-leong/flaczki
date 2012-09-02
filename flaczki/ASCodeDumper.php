@@ -117,8 +117,14 @@ class ASCodeDumper {
 				$this->printMemberModifiers($member->name, false);
 				echo "class ";
 				$this->printName($member->name);
-				echo " {\n";
 				
+				if($instance->parentName) {
+					echo " extends ";
+					$this->printName($instance->parentName);
+				}
+				
+				echo " {\n";
+							
 				// print static members
 				echo "<div class='code-block'>\n";
 				$this->printMembers($static->members, true);
