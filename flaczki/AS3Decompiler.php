@@ -338,7 +338,7 @@ class AS3Decompiler {
 				do {
 					$changed = $this->collapseBranches($branch);
 				} while($changed);
-				//unset($branch->branchIfTrue, $branch->branchIfFalse);
+				unset($branch->branchIfTrue, $branch->branchIfFalse);
 
 				// update the instruction pointer 
 				$callerCxt->nextAddress = $branch->addressIfFalse;
@@ -547,6 +547,8 @@ class AS3Decompiler {
 					$isEntry[$address] = true;
 				}
 				$isEntry[$stmt->defaultAddress] = true;
+			} else if($stmt instanceof AS3DecompilerLabel) {
+				$isEntry[$ip + 1] = true;
 			}
 		}
 		
@@ -612,9 +614,9 @@ class AS3Decompiler {
 				// header is the block containing the conditional statement
 				// it is not the first block
 				$headerBlock = $blocks[$loop->headerAddress];
-				$headerBlock->structured = true;
-				
-				if($headerBlock->lastStatement->addressIfFalse == $loop->continueAddress) {
+				$labelBlock = $blocks[$loop->labelAddress];
+						
+				if($headerBlock->lastStatement->addressIfFalse < $loop->headerAddress) {
 					// if the loop continues only when the condition is false
 					// then we need to invert the condition
 					$condition = $this->invertCondition($headerBlock->lastStatement->condition);
@@ -622,7 +624,6 @@ class AS3Decompiler {
 					$condition = $headerBlock->lastStatement->condition;
 				}
 				
-				$entryBlock = $blocks[$loop->entranceAddress];
 				if($condition instanceof AS3DecompilerHasNext) {
 					//  a for-in or for-each loop
 					$stmt = new AS3ForIn;
@@ -677,24 +678,18 @@ class AS3Decompiler {
 					} else {
 						$stmt = new AS3ForIn;
 					}
-				} else {
-					// it's a do-while if the conditional statement is at the "bottom" of the loop
-					if($loop->headerAddress == $loop->continueAddress + 1) {
-						$stmt = new AS3DoWhile;
-					} else {
+				} else {			
+					// it's a while if there's a jump to the header block to check the condition first
+					if($headerBlock->from[0] < $loop->labelAddress) {
 						$stmt = new AS3While;
+					} else {
+						$stmt = new AS3DoWhile;
 					}
 				}
 				$stmt->condition = $condition;
-				
-				// see if there's an unconditional branch into the loop
-				if($entryBlock->lastStatement instanceof AS3DecompilerJump) {
-					// replace the jump
-					$entryBlock->lastStatement = $stmt;
-				} else {
-					// we just fall into the loop--put the statement at the end
-					$entryBlock->statements[] = $stmt;
-				}
+				$labelBlock->lastStatement = $stmt;
+				$labelBlock->structured = true;
+				$headerBlock->structured = true;
 			} else {
 				// no header--the "loop" is the function itself
 				$stmt = $function;
@@ -710,7 +705,7 @@ class AS3Decompiler {
 			// convert jumps to breaks and continues
 			foreach($loop->contentAddresses as $blockAddress) {
 				$block = $blocks[$blockAddress];
-				$this->structureBreakContinue($block, $loop->continueAddress, $loop->breakAddress);
+				$this->structureBreakContinue($block, $loop->headerAddress, $loop->breakAddress);
 			}
 
 			// recreate if statements
@@ -874,72 +869,24 @@ class AS3Decompiler {
 	}
 	
 	protected function createLoops($blocks) {
-		// see which blocks dominates
-		$dominators = array();		
-		$dominatedByAll = array();
-		foreach($blocks as $blockAddress => $block) {
-			$dominatedByAll[$blockAddress] = true;
-		}
-		foreach($blocks as $blockAddress => $block) {
-			if($blockAddress == 0) {
-				$dominators[$blockAddress] = array(0 => true);
-			} else {
-				$dominators[$blockAddress] = $dominatedByAll;
-			}
-		}
-		do {
-			$changed = false;
-			foreach($blocks as $blockAddress => $block) {
-				foreach($block->from as $from) {
-					$dominatedByBefore = $dominators[$blockAddress];
-					$dominatedBy =& $dominators[$blockAddress];
-					$dominatedBy = array_intersect_key($dominatedBy, $dominators[$from]);
-					$dominatedBy[$blockAddress] = true;
-					if($dominatedBy != $dominatedByBefore) {
-						$changed = true;
-					}
-				}
-			}
-		} while($changed);
-		
 		$loops = array();
 		foreach($blocks as $blockAddress => $block) {
-			if(!$block->structured && $blockAddress != 0) {
-				foreach($block->to as $to) {
-					// a block dominated by what it goes to is a the tail of the loop
-					// that block is the loop header--it contains the conditional statement
-					if(isset($dominators[$blockAddress][$to])) {
-						$headerBlock = $blocks[$to];
-						if($headerBlock->lastStatement instanceof AS3DecompilerBranch) {
-							$loop = new AS3DecompilerLoop;
-							$loop->headerAddress = $to;
-							$loop->continueAddress = $blockAddress;
-							$loop->breakAddress = $headerBlock->lastStatement->addressIfFalse;
-							$loop->entranceAddress = $headerBlock->from[0];
-							$loop->contentAddresses = array($loop->headerAddress);
-							if($loop->continueAddress != $loop->headerAddress) {
-								$loop->contentAddresses[] = $loop->continueAddress;
-							}
-							
-							// all blocks that leads to the continue block are in the loop
-							// we won't catch blocks whose last statement is return, but that's okay
-							$stack = array($loop->continueAddress);
-							while($stack) {
-								$fromAddress = array_pop($stack);
-								$fromBlock = $blocks[$fromAddress];
-								foreach($fromBlock->from as $fromAddress) {									
-									if($fromAddress != $loop->entranceAddress && !in_array($fromAddress, $loop->contentAddresses)) {
-										$loop->contentAddresses[] = $fromAddress;
-										array_push($stack, $fromAddress);
-									}
-								}
-							}
-							
-							sort($loop->contentAddresses);
-							$loops[$blockAddress] = $loop;
-							$block->structured = true;
+			if($block->lastStatement instanceof AS3DecompilerLabel) {			
+				$labelAddress = $blockAddress;
+				$headerAddress = $block->from[0];				
+				$headerBlock = $blocks[$headerAddress];
+				if($headerBlock->lastStatement instanceof AS3DecompilerBranch) {
+					$loop = new AS3DecompilerLoop;
+					$loop->headerAddress = $headerAddress;
+					$loop->labelAddress = $labelAddress;
+					$loop->breakAddress = $block->next;
+					$loop->contentAddresses = array();
+					foreach($blocks as $contentAddress => $contentBlock) {
+						if($contentAddress > $labelAddress && $contentAddress <= $headerAddress) {
+							$loop->contentAddresses[] = $contentAddress;
 						}
 					}
+					$loops[] = $loop;
 				}
 			}
 		}
@@ -1522,7 +1469,7 @@ class AS3Decompiler {
 	}
 	
 	protected function do_label($cxt) {
-		// do nothing
+		return new AS3DecompilerLabel;
 	}
 	
 	protected function do_lf32($cxt) {
@@ -2301,9 +2248,11 @@ class AS3DecompilerBasicBlock {
 class AS3DecompilerLoop {
 	public $contentAddresses = array();
 	public $headerAddress;
-	public $continueAddress;
+	public $labelAddress;
 	public $breakAddress;
-	public $entranceAddress;
+}
+
+class AS3DecompilerLabel {
 }
 
 ?>
