@@ -99,13 +99,17 @@ class AS3Decompiler {
 		for($i = count($cxt->scopeStack) - 1; $i >= 0; $i--) {
 			$scopeObject = $vmObject = $cxt->scopeStack[$i];
 			if($scopeObject instanceof AVM2Register) {
-				if($scopeObject->index == 0) {
+				if($scopeObject instanceof AVM2ImplicitRegister) {
 					$vmObject = $this->this;
+				} else {
+					$vmObject = null;
 				}
 			}
-			foreach($vmObject->members as $member) {
-				if($member->name == $vmName) {
-					return $scopeObject;
+			if($vmObject) {
+				foreach($vmObject->members as $member) {
+					if($member->name == $vmName) {
+						return $scopeObject;
+					}
 				}
 			}
 		}
@@ -165,7 +169,7 @@ class AS3Decompiler {
 				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member);
 				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member);
 				
-				$arguments = $this->importArguments($vmMember->object->constructor->arguments);
+				$arguments = $this->importArguments($vmMember->object->instance->constructor->arguments);
 				$constructor = new AS3ClassMethod($name, $arguments, null, array('public'));
 				if($vmMember->object->instance->constructor->body) {
 					$cxt = new AS3DecompilerContext;
@@ -473,7 +477,6 @@ class AS3Decompiler {
 					}
 				} else if($stmt instanceof AS3DecompilerBranch) {
 					// could be a ternary inside a ternary
-					$count = count($cxtF->stack);
 					if(!$this->decompileTernaryOperator($cxtF, $stmt)) {
 						return false;
 					}
@@ -491,8 +494,14 @@ class AS3Decompiler {
 			$cxtT->nextAddress = $branch->addressIfTrue;
 			while(($stmt = $this->decompileNextInstruction($cxtT)) !== false) {
 				if($stmt) {
-					// no statement should be generated
-					return false;
+					if($stmt instanceof AS3DecompilerBranch) {
+						// could be a ternary inside a ternary
+						if(!$this->decompileTernaryOperator($cxtT, $stmt)) {
+							return false;
+						}
+					} else {
+						return false;
+					}
 				}
 				if($cxtT->nextAddress == $uBranch->address) {
 					break;
@@ -502,7 +511,8 @@ class AS3Decompiler {
 				$valueT = array_pop($cxtT->stack);
 				// push the expression on to the caller's context 
 				// and advance the instruction pointer to the jump destination
-				array_push($cxt->stack, new AS3TernaryConditional($branch->condition, $valueT, $valueF, 14));
+				$condition = $this->invertCondition($branch->condition);
+				array_push($cxt->stack, new AS3TernaryConditional($condition, $valueF, $valueT, 14));
 				$cxt->nextAddress = $uBranch->address;
 				return true;
 			}
@@ -519,7 +529,12 @@ class AS3Decompiler {
 				$op = $cxt->opQueue[$cxt->nextAddress];
 				$cxt->lastAddress = $cxt->nextAddress;
 				$cxt->addressIndex++;
-				$cxt->nextAddress = (isset($cxt->opAddresses[$cxt->addressIndex])) ? $cxt->opAddresses[$cxt->addressIndex] : null;
+				if(isset($cxt->opAddresses[$cxt->addressIndex])) {
+					$cxt->nextAddress = $cxt->opAddresses[$cxt->addressIndex];
+				} else {
+					$cxt->nextAddress = null;
+					$cxt->addressIndex = 0;
+				}
 				$cxt->op = $op;
 				$method = "do_$op->name";
 				$expr = $this->$method($cxt);
@@ -1035,7 +1050,10 @@ class AS3Decompiler {
 		$argumentCount = $cxt->op->op2;
 		$arguments = ($argumentCount > 0) ? array_splice($cxt->stack, -$argumentCount) : array();
 		$name = $this->resolveName($cxt, $cxt->op->op1);
-		$object = array_pop($cxt->stack);		
+		$object = array_pop($cxt->stack);
+		if($object instanceof AVM2ImplicitRegister) {
+			$object = null;
+		}
 		array_push($cxt->stack, new AS3FunctionCall($object, $name, $arguments));
 	}
 	
@@ -1289,9 +1307,13 @@ class AS3Decompiler {
 	protected function do_getproperty($cxt) {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject || $object instanceof AVM2ImplicitRegister)) {
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
 			if($name instanceof AS3Identifier) {
-				array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
+				if(!($object instanceof AVM2ImplicitRegister)) {
+					array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
+				} else {
+					array_push($cxt->stack, $name);
+				}
 			} else {
 				array_push($cxt->stack, new AS3ArrayAccess($name, $object));
 			}
@@ -1314,9 +1336,9 @@ class AS3Decompiler {
 		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister) {
 			array_push($cxt->stack, $object->slots[$cxt->op->op1]);
 		} else {
+			array_push($cxt->stack, null);
 			dump($object);
 			echo "do_getslot";
-			exit;
 		}
 	}
 	
@@ -1677,8 +1699,9 @@ class AS3Decompiler {
 	
 	protected function do_setlocal($cxt) {
 		$value = array_pop($cxt->stack);
+		$var = $cxt->op->op1;
+		$cxt->registerValues[$var->index] = $value;
 		if(!($value instanceof AVM2ActivionObject || $value instanceof AVM2GlobalScope)) {
-			$var = $cxt->op->op1;
 			$type = $this->getType($cxt, $value);
 
 			// go through the stack and replace any instances of $value with the register
@@ -1701,9 +1724,13 @@ class AS3Decompiler {
 		$value = array_pop($cxt->stack);
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if(!($object instanceof AVM2ActivationObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister)) {
+		if(!($object instanceof AVM2ActivationObject || $object instanceof AVM2GlobalScope)) {
 			if($name instanceof AS3Identifier) {
-				$var = new AS3BinaryOperation($name, '.', $object, 1);
+				if(!($object instanceof AVM2ImplicitRegister)) {
+					$var = new AS3BinaryOperation($name, '.', $object, 1);
+				} else {
+					$var = $name;
+				}
 			} else {
 				$var = new AS3ArrayAccess($name, $object);
 			}
@@ -1739,14 +1766,10 @@ class AS3Decompiler {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
 		$object = new AS3Identifier("super");
-		if(!($object instanceof AVM2ActivationObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister)) {
-			if($name instanceof AS3Identifier) {
-				$var = new AS3BinaryOperation($name, '.', $object, 1);
-			} else {
-				$var = new AS3ArrayAccess($name, $object);
-			}
+		if($name instanceof AS3Identifier) {
+			$var = new AS3BinaryOperation($name, '.', $object, 1);
 		} else {
-			$var = $name;
+			$var = new AS3ArrayAccess($name, $object);
 		}
 		return new AS3Assignment($value, $var);
 	}
@@ -2154,21 +2177,6 @@ class AS3ClassVariable extends AS3SimpleStatement {
 
 // structures used in the decompiling process
 
-class AS3DecompilerContext {
-	public $op;
-	public $opQueue;
-	public $opAddresses;
-	public $addressIndex;
-	public $lastAddress = 0;
-	public $nextAddress = 0;
-	public $stack = array();
-	public $scopeStack = array();
-	public $registerTypes = array();
-	
-	public $relatedBranch;
-	public $branchOnTrue;
-}
-
 class AS3DecompilerFlowControl {
 }
 
@@ -2262,6 +2270,22 @@ class AS3DecompilerLoop {
 }
 
 class AS3DecompilerLabel {
+}
+
+class AS3DecompilerContext {
+	public $op;
+	public $opQueue;
+	public $opAddresses;
+	public $addressIndex;
+	public $lastAddress = 0;
+	public $nextAddress = 0;
+	public $stack = array();
+	public $scopeStack = array();
+	public $registerTypes = array();
+	public $registerValues = array();
+	
+	public $relatedBranch;
+	public $branchOnTrue;
 }
 
 ?>

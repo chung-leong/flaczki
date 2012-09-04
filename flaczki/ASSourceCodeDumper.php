@@ -115,7 +115,7 @@ class ASSourceCodeDumper {
 				echo "<span class='boolean'>$text</span>"; 
 				break;
 			case 'double':
-				$text = is_nan($expr) ? 'NaN' : (string) $expr;
+				$text = is_nan($expr) ? 'NaN' : sprintf("%.1f", $expr);
 				echo "<span class='double'>$text</span>"; 
 				break;
 			case 'integer': 
@@ -148,6 +148,9 @@ class ASSourceCodeDumper {
 					$this->printExpression($expr->name);
 					echo ":";
 					$this->printExpression($expr->type);
+					if($expr->defaultValue !== null) {
+						$this->printExpression($expr->defaultValue);
+					}
 				} else if($expr instanceof AS3Accessor)	{
 					echo "<span class='keyword'>$expr->type</span> ";
 					$this->printExpression($expr->name);
@@ -174,8 +177,10 @@ class ASSourceCodeDumper {
 				} else if($expr instanceof AS3VariableDeclaration) {
 					echo "<span class='keyword'>var</span> ";
 					$this->printExpression($expr->name);
-					echo ":";
-					$this->printExpression($expr->type);
+					if($expr->type !== null) {
+						echo ":";
+						$this->printExpression($expr->type);
+					}
 					if(!($expr->value instanceof AVM2Undefined)) {
 						echo " = ";
 						$this->printExpression($expr->value);
@@ -247,8 +252,10 @@ class ASSourceCodeDumper {
 					echo "(";
 					$this->printExpressions($expr->arguments);
 					echo ")";
-					echo ":";
-					$this->printExpression($expr->returnType);				
+					if($expr->returnType) {
+						echo ":";
+						$this->printExpression($expr->returnType);
+					}
 					echo " {\n<div class='code-block'>\n";
 					$this->printStatements($expr->statements);
 					echo "</div>}";
@@ -447,8 +454,10 @@ class ASSourceCodeDumper {
 				echo "(";
 				$this->printExpressions($stmt->arguments);
 				echo ")";
-				echo ":";
-				$this->printExpression($stmt->returnType);				
+				if($stmt->returnType) {
+					echo ":";
+					$this->printExpression($stmt->returnType);
+				}
 				if($stmt->statements) {
 					echo " {\n<div class='code-block'>\n";
 					$this->printStatements($stmt->statements);
