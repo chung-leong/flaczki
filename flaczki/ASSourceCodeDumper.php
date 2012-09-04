@@ -342,6 +342,12 @@ class ASSourceCodeDumper {
 				echo ") {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->statements);
 				echo "</div>}\n";
+			} else if($stmt instanceof AS3Foreach) {
+				echo "<span class='keyword'>for each</span>(";
+				$this->printExpression($stmt->condition);
+				echo ") {\n<div class='code-block'>\n";
+				$this->printStatements($stmt->statements);
+				echo "</div>}\n";
 			} else if($stmt instanceof AS2DoWhile || $stmt instanceof AS3DoWhile) {
 				echo "<span class='keyword'>do {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->statements);

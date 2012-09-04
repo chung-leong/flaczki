@@ -629,6 +629,7 @@ class AS3Decompiler {
 					$stmt = new AS3ForIn;
 					
 					// first, look for the assignments to temporary variable in the block before
+					$entryBlock = $blocks[$labelBlock->prev];
 					$condition = $headerBlock->lastStatement->condition;
 					$loopIndex = $loopObject = null;
 					for($setStmt = end($entryBlock->statements); $setStmt && !($loopIndex && $loopObject); $setStmt = prev($entryBlock->statements)) {
@@ -654,7 +655,7 @@ class AS3Decompiler {
 					}
 						
 					// look for assignment to named variable 
-					$firstBlock = $blocks[$headerBlock->lastStatement->addressIfTrue];
+					$firstBlock = $blocks[$labelBlock->next];
 					$loopVar = $loopValue = null;
 					for($setStmt = reset($firstBlock->statements); $setStmt && !$loopVar; $setStmt = next($firstBlock->statements)) {
 						if($setStmt instanceof AS3BasicStatement) {
@@ -1215,7 +1216,7 @@ class AS3Decompiler {
 	protected function do_deleteproperty($cxt) {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject || $object instanceof AVM2ImplicitRegister)) {
 			$property = new AS3BinaryOperation($name, '.', $object, 1);
 		} else {
 			$property = $name;
@@ -1288,7 +1289,7 @@ class AS3Decompiler {
 	protected function do_getproperty($cxt) {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject || $object instanceof AVM2ImplicitRegister)) {
 			if($name instanceof AS3Identifier) {
 				array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
 			} else {
@@ -1310,7 +1311,7 @@ class AS3Decompiler {
 	
 	protected function do_getslot($cxt) {
 		$object = array_pop($cxt->stack);
-		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope) {
+		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister) {
 			array_push($cxt->stack, $object->slots[$cxt->op->op1]);
 		} else {
 			dump($object);
@@ -1679,6 +1680,14 @@ class AS3Decompiler {
 		if(!($value instanceof AVM2ActivionObject || $value instanceof AVM2GlobalScope)) {
 			$var = $cxt->op->op1;
 			$type = $this->getType($cxt, $value);
+
+			// go through the stack and replace any instances of $value with the register
+			foreach($cxt->stack as &$expr) {
+				if($expr === $value) {
+					$expr = $var;
+				}
+			}
+			
 			if(isset($cxt->registerTypes[$var->index])) {
 				return new AS3Assignment($value, $var);
 			} else {
@@ -1692,7 +1701,7 @@ class AS3Decompiler {
 		$value = array_pop($cxt->stack);
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+		if(!($object instanceof AVM2ActivationObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister)) {
 			if($name instanceof AS3Identifier) {
 				$var = new AS3BinaryOperation($name, '.', $object, 1);
 			} else {
@@ -1708,7 +1717,7 @@ class AS3Decompiler {
 		$slotId = $cxt->op->op1;
 		$value = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
-		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope) {
+		if($object instanceof AVM2ActivionObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister) {
 			if(isset($object->slots[$slotId])) {
 				$var = $object->slots[$slotId];
 				return new AS3Assignment($value, $var);
@@ -1730,7 +1739,7 @@ class AS3Decompiler {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
 		$object = new AS3Identifier("super");
-		if(!($object instanceof AVM2GlobalScope || $object instanceof AVM2ActivationObject)) {
+		if(!($object instanceof AVM2ActivationObject || $object instanceof AVM2GlobalScope || $object instanceof AVM2ImplicitRegister)) {
 			if($name instanceof AS3Identifier) {
 				$var = new AS3BinaryOperation($name, '.', $object, 1);
 			} else {

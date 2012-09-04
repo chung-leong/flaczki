@@ -66,7 +66,7 @@ class AVM2Decoder {
 	
 	protected function decodeMethodBody($methodBodyRec, $arguments) {
 		$registers = array();
-		$reg0 = new AVM2Register;
+		$reg0 = new AVM2ImplicitRegister;
 		$reg0->index = 0;
 		$reg0->name = "this";
 		$registers[] = $reg0;
@@ -849,6 +849,9 @@ class AVM2Constant {
 class AVM2Register {
 	public $index;
 	public $name;
+}
+
+class AVM2ImplicitRegister extends AVM2Register {
 }
 
 class AVM2ActivionObject {
