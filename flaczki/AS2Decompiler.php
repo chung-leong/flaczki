@@ -30,9 +30,11 @@ class AS2Decompiler {
 									continue;
 								}
 							
-								// look ahead find any logical statements that should be part of 
-								// the branch's condition							
-								$this->decompileBranch($cxt, $stmt);
+								// look ahead find any logical statements 
+								if($this->decompileLogicalStatement($cxt, $stmt)) {
+									// the result is on the stack
+									continue;
+								}
 							
 								// clone the context and add it to the list
 								$cxtT = clone $cxt;
@@ -64,122 +66,39 @@ class AS2Decompiler {
 		$this->structureLoops($loops, $blocks, $function);
 	}
 
-	protected function decompileBranch($cxt, $branch) {
-		if($branch->addressIfTrue > 0) {
+	protected function decompileLogicalStatement($cxt, $branch) {
+		$stackHeight = count($cxt->stack);
+		if($stackHeight > 0 && $branch->addressIfTrue > 0) {
 			// find all other conditional branches immediately following this one
-			$cxtT = clone $cxt;
-			$cxtT->nextAddress = $branch->addressIfTrue;
-			$cxtT->relatedBranch = $branch;
-			$cxtT->branchOnTrue = true;
 			$cxtF = clone $cxt;
-			$cxtF->nextAddress = $branch->addressIfFalse;		
-			$cxtF->relatedBranch = $branch;
-			$cxtF->branchOnTrue = false;
-			$contexts = array($cxtT, $cxtF);
-			$count = 0;
-			$scanned = array();
-			while($contexts) {
-				$cxt = array_shift($contexts);
-				$scanned[$cxt->nextAddress] = true;
-				while(($stmt = $this->decompileNextInstruction($cxt)) !== false) {
-					if($stmt) {
-						if($stmt instanceof AS2DecompilerBranch) {
-							if($stmt->condition instanceof AS2BinaryOperation && $stmt->condition->operand1 instanceof AS2DecompilerEnumeration) {
-								break;
-							}
-							if($cxt->branchOnTrue) {
-								$cxt->relatedBranch->branchIfTrue = $stmt;
-							} else {
-								$cxt->relatedBranch->branchIfFalse = $stmt;
-							}
-							
-							if(!isset($scanned[$stmt->addressIfTrue]) && !isset($scanned[$stmt->addressIfFalse])) {
-								$cxtT = clone $cxt;
-								$cxtT->nextAddress = $stmt->addressIfTrue;
-								$cxtT->relatedBranch = $stmt;
-								$cxtT->branchOnTrue = true;
-								$contexts[] = $cxtT;
-								$cxt->nextAddress = $stmt->addressIfFalse;
-								$cxt->relatedBranch = $stmt;
-								$cxt->branchOnTrue = false;
-							} else {
-								break;
-							}
-						} else {
-							break;
-						}
+			$endAddress = $branch->addressIfTrue;
+			
+			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
+				if($stmt instanceof AS2DecompilerBranch) {
+					if($this->decompileLogicalStatement($cxtF, $stmt)) {
+					} else {
+						break;
 					}
-				}
-			}
-			
-			// collapsed branches into AND/OR statements
-			// first, get rid of duplicates to simplify the logic
-			$this->collapseDuplicateBranches($branch);
-			
-			// keep reducing until there are no more changes
-			do {
-				$changed = $this->collapseBranches($branch);
-			} while($changed);
-			unset($branch->branchIfTrue, $branch->branchIfFalse);
-		}
-	}
-	
-	protected function collapseDuplicateBranches($branch) {
-		if(isset($branch->branchIfTrue)) {
-			$this->collapseDuplicateBranches($branch->branchIfTrue);
-			if($branch->condition === $branch->branchIfTrue->condition) {
-				$branch->addressIfTrue = $branch->branchIfTrue->addressIfTrue;
-				if(isset($branch->branchIfTrue->branchIfTrue)) {
-					$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
-				} else {
-					unset($branch->branchIfTrue);
+				} 
+				if($cxtF->nextAddress == $endAddress) {
+					if($stackHeight == count($cxtF->stack)) {
+						$secondCondition = array_pop($cxtF->stack);
+						$falseCondition = array_pop($cxt->stack);
+						if($falseCondition instanceof AS2Negation && $branch->condition === $falseCondition->operand
+						|| $branch->condition instanceof AS2Negation && $falseCondition === $branch->condition->operand) {
+							$firstCondition = $this->invertCondition($branch->condition);
+							array_push($cxt->stack, new AS2BinaryOperation($secondCondition, '&&', $firstCondition, 12));
+						} else {
+							$firstCondition = $branch->condition;
+							array_push($cxt->stack, new AS2BinaryOperation($secondCondition, '||', $firstCondition, 13));
+						}
+						$cxt->nextAddress = $endAddress;
+						return true;
+					}
+					break;
 				}
 			}
 		}
-		if(isset($branch->branchIfFalse)) {
-			$this->collapseDuplicateBranches($branch->branchIfFalse);
-			if($branch->condition === $branch->branchIfFalse->condition) {
-				$branch->addressIfFalse = $branch->branchIfFalse->addressIfFalse;
-				if(isset($branch->branchIfFalse->branchIfFalse)) {
-					$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
-				} else {
-					unset($branch->branchIfFalse);
-				}
-			}
-		}
-	}
-	
-	protected function collapseBranches($branch) {
-		$changed = false;
-		if(isset($branch->branchIfTrue)) {
-			if($branch->branchIfTrue->addressIfFalse == $branch->addressIfFalse) {
-				$branch->condition = new AS2BinaryOperation($branch->branchIfTrue->condition, '&&', $branch->condition, 12);
-				$branch->addressIfTrue = $branch->branchIfTrue->addressIfTrue;
-				if(isset($branch->branchIfTrue->branchIfTrue)) {
-					$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
-				} else {
-					unset($branch->branchIfTrue);
-				}
-				$changed = true;
-			} else {
-				$changed = $this->collapseBranches($branch->branchIfTrue) || $changed;
-			}
-		}
-		if(isset($branch->branchIfFalse)) {
-			if($branch->branchIfFalse->addressIfTrue == $branch->addressIfTrue) {
-				$branch->condition = new AS2BinaryOperation($branch->branchIfFalse->condition, '||', $branch->condition, 13);
-				$branch->addressIfFalse = $branch->branchIfFalse->addressIfFalse;
-				if(isset($branch->branchIfFalse->branchIfFalse)) {
-					$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
-				} else {
-					unset($branch->branchIfFalse);
-				}
-				$changed = true;
-			} else {
-				$changed = $this->collapseBranches($branch->branchIfFalse) || $changed;
-			}
-		}
-		return $changed;
 	}
 	
 	protected function decompileTernaryOperator($cxt, $branch) {
@@ -331,9 +250,9 @@ class AS2Decompiler {
 				// header is the block containing the conditional statement
 				// it is not the first block
 				$headerBlock = $blocks[$loop->headerAddress];
-				$headerBlock->structured = true;
-				
-				if($headerBlock->lastStatement->addressIfFalse == $loop->continueAddress) {
+				$entryBlock = $blocks[$loop->entryAddress];
+						
+				if($headerBlock->lastStatement->addressIfFalse != $loop->breakAddress) {
 					// if the loop continues only when the condition is false
 					// then we need to invert the condition
 					$condition = $this->invertCondition($headerBlock->lastStatement->condition);
@@ -341,42 +260,21 @@ class AS2Decompiler {
 					$condition = $headerBlock->lastStatement->condition;
 				}
 				
-				// see if there's an unconditional branch into the loop
-				$entryBlock = $blocks[$loop->entranceAddress];
-				if($entryBlock->lastStatement instanceof AS2DecompilerJump) {
-					if($condition instanceof AS2BinaryOperation && $condition->operand1 instanceof AS2DecompilerEnumeration) {
-						// a for in loop						
-						$stmt = new AS2ForIn;
-						$enumeration = $condition->operand1;
-						$condition = new AS2binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
-					} else {
-						if($entryBlock->lastStatement->address == $headerBlock->lastStatement->addressIfTrue) {
-							// it goes to the beginning of the loop so it must be a do-while
-							$stmt = new AS2DoWhile;
-						} else {			
-							$stmt = new AS2While;
-						}
-					}
-					$entryBlock->lastStatement = $stmt;
+				if($condition instanceof AS2BinaryOperation && $condition->operand1 instanceof AS2DecompilerEnumeration) {
+					// a for in loop						
+					$stmt = new AS2ForIn;
+					$enumeration = $condition->operand1;
+					$condition = new AS2binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
 				} else {
-					// we just fall into the loop
-					if($condition instanceof AS2BinaryOperation && $condition->operand1 instanceof AS2DecompilerEnumeration) {
-						// a for in loop						
-						$stmt = new AS2ForIn;
-						$enumeration = $condition->operand1;
-						$condition = new AS2binaryOperation($enumeration->container, 'in', $enumeration->variable, 7);
+					if($loop->lastStatement instanceof AS2DecompilerBranch) {
+						$stmt = new AS2DoWhile;
 					} else {
-						if($loop->headerAddress == $loop->continueAddress) {
-							// the conditional statement is at the "bottom" of the loop so it's a do-while
-							$stmt = new AS2DoWhile;
-						} else {
-							$stmt = new AS2While;
-						}
+						$stmt = new AS2While;
 					}
-					$entryBlock->statements[] = $stmt;
 				}
 				$stmt->condition = $condition;
-
+				$entryBlock->statements[] = $stmt;
+				$headerBlock->structured = true;
 			} else {
 				// no header--the "loop" is the function itself
 				$stmt = $function;
@@ -385,7 +283,15 @@ class AS2Decompiler {
 			// convert jumps to breaks and continues
 			foreach($loop->contentAddresses as $blockAddress) {
 				$block = $blocks[$blockAddress];
-				$this->structureBreakContinue($block, $loop->continueAddress, $loop->breakAddress);
+				if($block->lastStatement instanceof AS2DecompilerJump && !$block->structured) {
+					if($block->lastStatement->address == $loop->breakAddress) {
+						$block->lastStatement = new AS2Break;
+						$block->structured = true;
+					} else if($block->lastStatement->address == $loop->continueAddress) {
+						$block->lastStatement = new AS2Continue;
+						$block->structured = true;
+					}
+				}
 			}
 
 			// recreate if statements
@@ -415,20 +321,6 @@ class AS2Decompiler {
 		}
 	}
 	
-	protected function structureBreakContinue($block, $continueAddress, $breakAddress) {
-		if($block->lastStatement instanceof AS2DecompilerJump && !$block->structured) {
-			// if it's a jump to the break address (i.e. to the block right after the while loop) then it's a break 
-			// if it's a jump to the continue address (i.e. the tail block containing the backward jump) then it's a continue 
-			if($block->lastStatement->address === $breakAddress) {
-				$block->lastStatement = new AS2Break;
-				$block->structured;
-			} else if($block->lastStatement->address === $continueAddress) {
-				$block->lastStatement = new AS2Continue;
-				$block->structured;
-			}
-		}
-	}
-		
 	protected function structureIf($block, $blocks) {
 		if($block->lastStatement instanceof AS2DecompilerBranch && !$block->structured) {
 			$tBlock = $blocks[$block->lastStatement->addressIfTrue];
@@ -452,74 +344,36 @@ class AS2Decompiler {
 	}
 	
 	protected function createLoops($blocks) {
-		// see which blocks dominates
-		$dominators = array();		
-		$dominatedByAll = array();
-		foreach($blocks as $blockAddress => $block) {
-			$dominatedByAll[$blockAddress] = true;
-		}
-		foreach($blocks as $blockAddress => $block) {
-			if($blockAddress == 0) {
-				$dominators[$blockAddress] = array(0 => true);
-			} else {
-				$dominators[$blockAddress] = $dominatedByAll;
-			}
-		}
-		do {
-			$changed = false;
-			foreach($blocks as $blockAddress => $block) {
-				foreach($block->from as $from) {
-					$dominatedByBefore = $dominators[$blockAddress];
-					$dominatedBy =& $dominators[$blockAddress];
-					$dominatedBy = array_intersect_key($dominatedBy, $dominators[$from]);
-					$dominatedBy[$blockAddress] = true;
-					if($dominatedBy != $dominatedByBefore) {
-						$changed = true;
-					}
-				}
-			}
-		} while($changed);
-		
 		$loops = array();
 		foreach($blocks as $blockAddress => $block) {
-			if(!$block->structured && $blockAddress != 0) {
-				foreach($block->to as $to) {
-					// a block dominated by what it goes to is a the tail of the loop
-					// that block is the loop header--it contains the conditional statement
-					if(isset($dominators[$blockAddress][$to])) {
-						$headerBlock = $blocks[$to];
-						if($headerBlock->lastStatement instanceof AS2DecompilerBranch) {
-							$loop = new AS2DecompilerLoop;
-							$loop->headerAddress = $to;
-							$loop->continueAddress = $blockAddress;
-							$loop->breakAddress = $headerBlock->lastStatement->addressIfFalse;
-							$loop->entranceAddress = $headerBlock->from[0];
-							$loop->contentAddresses = array($loop->headerAddress);
-							if($loop->continueAddress != $loop->headerAddress) {
-								$loop->contentAddresses[] = $loop->continueAddress;
-							}
-							
-							// all blocks that leads to the continue block are in the loop
-							// we won't catch blocks whose last statement is return, but that's okay
-							$stack = array($loop->continueAddress);
-							while($stack) {
-								$fromAddress = array_pop($stack);
-								$fromBlock = $blocks[$fromAddress];
-								foreach($fromBlock->from as $fromAddress) {									
-									if($fromAddress != $loop->entranceAddress && !in_array($fromAddress, $loop->contentAddresses)) {
-										$loop->contentAddresses[] = $fromAddress;
-										array_push($stack, $fromAddress);
-									}
-								}
-							}
-							
-							sort($loop->contentAddresses);
-							$loops[$blockAddress] = $loop;
-							$block->structured = true;
-						}
-					}
+			if($block->lastStatement instanceof AS2DecompilerBranch && $block->lastStatement->addressIfTrue <= $blockAddress) {
+				$startAddress = $block->lastStatement->addressIfTrue;
+				$endAddress = $blockAddress;
+				$headerAddress = $blockAddress;
+				$block->structured = true;
+			} else if($block->lastStatement instanceof AS2DecompilerJump && $block->lastStatement->address <= $blockAddress) {
+				$startAddress = $block->lastStatement->address;
+				$endAddress = $blockAddress;
+				$headerAddress = $startAddress;
+				$block->structured = true;
+			} else {
+				continue;
+			}
+			$startBlock = $blocks[$startAddress];
+			$endBlock = $blocks[$endAddress];
+			$loop = new AS2DecompilerLoop;
+			$loop->headerAddress = $headerAddress;
+			$loop->continueAddress = $headerAddress;
+			$loop->breakAddress = $endBlock->next;
+			$loop->entryAddress = $startBlock->prev;
+			$loop->lastStatement = $block->lastStatement;
+			foreach($blocks as $contentAddress => $contentBlock) {
+				if($contentAddress >= $startAddress && $contentAddress <= $endAddress) {
+					$loop->contentAddresses[] = $contentAddress;
 				}
 			}
+			$loops[] = $loop;
+			
 		}
 		
 		// sort the loops, moving innermost ones to the beginning
@@ -579,10 +433,8 @@ class AS2Decompiler {
 	}
 	
 	protected function invertCondition($expr) {
-		if($expr instanceof AS2UnaryOperation) {
-			if($expr->operator == '!') {
-				return $expr->operand;
-			}
+		if($expr instanceof AS2Negation) {
+			return $expr->operand;
 		} else if($expr instanceof AS2BinaryOperation) {
 			if($newOperator = $this->invertBinaryOperator($expr->operator)) {
 				$newExpr = clone $expr;
@@ -590,7 +442,7 @@ class AS2Decompiler {
 				return $newExpr;
 			}
 		}
-		$newExpr = new AS2UnaryOperation('!', $expr, 3);
+		$newExpr = new AS2Negation($expr);
 		return $newExpr;
 	}
 	
@@ -774,7 +626,7 @@ class AS2Decompiler {
 		$prototype = new AS2Identifier('prototype');
 		$subclassPrototype = new AS2BinaryOperation($prototype, '.', $subclass, 1);
 		$superclassPrototype = new AS2BinaryOperation($prototype, '.', $superclass, 1);
-		$prototypeObject = new AS2ObjectInitializer(array( '__proto__' => $superclassPrototype, '__constructor__' => $superclass ));
+		$prototypeObject = new AS2ObjectInitializer(array( '__proto__', $superclassPrototype, '__constructor__', $superclass));
 		return new AS2Assignment($prototypeObject, $subclassPrototype);
 	}
 
@@ -892,12 +744,7 @@ class AS2Decompiler {
 
 	protected function doInitObject($cxt) {
 		$count = array_pop($cxt->stack);
-		$items = array();
-		for($i = 0; $i < $count; $i++) {
-			$value = array_pop($cxt->stack);
-			$name = array_pop($cxt->stack);
-			$items[$name] = $value;
-		}
+		$items = ($count > 0) ? array_splice($cxt->stack, -$count * 2) : array();
 		array_push($cxt->stack, new AS2ObjectInitializer($items));
 	}
 
@@ -967,7 +814,12 @@ class AS2Decompiler {
 	}
 
 	protected function doNot($cxt) {
-		array_push($cxt->stack, new AS2UnaryOperation('!', array_pop($cxt->stack), 3));
+		$value = array_pop($cxt->stack);
+		if($value instanceof AS2Negation) {
+			array_push($cxt->stack, $value->operand);
+		} else {
+			array_push($cxt->stack, new AS2Negation($value));
+		}
 	}
 
 	protected function doOr($cxt) {
@@ -1338,6 +1190,15 @@ class AS2UnaryOperation extends AS2Operation {
 	}
 }
 
+class AS2Negation extends AS2UnaryOperation {
+
+	public function __construct($operand) {
+		$this->operator = '!';
+		$this->operand = $operand;
+		$this->precedence = 3;
+	}
+}
+
 class AS2TernaryConditional extends AS2Operation {
 	public $condition;
 	public $valueIfTrue;
@@ -1489,9 +1350,6 @@ class AS2DecompilerContext {
 	public $stack = array();
 	public $registerDeclared = array();
 	public $currentTarget;
-	
-	public $relatedBranch;
-	public $branchOnTrue;
 }
 
 class AS2DecompilerFlowControl {
@@ -1542,7 +1400,7 @@ class AS2DecompilerLoop {
 	public $headerAddress;
 	public $continueAddress;
 	public $breakAddress;
-	public $entranceAddress;
+	public $entryAddress;
 }
 
 ?>

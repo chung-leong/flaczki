@@ -269,9 +269,9 @@ class AS3Decompiler {
 									continue;
 								}
 							
-								// look ahead find any logical statements that should be part of 
-								// the branch's condition
+								// look ahead find any logical statements 
 								if($this->decompileLogicalStatement($cxt, $stmt)) {
+									// the result is on the stack
 									continue;
 								}
 								
@@ -633,7 +633,7 @@ class AS3Decompiler {
 						// a jump to the block right after the while loop--it's a break 
 						$block->lastStatement = new AS3Break($label);
 						$block->structured = true;
-					} else if($block->lastStatement->address > $loop->labelAddress &&  $block->lastStatement->address <= $loop->headerAddress) {
+					} else if($block->lastStatement->address == $loop->continueAddress) {
 						// a jump to the somewhere inside the loop--it has to be a continue (since there's no goto)
 						$block->lastStatement = new AS3Continue($label);
 						$block->structured = true;
@@ -815,6 +815,7 @@ class AS3Decompiler {
 					$loop = new AS3DecompilerLoop;
 					$loop->number = ++$count;
 					$loop->headerAddress = $headerAddress;
+					$loop->continueAddress = $headerAddress;
 					$loop->labelAddress = $labelAddress;
 					$loop->breakAddress = $headerBlock->next;
 					$loop->entryAddress = $headerBlock->from[0];
@@ -2200,6 +2201,7 @@ class AS3DecompilerLoop {
 	public $contentAddresses = array();
 	public $headerAddress;
 	public $labelAddress;
+	public $continueAddress;
 	public $breakAddress;
 	public $number;
 }
@@ -2218,9 +2220,6 @@ class AS3DecompilerContext {
 	public $scopeStack = array();
 	public $registerTypes = array();
 	public $registerValues = array();
-	
-	public $relatedBranch;
-	public $branchOnTrue;
 }
 
 ?>
