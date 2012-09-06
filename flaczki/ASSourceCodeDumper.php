@@ -154,12 +154,19 @@ class ASSourceCodeDumper {
 				} else if($expr instanceof AS3Accessor)	{
 					echo "<span class='keyword'>$expr->type</span> ";
 					$this->printExpression($expr->name);
-				} else if($expr instanceof AS2Function) {
+				} else if($expr instanceof AS2Function || $expr instanceof AS3Function) {
 					echo "<span class='keyword'>function</span>";
-					$this->printExpression($expr->name);
+					if(isset($expr->name)) {
+						$this->printExpression($expr->name);
+					}
 					echo "(";
 					$this->printExpressions($expr->arguments);
-					echo ") {<div class='code-block'>\n";
+					echo ")";
+					if(isset($expr->returnType)) {
+						echo ":";
+						$this->printExpression($expr->returnType);
+					}
+					echo " {<div class='code-block'>\n";
 					$this->printStatements($expr->statements);
 					echo "</div>}";
 				} else if($expr instanceof AS2FunctionCall || $expr instanceof AS3FunctionCall) {
@@ -167,21 +174,14 @@ class ASSourceCodeDumper {
 					echo "(";
 					$this->printExpressions($expr->arguments);
 					echo ")";
-				} else if($expr instanceof AS2VariableDeclaration) {
+				} else if($expr instanceof AS2VariableDeclaration || $expr instanceof AS3VariableDeclaration) {
 					echo "<span class='keyword'>var</span> ";
 					$this->printExpression($expr->name);
-					if(!($expr->value instanceof AVM1Undefined)) {
-						echo " = ";
-						$this->printExpression($expr->value);
-					}
-				} else if($expr instanceof AS3VariableDeclaration) {
-					echo "<span class='keyword'>var</span> ";
-					$this->printExpression($expr->name);
-					if($expr->type !== null) {
+					if(isset($expr->type)) {
 						echo ":";
 						$this->printExpression($expr->type);
 					}
-					if(!($expr->value instanceof AVM2Undefined)) {
+					if(!($expr->value instanceof AVM1Undefined) && !($expr->value instanceof AVM2Undefined)) {
 						echo " = ";
 						$this->printExpression($expr->value);
 					}
@@ -249,18 +249,6 @@ class ASSourceCodeDumper {
 					if($needParentheses) {
 						echo ")";
 					}
-				} else if($expr instanceof AS3Function) {
-					echo "<span class='keyword'>function</span>";
-					echo "(";
-					$this->printExpressions($expr->arguments);
-					echo ")";
-					if($expr->returnType) {
-						echo ":";
-						$this->printExpression($expr->returnType);
-					}
-					echo " {\n<div class='code-block'>\n";
-					$this->printStatements($expr->statements);
-					echo "</div>}";
 				}
 				break;
 		}
@@ -281,8 +269,14 @@ class ASSourceCodeDumper {
 				$this->printExpression($stmt->expression);
 			} else if($stmt instanceof AS2Break || $stmt instanceof AS3Break) {
 				echo "<span class='keyword'>break</span>";
+				if(isset($stmt->label)) {
+					echo " <span class='label'>$stmt->label</span>";
+				}
 			} else if($stmt instanceof AS2Continue || $stmt instanceof AS3Continue) {
 				echo "<span class='keyword'>continue</span>";
+				if(isset($stmt->label)) {
+					echo " <span class='label'>$stmt->label</span>";
+				}
 			} else if($stmt instanceof AS2Return || $stmt instanceof AS3Return) {
 				echo "<span class='keyword'>return</span>";
 				if(!($stmt->value instanceof AVM1Undefined) && !($stmt->value instanceof AVM2Undefined)) {
@@ -338,6 +332,9 @@ class ASSourceCodeDumper {
 					}
 				}
 			} else if($stmt instanceof AS2While || $stmt instanceof AS3While) {
+				if(isset($stmt->label)) {
+					echo "<span class='label'>$stmt->label</span>: ";
+				}
 				echo "<span class='keyword'>while</span>(";
 				$this->printExpression($stmt->condition);
 				echo ") {\n<div class='code-block'>\n";

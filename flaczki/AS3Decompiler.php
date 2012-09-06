@@ -521,7 +521,7 @@ class AS3Decompiler {
 	}
 
 	protected function structureLoops($loops, $blocks, $function) {
-		// convert the loops into either while or do-while
+		$requiresLabel = array();
 		foreach($loops as $loop) {
 			if($loop->headerAddress !== null) {
 				// header is the block containing the conditional statement
@@ -623,7 +623,29 @@ class AS3Decompiler {
 			// convert jumps to breaks and continues
 			foreach($loop->contentAddresses as $blockAddress) {
 				$block = $blocks[$blockAddress];
-				$this->structureBreakContinue($block, $loop->headerAddress, $loop->breakAddress);
+				if($block->lastStatement instanceof AS3DecompilerJump && !$block->structured) {
+					if(isset($requiresLabel[$blockAddress])) {
+						$label = "L$loop->number";
+					} else {
+						$label = null;
+					}
+					if($block->lastStatement->address == $loop->breakAddress) {
+						// a jump to the block right after the while loop--it's a break 
+						$block->lastStatement = new AS3Break($label);
+						$block->structured = true;
+					} else if($block->lastStatement->address > $loop->labelAddress &&  $block->lastStatement->address <= $loop->headerAddress) {
+						// a jump to the somewhere inside the loop--it has to be a continue (since there's no goto)
+						$block->lastStatement = new AS3Continue($label);
+						$block->structured = true;
+					} else {
+						// a break or continue for some other loop
+						$requiresLabel[$blockAddress] = true;
+					}
+					if($block->structured) {
+						$stmt->label = $label;
+					}
+				}
+				
 			}
 
 			// recreate if statements
@@ -653,20 +675,6 @@ class AS3Decompiler {
 		}
 	}
 	
-	protected function structureBreakContinue($block, $continueAddress, $breakAddress) {
-		if($block->lastStatement instanceof AS3DecompilerJump && !$block->structured) {
-			// if it's a jump to the break address (i.e. to the block right after the while loop) then it's a break 
-			// if it's a jump to the continue address (i.e. the tail block containing the backward jump) then it's a continue 
-			if($block->lastStatement->address === $breakAddress) {
-				$block->lastStatement = new AS3Break;
-				$block->structured = true;
-			} else if($block->lastStatement->address === $continueAddress) {
-				$block->lastStatement = new AS3Continue;
-				$block->structured = true;
-			}
-		}
-	}
-		
 	protected function structureIf($block, $blocks) {
 		if($block->lastStatement instanceof AS3DecompilerBranch && !$block->structured) {
 			$tBlock = $blocks[$block->lastStatement->addressIfTrue];
@@ -758,12 +766,17 @@ class AS3Decompiler {
 								}
 		
 								// change jumps to break statements
-								$this->structureBreakContinue($toBlock, null, $breakAddress);
+								if($toBlock->lastStatement instanceof AS3DecompilerJump && !$toBlock->structured) {
+									if($toBlock->lastStatement->address === $breakAddress) {
+										$toBlock->lastStatement = new AS3Break;
+										$toBlock->structured = true;
+									}
+								}
 							}
 							foreach($toBlock->to as $to) {
 								if(!isset($scanned[$to])) {
 									$scanned[$to] = true;
-									if($to != $breakAddress) {
+									if($to < $breakAddress) {
 										array_push($stack, $to);
 									}
 								}
@@ -792,6 +805,7 @@ class AS3Decompiler {
 	
 	protected function createLoops($blocks) {
 		$loops = array();
+		$count = 0;
 		foreach($blocks as $blockAddress => $block) {
 			if($block->lastStatement instanceof AS3DecompilerLabel) {			
 				$labelAddress = $blockAddress;
@@ -799,6 +813,7 @@ class AS3Decompiler {
 				$headerBlock = $blocks[$headerAddress];
 				if($headerBlock->lastStatement instanceof AS3DecompilerBranch) {
 					$loop = new AS3DecompilerLoop;
+					$loop->number = ++$count;
 					$loop->headerAddress = $headerAddress;
 					$loop->labelAddress = $labelAddress;
 					$loop->breakAddress = $headerBlock->next;
@@ -1599,9 +1614,9 @@ class AS3Decompiler {
 		array_push($cxt->stack, new AS3BinaryOperation(array_pop($cxt->stack), '>>', array_pop($cxt->stack), 6));
 	}
 	
-	/*protected function do_setglobalslot($cxt) {
-		// TODO		
-	}*/
+	protected function do_setglobalslot($cxt) {
+		$value = array_pop($cxt->stack);
+	}
 	
 	protected function do_setlocal($cxt) {
 		$value = array_pop($cxt->stack);
@@ -1921,9 +1936,19 @@ class AS3Throw extends AS3SimpleStatement {
 }
 
 class AS3Break extends AS3SimpleStatement {
+	public $label;
+	
+	public function __construct($label = null) {
+		$this->label = $label;
+	}
 }
 
 class AS3Continue extends AS3SimpleStatement {
+	public $label;
+	
+	public function __construct($label = null) {
+		$this->label = $label;
+	}
 }
 
 class AS3IfElse extends AS3CompoundStatement {
@@ -1935,21 +1960,25 @@ class AS3IfElse extends AS3CompoundStatement {
 class AS3DoWhile extends AS3CompoundStatement {
 	public $condition;
 	public $statements = array();
+	public $label;
 }
 
 class AS3While extends AS3CompoundStatement {
 	public $condition;
 	public $statements = array();
+	public $label;
 }
 
 class AS3ForIn extends AS3CompoundStatement {
 	public $condition;
 	public $statements = array();
+	public $label;
 }
 
 class AS3ForEach extends AS3CompoundStatement {
 	public $condition;
 	public $statements = array();
+	public $label;
 }
 
 class AS3Switch extends AS3CompoundStatement {
@@ -2172,6 +2201,7 @@ class AS3DecompilerLoop {
 	public $headerAddress;
 	public $labelAddress;
 	public $breakAddress;
+	public $number;
 }
 
 class AS3DecompilerLabel {
