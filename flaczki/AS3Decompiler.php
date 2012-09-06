@@ -604,7 +604,9 @@ class AS3Decompiler {
 				$stmt->condition = $condition;
 				$entryBlock->lastStatement = $stmt;
 				$labelBlock->structured = true;
+				$labelBlock->destination = false;
 				$headerBlock->structured = true;
+				$headerBlock->destination = false;
 				$entryBlock->structured = true;
 			} else {
 				// no header--the "loop" is the function itself
@@ -657,10 +659,10 @@ class AS3Decompiler {
 			// if it's a jump to the continue address (i.e. the tail block containing the backward jump) then it's a continue 
 			if($block->lastStatement->address === $breakAddress) {
 				$block->lastStatement = new AS3Break;
-				$block->structured;
+				$block->structured = true;
 			} else if($block->lastStatement->address === $continueAddress) {
 				$block->lastStatement = new AS3Continue;
-				$block->structured;
+				$block->structured = true;
 			}
 		}
 	}
@@ -744,19 +746,23 @@ class AS3Decompiler {
 						
 						// move all blocks into the case until we are at the break
 						$stack = array($caseAddress);
+						$scanned = array();
 						while($stack) {
 							$to = array_pop($stack);
 							$toBlock = $blocks[$to];
-							if($toBlock->destination === null) {								
-								$toBlock->destination =& $case->statements;
+							if($toBlock->destination === null) {
+								if($toBlock->lastStatement instanceof AS3DecompilerLabel) {
+									$toBlock->destination = false;
+								} else {
+									$toBlock->destination =& $case->statements;
+								}
 		
 								// change jumps to break statements
 								$this->structureBreakContinue($toBlock, null, $breakAddress);
-								
-								// structure if statements
-								$this->structureIf($toBlock, $blocks);
-								
-								foreach($toBlock->to as $to) {
+							}
+							foreach($toBlock->to as $to) {
+								if(!isset($scanned[$to])) {
+									$scanned[$to] = true;
 									if($to != $breakAddress) {
 										array_push($stack, $to);
 									}
@@ -795,7 +801,7 @@ class AS3Decompiler {
 					$loop = new AS3DecompilerLoop;
 					$loop->headerAddress = $headerAddress;
 					$loop->labelAddress = $labelAddress;
-					$loop->breakAddress = $block->next;
+					$loop->breakAddress = $headerBlock->next;
 					$loop->entryAddress = $headerBlock->from[0];
 					$loop->contentAddresses = array();
 					foreach($blocks as $contentAddress => $contentBlock) {
