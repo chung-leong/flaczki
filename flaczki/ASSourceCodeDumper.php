@@ -210,7 +210,7 @@ class ASSourceCodeDumper {
 						echo "{}";
 					}
 				} else if($expr instanceof AS2Operation || $expr instanceof AS3Operation) {
-					static $noSpace = array('.' => true, '!' => true, '~' => true, '++' => true, '--' => true);
+					static $noSpace = array('.' => true, '..' => true, '!' => true, '~' => true, '++' => true, '--' => true);
 					if($precedence !== null) {
 						if($expr instanceof AS2Operation && $precedence < $expr->precedence) {
 							$needParentheses = true;
@@ -453,6 +453,11 @@ class ASSourceCodeDumper {
 				}
 				echo " {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->members);
+				if($stmt->initialization) {
+					echo " {\n<div class='code-block'>\n";
+					$this->printStatements($stmt->initialization);
+					echo "</div>}\n";
+				}
 				echo "</div>}\n";
 			} else if($stmt instanceof AS3ClassMethod || $stmt instanceof AS3Function) {
 				foreach($stmt->modifiers as $modifier) {

@@ -36,7 +36,7 @@ class AS3Decompiler {
 			if(!isset($this->nameMap[$vmName->string])) {
 				$this->nameMap[$vmName->string] = $vmName;
 				$namespace = ($vmName instanceof AVM2Multiname) ? $vmName->namespaceSet->namespaces[0] : $vmName->namespace;
-				if($vmName->string && $namespace->string) {
+				if($vmName->string && $namespace->string && !preg_match('/^__AS3__./', $namespace->string)) {
 					$qname = "{$namespace->string}.{$vmName->string}";
 					$this->imports[] = new AS3Identifier($qname);
 				}
@@ -46,7 +46,7 @@ class AS3Decompiler {
 				$identifier = "@$identifier";
 			}
 			return new AS3Identifier($identifier);
-		} else if($vmName instanceof AVMGenericName) {
+		} else if($vmName instanceof AVM2GenericName) {
 			$name = $this->importName($vmName->name);
 			$name = $name->string;
 			$types = array();
@@ -177,8 +177,12 @@ class AS3Decompiler {
 				foreach($vmMember->object->instance->interfaces as $vmInterface) {
 					$member->interfaces[] = $this->importName($vmInterface);
 				}
+				
+				// decompile static and instance constants, variables, and methods
 				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member);
 				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member);
+				
+				// decompile constructor
 				$arguments = $this->importArguments($vmMember->object->instance->constructor->arguments);
 				$constructor = new AS3ClassMethod($name, $arguments, null, array('public'));
 				if($vmMember->object->instance->constructor->body) {
@@ -194,6 +198,19 @@ class AS3Decompiler {
 					$this->decompileFunctionBody($cxt, $constructor);
 				}
 				$member->members[] = $constructor;
+				
+				// decompile static initializer
+				if($vmMember->object->constructor->body) {
+					$initializer = new AS3ClassMethod($name, array(), null, array());
+					$cxt = new AS3DecompilerContext;
+					$cxt->opQueue = $vmMember->object->constructor->body->operations;
+					$this->decompileFunctionBody($cxt, $initializer);
+					$stmt  = array_pop($initializer->statements);
+					if(!($stmt instanceof AS3Return)) {
+						$initializer->statements[] = $stmt;
+					}
+					$member->initialization = $initializer->statements;
+				}
 			} else if($vmMember->object instanceof AVM2Method) {
 				$returnType = $this->importName($vmMember->object->returnType);
 				$arguments = $this->importArguments($vmMember->object->arguments);
@@ -1159,7 +1176,7 @@ class AS3Decompiler {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
 		if($name instanceof AS3Identifier) {
-			array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
+			array_push($cxt->stack, new AS3BinaryOperation($name, '..', $object, 1));
 		} else {
 			array_push($cxt->stack, new AS3ArrayAccess($name, $object));
 		}
@@ -1991,6 +2008,7 @@ class AS3Class extends AS3CompoundStatement {
 	public $parentName;
 	public $members = array();
 	public $interfaces = array();
+	public $initialization = array();
 	
 	public function __construct($name, $modifiers) {
 		$this->modifiers = $modifiers;
