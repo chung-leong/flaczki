@@ -115,7 +115,7 @@ class ASSourceCodeDumper {
 				echo "<span class='boolean'>$text</span>"; 
 				break;
 			case 'double':
-				$text = is_nan($expr) ? 'NaN' : sprintf("%.1f", $expr);
+				$text = is_nan($expr) ? 'NaN' : (string) $expr;
 				echo "<span class='double'>$text</span>"; 
 				break;
 			case 'integer': 
@@ -259,8 +259,6 @@ class ASSourceCodeDumper {
 					echo " {\n<div class='code-block'>\n";
 					$this->printStatements($expr->statements);
 					echo "</div>}";
-				} else {
-					echo "!!!" . get_class($expr) . "!!!";
 				}
 				break;
 		}
@@ -440,6 +438,19 @@ class ASSourceCodeDumper {
 					echo "<span class='keyword'>class</span> ";
 				}
 				$this->printExpression($stmt->name);
+				if($stmt->parentName) {
+					echo " <span class='keyword'>extends</span> ";
+					$this->printExpression($stmt->parentName);
+				}
+				if($stmt->interfaces) {
+					echo " <span class='keyword'>implements</span> ";
+					foreach($stmt->interfaces as $index => $interface) {
+						if($index != 0) {
+							echo ", ";
+						}
+						$this->printExpression($interface);
+					}
+				}
 				echo " {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->members);
 				echo "</div>}\n";

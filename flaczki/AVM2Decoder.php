@@ -870,6 +870,7 @@ class AVM2ClassInstance {
 	const ATTR_INTERFACE = 0x04;
 
 	public $name;
+	public $parentName;
 	public $interfaces;
 	public $constructor;
 	public $members;

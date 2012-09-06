@@ -32,11 +32,12 @@ class AS3Decompiler {
 	}
 	
 	protected function importName($vmName) {
-		if($vmName instanceof AVM2QName) {
+		if($vmName instanceof AVM2QName || $vmName instanceof AVM2Multiname) {
 			if(!isset($this->nameMap[$vmName->string])) {
 				$this->nameMap[$vmName->string] = $vmName;
-				if($vmName->string && $vmName->namespace->string) {
-					$qname = "{$vmName->namespace->string}.{$vmName->string}";
+				$namespace = ($vmName instanceof AVM2Multiname) ? $vmName->namespaceSet->namespaces[0] : $vmName->namespace;
+				if($vmName->string && $namespace->string) {
+					$qname = "{$namespace->string}.{$vmName->string}";
 					$this->imports[] = new AS3Identifier($qname);
 				}
 			}
@@ -70,10 +71,6 @@ class AS3Decompiler {
 		} else if($vmName instanceof AVM2RTQName || $vmName instanceof AVM2MultinameL) {
 			$name = array_pop($cxt->stack);
 			return $name;
-		} else {
-			dump($vmName);
-			echo "resolveName";
-			exit;
 		}
 	}
 	
@@ -166,9 +163,14 @@ class AS3Decompiler {
 					$modifiers[] = "dynamic";
 				}			
 				$member = ($vmMember->object->instance->flags & AVM2ClassInstance::ATTR_INTERFACE) ? new AS3Interface($name, $modifiers) : new AS3Class($name, $modifiers);
+				if($vmMember->object->instance->parentName) {
+					$member->parentName = $this->importName($vmMember->object->instance->parentName);
+				}
+				foreach($vmMember->object->instance->interfaces as $vmInterface) {
+					$member->interfaces[] = $this->importName($vmInterface);
+				}
 				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member);
 				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member);
-				
 				$arguments = $this->importArguments($vmMember->object->instance->constructor->arguments);
 				$constructor = new AS3ClassMethod($name, $arguments, null, array('public'));
 				if($vmMember->object->instance->constructor->body) {
@@ -243,8 +245,10 @@ class AS3Decompiler {
 								}
 							
 								// look ahead find any logical statements that should be part of 
-								// the branch's condition							
-								$this->decompileBranch($cxt, $stmt);
+								// the branch's condition
+								if($this->decompileLogicalStatement($cxt, $stmt)) {
+									continue;
+								}
 								
 								// clone the context and add it to the list
 								$cxtT = clone $cxt;
@@ -282,184 +286,41 @@ class AS3Decompiler {
 		// recreate loops and conditional statements
 		$this->structureLoops($loops, $blocks, $function);
 	}
-
-	protected function decompileBranch($cxt, $branch) {
-		if($branch->addressIfTrue > 0) {
+	
+	protected function decompileLogicalStatement($cxt, $branch) {
+		$stackHeight = count($cxt->stack);
+		if($stackHeight > 0 && $branch->addressIfTrue > 0) {
 			// find all other conditional branches immediately following this one
-			$cxtT = clone $cxt;
-			$cxtT->nextAddress = $branch->addressIfTrue;
-			$cxtT->relatedBranch = $branch;
-			$cxtT->branchOnTrue = true;
 			$cxtF = clone $cxt;
-			$cxtF->nextAddress = $branch->addressIfFalse;		
-			$cxtF->relatedBranch = $branch;
-			$cxtF->branchOnTrue = false;
-			$contexts = array($cxtT, $cxtF);
-			$scanned = array();
-			$hasSubbranches = false;
-			$callerCxt = $cxt;
-			while($contexts) {
-				$cxt = array_shift($contexts);
-				$scanned[$cxt->nextAddress] = true;
-				while(($stmt = $this->decompileNextInstruction($cxt)) !== false) {
-					if($stmt) {
-						if($stmt instanceof AS3DecompilerBranch) {
-							if($cxt->branchOnTrue) {
-								$cxt->relatedBranch->branchIfTrue = $stmt;
-							} else {
-								$cxt->relatedBranch->branchIfFalse = $stmt;
-							}
-							
-							if(!isset($scanned[$stmt->addressIfTrue])) {
-								$cxtT = clone $cxt;
-								$cxtT->nextAddress = $stmt->addressIfTrue;
-								$cxtT->relatedBranch = $stmt;
-								$cxtT->branchOnTrue = true;
-								$contexts[] = $cxtT;
-								$hasSubbranches = true;
-							}
-							if(!isset($scanned[$stmt->addressIfFalse])) {
-								$cxt->nextAddress = $stmt->addressIfFalse;
-								$cxt->relatedBranch = $stmt;
-								$cxt->branchOnTrue = false;
-								$hasSubbranches = true;
-							} else {
-								break;
-							}
-						} else {
-							break;
-						}
-					}
-				}
-			}
+			$endAddress = $branch->addressIfTrue;
 			
-			if($hasSubbranches) {
-				// collapsed branches into AND/OR statements
-				// first, get rid of duplicates to simplify the logic
-				$this->collapseDuplicateBranches($branch);
-				
-				// keep reducing until there are no more changes
-				do {
-					$changed = $this->collapseBranches($branch);
-				} while($changed);
-				unset($branch->branchIfTrue, $branch->branchIfFalse);
+			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
+				if($stmt instanceof AS3DecompilerBranch) {
+					if($this->decompileLogicalStatement($cxtF, $stmt)) {
+					} else {
+						break;
+					}
+				} 
+				if($cxtF->nextAddress == $endAddress) {
+					if($stackHeight == count($cxtF->stack)) {
+						$secondCondition = array_pop($cxtF->stack);
+						array_pop($cxt->stack);
+						if($branch->branchOn == true) {
+							$firstCondition = $branch->condition;
+							array_push($cxt->stack, new AS3BinaryOperation($secondCondition, '||', $firstCondition, 13));
+						} else {
+							$firstCondition = $this->invertCondition($branch->condition);
+							array_push($cxt->stack, new AS3BinaryOperation($secondCondition, '&&', $firstCondition, 12));
+						}
+						$cxt->nextAddress = $endAddress;
+						return true;
+					}
+					break;
+				}
+			}	
+		}
+	}
 
-				// update the instruction pointer 
-				$callerCxt->nextAddress = $branch->addressIfFalse;
-			}
-		}
-	}
-	
-	protected function compareConditions($condition1, $condition2) {
-		$inverted = false;
-		while($condition1 instanceof AS3Negation) {
-			$condition1 = $condition1->operand;
-			$inverted = !$inverted;
-		}
-		while($condition2 instanceof AS3Negation) {
-			$condition2 = $condition2->operand;
-			$inverted = !$inverted;
-		}
-		if($condition1 === $condition2) {
-			return ($inverted) ? -1 : 1;
-		}
-		return 0;
-	}
-	
-	protected function collapseDuplicateBranches($branch) {
-		if(isset($branch->branchIfTrue)) {
-			$this->collapseDuplicateBranches($branch->branchIfTrue);
-			if($relation = $this->compareConditions($branch->condition, $branch->branchIfTrue->condition)) {
-				if($relation == 1) {
-					$branch->addressIfTrue = $branch->branchIfTrue->addressIfTrue;
-					if(isset($branch->branchIfTrue->branchIfTrue)) {
-						$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
-					} else {
-						unset($branch->branchIfTrue);
-					}
-				} else {
-					$branch->addressIfTrue = $branch->branchIfTrue->addressIfFalse;
-					if(isset($branch->branchIfTrue->branchIfFalse)) {
-						$branch->branchIfTrue = $branch->branchIfTrue->branchIfFalse;
-					} else {
-						unset($branch->branchIfTrue);
-					}
-				}
-			}
-		}
-		if(isset($branch->branchIfFalse)) {
-			$this->collapseDuplicateBranches($branch->branchIfFalse);
-			if($relation = $this->compareConditions($branch->condition, $branch->branchIfFalse->condition)) {
-				if($relation == 1) {
-					$branch->addressIfFalse = $branch->branchIfFalse->addressIfFalse;
-					if(isset($branch->branchIfFalse->branchIfFalse)) {
-						$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
-					} else {
-						unset($branch->branchIfFalse);
-					}
-				} else {
-					$branch->addressIfFalse = $branch->branchIfFalse->addressIfTrue;
-					if(isset($branch->branchIfFalse->branchIfTrue)) {
-						$branch->branchIfFalse = $branch->branchIfFalse->branchIfTrue;
-					} else {
-						unset($branch->branchIfFalse);
-					}
-				}
-			}
-		}
-	}
-	
-	protected function collapseBranches($branch) {
-		$changed = false;
-		if(isset($branch->branchIfTrue)) {
-			if($branch->branchIfTrue->addressIfFalse == $branch->addressIfFalse) {
-				$branch->condition = new AS3BinaryOperation($branch->branchIfTrue->condition, '&&', $branch->condition, 12);
-				$branch->addressIfTrue = $branch->branchIfTrue->addressIfTrue;
-				if(isset($branch->branchIfTrue->branchIfTrue)) {
-					$branch->branchIfTrue = $branch->branchIfTrue->branchIfTrue;
-				} else {
-					unset($branch->branchIfTrue);
-				}
-				$changed = true;
-			} else if($branch->branchIfTrue->addressIfTrue == $branch->addressIfFalse) {
-				$branch->condition = new AS3BinaryOperation($this->invertCondition($branch->branchIfTrue->condition), '&&', $branch->condition, 12);
-				$branch->addressIfTrue = $branch->branchIfTrue->addressIfFalse;
-				if(isset($branch->branchIfTrue->branchIfFalse)) {
-					$branch->branchIfTrue = $branch->branchIfTrue->branchIfFalse;
-				} else {
-					unset($branch->branchIfTrue);
-				}
-				$changed = true;
-			} else {
-				$changed = $this->collapseBranches($branch->branchIfTrue) || $changed;
-			}
-		}
-		if(isset($branch->branchIfFalse)) {
-			if($branch->branchIfFalse->addressIfTrue == $branch->addressIfTrue) {
-				$branch->condition = new AS3BinaryOperation($branch->branchIfFalse->condition, '||', $branch->condition, 13);
-				$branch->addressIfFalse = $branch->branchIfFalse->addressIfFalse;
-				if(isset($branch->branchIfFalse->branchIfFalse)) {
-					$branch->branchIfFalse = $branch->branchIfFalse->branchIfFalse;
-				} else {
-					unset($branch->branchIfFalse);
-				}
-				$changed = true;
-			} else if($branch->branchIfFalse->addressIfFalse == $branch->addressIfTrue) {
-				$branch->condition = new AS3BinaryOperation($this->invertCondition($branch->branchIfFalse->condition), '||', $branch->condition, 13);
-				$branch->addressIfFalse = $branch->branchIfFalse->addressIfTrue;
-				if(isset($branch->branchIfFalse->branchIfTrue)) {
-					$branch->branchIfFalse = $branch->branchIfFalse->branchIfTrue;
-				} else {
-					unset($branch->branchIfFalse);
-				}
-				$changed = true;
-			} else {
-				$changed = $this->collapseBranches($branch->branchIfFalse) || $changed;
-			}
-		}
-		return $changed;
-	}
-	
 	protected function decompileTernaryOperator($cxt, $branch) {
 		$cxtF = clone $cxt;
 		$stackHeight = count($cxtF->stack);
@@ -1151,7 +1012,8 @@ class AS3Decompiler {
 	
 	protected function do_convert_b($cxt) {
 		$value = array_pop($cxt->stack);
-		if($value instanceof AS3TypeCoercion && $value->type->string == 'Boolean') {
+		if($value instanceof AS3TypeCoercion) {
+			$value->type = new AS3IDentifier('Boolean');
 			array_push($cxt->stack, $value);
 		} else {
 			array_push($cxt->stack, new AS3TypeCoercion('Boolean', $value)); 
@@ -1337,8 +1199,6 @@ class AS3Decompiler {
 			array_push($cxt->stack, $object->slots[$cxt->op->op1]);
 		} else {
 			array_push($cxt->stack, null);
-			dump($object);
-			echo "do_getslot";
 		}
 	}
 	
@@ -1755,9 +1615,6 @@ class AS3Decompiler {
 				$type = $this->getType($cxt, $value);
 				return new AS3VariableDeclaration($value, $var, $type);
 			}
-		} else {
-			dump_backtrace();
-			exit;
 		}
 	}
 
@@ -2120,6 +1977,7 @@ class AS3Package extends AS3CompoundStatement {
 class AS3Class extends AS3CompoundStatement {
 	public $modifiers;
 	public $name;
+	public $parentName;
 	public $members = array();
 	public $interfaces = array();
 	
@@ -2192,6 +2050,7 @@ class AS3DecompilerBranch extends AS3DecompilerFlowControl {
 	public $condition;
 	public $addressIfTrue;
 	public $addressIfFalse;
+	public $branchOn;
 	
 	public function __construct($condition, $address, $offset, $branchOn) {
 		if($branchOn == false) {
@@ -2205,6 +2064,7 @@ class AS3DecompilerBranch extends AS3DecompilerFlowControl {
 		}
 		$this->addressIfTrue = $address + $offset;
 		$this->addressIfFalse = $address;
+		$this->branchOn = $branchOn;
 	}
 }
 
