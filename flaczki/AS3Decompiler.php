@@ -284,9 +284,11 @@ class AS3Decompiler {
 								$cxt->nextAddress = $stmt->address;
 							} else if($stmt instanceof AS3DecompilerSwitch) {
 								foreach($stmt->caseAddresses as $caseAddress) {
-									$cxtC = clone $cxt;
-									$cxtC->nextAddress = $caseAddress;
-									$contexts[] = $cxtC;
+									if($caseAddress != $stmt->defaultAddress) {
+										$cxtC = clone $cxt;
+										$cxtC->nextAddress = $caseAddress;
+										$contexts[] = $cxtC;
+									}
 								}
 								$cxt->nextAddress = $stmt->defaultAddress;
 							}
@@ -375,6 +377,18 @@ class AS3Decompiler {
 			// the value of the operator when the conditional expression evaluates to false
 			$valueF = end($cxtF->stack);
 			
+			// see where the expression would end up
+			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
+				if($stmt) {
+					if($stmt instanceof AS3DecompilerSwitch) {
+						// it's actually a jump to lookupswitch
+						return false;
+					} else {
+						break;
+					}
+				}
+			}
+			
 			// get the value for the true branch by decompiling up to the destination of the unconditional jump 
 			$cxtT = clone $cxt;
 			$cxtT->nextAddress = $branch->addressIfTrue;
@@ -447,7 +461,6 @@ class AS3Decompiler {
 				foreach($stmt->caseAddresses as $address) {
 					$isEntry[$address] = true;
 				}
-				$isEntry[$stmt->defaultAddress] = true;
 			} else if($stmt instanceof AS3DecompilerLabel) {
 				$isEntry[$ip + 1] = true;
 			}
@@ -490,7 +503,6 @@ class AS3Decompiler {
 				foreach($stmt->caseAddresses as $address) {
 					$block->to[] = $address;
 				}
-				$block->to[] = $stmt->defaultAddress;
 			} else {
 				if($block->next !== null) {
 					$block->to[] = $block->next;
@@ -2106,9 +2118,7 @@ class AS3DecompilerSwitch extends AS3DecompilerFlowControl {
 		$this->index = $index;
 		$this->caseAddresses = array();
 		foreach($caseOffsets as $caseOffset) {
-			if($caseOffset != $defaultOffset) {
-				$this->caseAddresses[] = $address + $caseOffset;
-			}
+			$this->caseAddresses[] = $address + $caseOffset;
 		}
 		$this->defaultAddress = $address + $defaultOffset;
 	}

@@ -197,12 +197,14 @@ class ASSourceCodeDumper {
 					if($expr->items) {
 						echo "{ ";
 						$count = 0;
-						foreach($expr->items as $name => $value) {
-							if($count++ > 0) {
-								echo ", ";
+						foreach($expr->items as $index => $value) {
+							if($index & 1) {
+								echo ": ";
+							} else {
+								if($count++ > 0) {
+									echo ", ";
+								}
 							}
-							$this->printExpression($name);
-							echo ": ";
 							$this->printExpression($value);
 						}
 						echo " }";
@@ -325,7 +327,7 @@ class ASSourceCodeDumper {
 				$this->printStatements($stmt->statementsIfTrue);
 				echo "</div>}\n";
 				if($stmt->statementsIfFalse) {
-					if(count($stmt->statementsIfFalse) == 1 && $stmt->statementsIfFalse[0] instanceof AS2IfElse) {
+					if(count($stmt->statementsIfFalse) == 1 && ($stmt->statementsIfFalse[0] instanceof AS2IfElse || $stmt->statementsIfFalse[0] instanceof AS3IfElse)) {
 						// else if
 						echo "<span class='keyword'>else</span> ";
 						$this->printStatement($stmt->statementsIfFalse[0]);
@@ -367,11 +369,15 @@ class ASSourceCodeDumper {
 					echo "<span class='keyword'>case</span> ";
 					$this->printExpression($case->constant);
 					echo ": ";
-					$this->printStatements($case->statements);
+					echo "<div class='code-block'>\n";
+						$this->printStatements($case->statements);
+					echo "</div>\n";
 				}
 				if($stmt->defaultCase) {
 					echo "<span class='keyword'>default:</span>";
+					echo "<div class='code-block'>\n";
 					$this->printStatements($stmt->defaultCase->statements);
+					echo "</div>\n";
 				}
 				echo "</div>}\n";
 			} else if($stmt instanceof AS2TryCatch || $stmt instanceof AS3TryCatch) {
