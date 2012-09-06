@@ -41,7 +41,11 @@ class AS3Decompiler {
 					$this->imports[] = new AS3Identifier($qname);
 				}
 			}
-			return new AS3Identifier($vmName->string ? $vmName->string : '*');
+			$identifier = $vmName->string ? $vmName->string : '*';
+			if($vmName instanceof AVM2QNameA || $vmName instanceof AVM2MultinameA) {
+				$identifier = "@$identifier";
+			}
+			return new AS3Identifier($identifier);
 		} else if($vmName instanceof AVMGenericName) {
 			$name = $this->importName($vmName->name);
 			$name = $name->string;
@@ -67,7 +71,11 @@ class AS3Decompiler {
 	
 	protected function resolveName($cxt, $vmName) {
 		if($vmName instanceof AVM2QName || $vmName instanceof AVM2Multiname) {
-			return new AS3Identifier($vmName->string ? $vmName->string : '*');
+			$identifier = $vmName->string ? $vmName->string : '*';
+			if($vmName instanceof AVM2QNameA || $vmName instanceof AVM2MultinameA) {
+				$identifier = "@$identifier";
+			}
+			return new AS3Identifier($identifier);
 		} else if($vmName instanceof AVM2RTQName || $vmName instanceof AVM2MultinameL) {
 			$name = array_pop($cxt->stack);
 			return $name;
@@ -491,6 +499,7 @@ class AS3Decompiler {
 				// it is not the first block
 				$headerBlock = $blocks[$loop->headerAddress];
 				$labelBlock = $blocks[$loop->labelAddress];
+				$entryBlock = $blocks[$loop->entryAddress];
 						
 				if($headerBlock->lastStatement->addressIfFalse < $loop->headerAddress) {
 					// if the loop continues only when the condition is false
@@ -556,17 +565,18 @@ class AS3Decompiler {
 						$stmt = new AS3ForIn;
 					}
 				} else {			
-					// it's a while if there's a jump to the header block to check the condition first
-					if($headerBlock->from[0] < $loop->labelAddress) {
+					// it's a while if there's a jump into the loop that doesn't land at the beginning
+					if($entryBlock->lastStatement instanceof AS3DecompilerJump && $entryBlock->lastStatement->address != $loop->labelAddress + 1) {
 						$stmt = new AS3While;
 					} else {
 						$stmt = new AS3DoWhile;
 					}
 				}
 				$stmt->condition = $condition;
-				$labelBlock->lastStatement = $stmt;
+				$entryBlock->lastStatement = $stmt;
 				$labelBlock->structured = true;
 				$headerBlock->structured = true;
+				$entryBlock->structured = true;
 			} else {
 				// no header--the "loop" is the function itself
 				$stmt = $function;
@@ -757,6 +767,7 @@ class AS3Decompiler {
 					$loop->headerAddress = $headerAddress;
 					$loop->labelAddress = $labelAddress;
 					$loop->breakAddress = $block->next;
+					$loop->entryAddress = $headerBlock->from[0];
 					$loop->contentAddresses = array();
 					foreach($blocks as $contentAddress => $contentBlock) {
 						if($contentAddress > $labelAddress && $contentAddress <= $headerAddress) {
