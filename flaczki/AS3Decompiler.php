@@ -2,7 +2,6 @@
 
 class AS3Decompiler {
 
-	protected $decoder;
 	protected $imports;
 	protected $nameMap;
 	protected $global;
@@ -10,27 +9,18 @@ class AS3Decompiler {
 	protected $names;
 	
 	public function __construct() {
-		$this->decoder = new AVM2Decoder;
 		$this->global = new AVM2GlobalScope;
 		$this->names = array();
 	}
 	
-	public function decompile($abcFile) {
-		$scripts = $this->decoder->decode($abcFile);
-		
+	public function decompile($script) {
 		// add the script members to the global scope
-		foreach($scripts as $script) {			
-			foreach($script->members as $member) {
-				$this->global->members[] = $member;
-			}
+		foreach($script->members as $member) {
+			$this->global->members[] = $member;
 		}
-		
-		$packages = array();
-		
-		foreach($scripts as $script) {
-			$packages[] = $this->decompileScript($script);
-		}
-		return $packages;
+		$package = $this->decompileScript($script);
+		unset($this->name);
+		return $package;
 	}
 	
 	protected function getIdentifier($string) {
@@ -2086,7 +2076,12 @@ class AS3StaticInitializer extends AS3CompoundStatement {
 	
 	public function __get($name) {
 		if($name == 'statements') {
-			return $this->methodBody->getStatements(array());
+			$statements = $this->methodBody->getStatements(array());
+			// remove trailing return
+			$return = array_pop($statements);
+			if(!($return instanceof AS3BasicStatement) || !($return->expression instanceof AS3Return)) {
+				$statements[] = $return;
+			}
 		}
 	}
 }
@@ -2262,6 +2257,5 @@ class AS3DecompilerContext {
 	public $scopeStack = array();
 	public $registerTypes = array();
 }
-
 
 ?>

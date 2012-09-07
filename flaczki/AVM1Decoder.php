@@ -9,22 +9,16 @@ class AVM1Decoder {
 	protected $constantPool;
 
 	public function decode($byteCodes) {
-		$this->byteCodes = $byteCodes;
-		$this->position = 0;
-		$this->registers = null;
-		$this->constantPool = null;
-		
 		$registers = array();
 		for($index = 0; $index < 3; $index++) {
 			$register = new AVM1Register;
 			$register->index = $index;
 			$registers[$index] = $register;
 		}
-		$function = $this->decodeInstructions(strlen($byteCodes), $registers);
-		return $function->operations;
+		return $this->decodeInstructions($byteCodes, 0, strlen($byteCodes), null, $registers);
 	}
 	
-	protected function decodeInstructions($count, $registers = null) {
+	public function decodeInstructions($byteCodes, $position, $count, $constantPool, $registers) {
 		static $opNames = array(
 			0x0A => 'Add',
 			0x47 => 'Add2',
@@ -126,21 +120,30 @@ class AVM1Decoder {
 			0x94 => 'With',
 		);
 		
-		if($registers) {
-			$savedRegisters = $this->registers;
-			$this->registers = $registers;
-		}		
+		$this->byteCodes = $byteCodes;
+		$this->position = $position;
+		$this->constantPool = $constantPool;
+		$this->registers = $registers;
 		$endPosition = $this->position + $count;
-		$ops = array();
+	 	$opCache = array();
+		$ops = array();		
 		while($this->position < $endPosition) {
 			$opcodePosition = $this->position;
 			$opcode = $this->readUI8();
 			if($opcode) {
 				$name = $opNames[$opcode];
-				$op = new AVM1Op;
-				$op->name = $name;
-				$op->code = $opcode;
-				if($opcode >= 0x80) {
+				if($opcode < 0x80) {
+					if(isset($opCache[$opcode])) {
+						$op = $opCache[$opcode];
+					} else {
+						$op = $opCache[$opcode] = new AVM1Op;
+						$op->name = $name;
+						$op->code = $opcode;
+					}
+				} else {
+					$op = new AVM1Op;
+					$op->name = $name;
+					$op->code = $opcode;
 					$length = $this->readUI16();
 					$this->nextPosition = $this->position + $length;
 					$handler = "decode$name";
@@ -149,12 +152,8 @@ class AVM1Decoder {
 				$ops[$opcodePosition] = $op;
 			}
 		}
-		$function = new AVM1FunctionBody;
-		$function->operations = $ops;		
-		if($registers) {		
-			$this->registers = $savedRegisters;
-		}
-		return $function;
+		$this->registers = $this->byteCodes = $this->constantPool = null;
+		return $ops;
 	}
 	
 	protected function decodeCall($op) {
@@ -185,7 +184,8 @@ class AVM1Decoder {
 			$register->index = $index;
 			$registers[$index] = $register;
 		}
-		$op->op5 = $this->decodeInstructions($codeSize, $registers);
+		$op->op5 = new AVM1FunctionBody($this, $this->byteCodes, $this->position, $codeSize, $this->constantPool, $registers);
+		$this->position += $codeSize;
 	}
 	
 	protected function decodeDefineFunction2($op) {
@@ -235,7 +235,8 @@ class AVM1Decoder {
 				$registers[$index] = $register;
 			}
 		}
-		$op->op7 = $this->decodeInstructions($codeSize, $registers);
+		$op->op7 = new AVM1FunctionBody($this, $this->byteCodes, $this->position, $codeSize, $this->constantPool, $registers);
+		$this->position += $codeSize;
 	}
 	
 	protected function decodeGetURL($op) {
@@ -309,10 +310,12 @@ class AVM1Decoder {
 			$op->op5 = $catchName = $this->readString();
 			$catchRegister = null;
 		}
-		$op->op6 = $this->decodeInstructions($trySize);
-		$op->op7 = ($flags & 0x01) ? $this->decodeInstructions($catchSize) : null;
-		$op->op8 = ($flags & 0x02) ? $this->decodeInstructions($finallySize) : null;
-		
+		$op->op6 = new AVM1FunctionBody($this, $this->byteCodes, $this->position, $trySize, $this->registers); 
+		$this->position += $trySize;
+		$op->op7 = ($flags & 0x01) ? new AVM1FunctionBody($this, $this->byteCodes, $this->position, $catchSize, $this->registers) : null; 
+		$this->position += $catchSize;
+		$op->op8 = ($flags & 0x02) ? new AVM1FunctionBody($this, $this->byteCodes, $this->position, $finallySize, $this->registers) : null;
+		$this->position += $finallySize;
 	}
 	
 	protected function decodeWaitForFrame($op) {
@@ -328,7 +331,8 @@ class AVM1Decoder {
 		}
 		$size = $this->position - $startIndex;
 		$this->position = $startIndex;
-		$op->op3 = $this->decodeInstructions($size);
+		$op->op3 = new AVM1FunctionBody($this, $this->byteCodes, $this->position, $size, $this->registers);
+		$this->position += $size;
 	}
 	
 	
@@ -343,12 +347,14 @@ class AVM1Decoder {
 		}
 		$size = $this->position - $startIndex;
 		$this->position = $startIndex;
-		$op->op2 = $this->decodeInstructions($size);
+		$op->op2 = new AVM1FunctionBody($this, $this->byteCodes, $this->position, $size, $this->registers);
+		$this->position += $size;
 	}
 	
 	protected function decodeWith($op) {
 		$op->op1 = $size = $this->readUI16();
-		$op->op2 = $this->decodeInstructions($size);
+		$op->op2 = new AVM1FunctionBody($this, $this->byteCodes, $this->position, $size, $this->registers);
+		$this->position += $size;
 	}
 	
 	protected function readString() {
@@ -423,7 +429,27 @@ class AVM1Register {
 }
 
 class AVM1FunctionBody {
-	public $operations;
+	protected $decoder;
+	protected $byteCodes;
+	protected $position;
+	protected $count;
+	protected $constantPool;
+	protected $registers;
+	
+	public function __construct($decoder, $byteCodes, $position, $count, $constantPool, $registers) {
+		$this->decoder = $decoder;
+		$this->byteCodes = $byteCodes;
+		$this->position = $position;
+		$this->count = $count;
+		$this->constantPool = $constantPool;
+		$this->registers = $registers;
+	}
+	
+	public function __get($name) {
+		if($name == 'operations') {
+			return $this->decoder->decodeInstructions($this->byteCodes, $this->position, $this->count, $this->constantPool, $this->registers);
+		}
+	}
 }
 
 class AVM1Op {

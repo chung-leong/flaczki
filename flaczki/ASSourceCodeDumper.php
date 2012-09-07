@@ -7,7 +7,9 @@ class ASSourceCodeDumper {
 	protected $symbolName;
 	protected $symbolNames;
 	protected $instanceCount;
+	protected $decoderAVM1;
 	protected $decompilerAS2;
+	protected $decoderAVM2;
 	protected $decompilerAS3;
 				
 	public function getRequiredTags() {
@@ -20,91 +22,116 @@ class ASSourceCodeDumper {
 		$this->symbolCount = 0;
 		$this->symbolNames = array( 0 => $this->symbolName);
 		$this->instanceCount = 0;
-		$this->processTags($swfFile->tags);
+		foreach($swfFile->tags as &$tag) {
+			$this->processTag($tag);
+			$tag = null;
+		}
 	}
 
-	protected function processTags(&$tags) {
-		foreach($tags as &$tag) {
-			if($tag instanceof SWFDoABCTag) {
-				if(!$this->decompilerAS3) {
-					$this->decompilerAS3 = new AS3Decompiler;
+	protected function processTag($tag) {
+		if($tag instanceof SWFDoABCTag) {
+			if(!$this->decoderAVM2) {
+				$this->decoderAVM2 = new AVM2Decoder;
+			}
+			if(!$this->decompilerAS3) {
+				$this->decompilerAS3 = new AS3Decompiler;
+			}
+			$scripts = $this->decoderAVM2->decode($tag->abcFile);
+			$tag->abcFile = null;
+			foreach($scripts as &$script) {
+				$package = $this->decompilerAS3->decompile($script);
+				$script = null;
+				$this->printStatement($package);
+				$packages = null;
+			}
+		} else if($tag instanceof SWFDoActionTag || $tag instanceof SWFDoInitActionTag) {
+			// an empty tag would still contain the zero terminator
+			if(strlen($tag->actions) > 1) {
+				if($tag instanceof SWFDoInitActionTag) {
+					$symbolName = $this->symbolNames[$tag->characterId];
+					echo "<div class='comments'>// $symbolName initialization </div>";
+				} else {
+					echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
 				}
-				$packages = $this->decompilerAS3->decompile($tag->abcFile);
-				$this->printStatements($packages);
-			} else if($tag instanceof SWFDoActionTag || $tag instanceof SWFDoInitActionTag) {
-				// an empty tag would still contain the zero terminator
-				if(strlen($tag->actions) > 1) {
-					if($tag instanceof SWFDoInitActionTag) {
-						$symbolName = $this->symbolNames[$tag->characterId];
-						echo "<div class='comments'>// $symbolName initialization </div>";
-					} else {
-						echo "<div class='comments'>// $this->symbolName, frame $this->frameIndex </div>";
+				if(!$this->decoderAVM1) {
+					$this->decoderAVM1 = new AVM1Decoder;
+				}
+				if(!$this->decompilerAS2) {
+					$this->decompilerAS2 = new AS2Decompiler;
+				}
+				$operations = $this->decoderAVM1->decode($tag->actions);
+				$tag->actions = null;
+				$statements = $this->decompilerAS2->decompile($operations);
+				$operations = null;
+				$this->printStatements($statements);
+				$statements = null;
+			}
+		} else if($tag instanceof SWFPlaceObject2Tag) {
+			$this->instanceCount++;
+			if($tag->clipActions) {
+				static $eventNames = array(	0x00040000 => "construct",		0x00020000 => "keyPress", 
+											0x00010000 => "dragOut", 		0x00008000 => "dragOver",
+											0x00004000 => "rollOut", 		0x00002000 => "rollOver",
+											0x00001000 => "releaseOutside",	0x00000800 => "release",
+											0x00000400 => "press",			0x00000200 => "initialize",
+											0x00000100 => "data",			0x00000080 => "keyUp",
+											0x00000040 => "keyDown",		0x00000020 => "mouseUp",
+											0x00000010 => "mouseDown",		0x00000008 => "mouseMove",
+											0x00000004 => "inload",			0x00000002 => "enterFrame",
+											0x00000001 => "load"	);
+				
+				$instanceName = ($tag->name) ? $tag->name : "instance$this->instanceCount";
+				$instancePath = "$this->symbolName.$instanceName";
+				echo "<div class='comments'>// $instancePath</div>";
+				foreach($tag->clipActions as $clipAction) {
+					echo "<div>on(";
+					$eventCount = 0;
+					foreach($eventNames as $flag => $eventName) {
+						if($clipAction->eventFlags & $flag) {
+							if($eventCount > 0) {
+								echo ", ";
+							}
+							echo "<span class='name'>$eventName</span>";
+							$eventCount++;
+						}
+					}
+					echo ") {\n";
+					if(!$this->decoderAVM1) {
+						$this->decoderAVM1 = new AVM1Decoder;
 					}
 					if(!$this->decompilerAS2) {
 						$this->decompilerAS2 = new AS2Decompiler;
 					}
-					$statements = $this->decompilerAS2->decompile($tag->actions);
+					$operations = $this->decoderAVM1->decode($clipAction->actions);
+					$clipAction->actions = null;
+					$statements = $this->decompilerAS2->decompile($operations);
+					$operations = null;
+					echo "<div class='code-block'>\n";
 					$this->printStatements($statements);
-				}
-			} else if($tag instanceof SWFPlaceObject2Tag) {
-				$this->instanceCount++;
-				if($tag->clipActions) {
-					static $eventNames = array(	0x00040000 => "construct",	0x00020000 => "keyPress", 
-												0x00010000 => "dragOut", 	0x00008000 => "dragOver",
-												0x00004000 => "rollOut", 	0x00002000 => "rollOver",
-												0x00001000 => "releaseOutside",	0x00000800 => "release",
-												0x00000400 => "press",		0x00000200 => "initialize",
-												0x00000100 => "data",		0x00000080 => "keyUp",
-												0x00000040 => "keyDown",	0x00000020 => "mouseUp",
-												0x00000010 => "mouseDown",	0x00000008 => "mouseMove",
-												0x00000004 => "inload",		0x00000002 => "enterFrame",
-												0x00000001 => "load"	);
-					
-					$instanceName = ($tag->name) ? $tag->name : "instance$this->instanceCount";
-					$instancePath = "$this->symbolName.$instanceName";
-					echo "<div class='comments'>// $instancePath</div>";
-					foreach($tag->clipActions as $clipAction) {
-						echo "<div>on(";
-						$eventCount = 0;
-						foreach($eventNames as $flag => $eventName) {
-							if($clipAction->eventFlags & $flag) {
-								if($eventCount > 0) {
-									echo ", ";
-								}
-								echo "<span class='name'>$eventName</span>";
-								$eventCount++;
-							}
-						}
-						echo ") {\n";
-						if(!$this->decompilerAS2) {
-							$this->decompilerAS2 = new AS2Decompiler;
-						}
-						$statements = $this->decompilerAS2->decompile($clipAction->actions);
-						echo "<div class='code-block'>\n";
-						$this->printStatements($statements);
-						echo "</div>}\n";
-					}
-				}
-			} else if($tag instanceof SWFShowFrameTag) {
-				$this->frameIndex++;
-			} else if($tag instanceof SWFDefineSpriteTag) {
-				$prevSymbolName = $this->symbolName;
-				$prevFrameIndex = $this->frameIndex;
-				$prevInstanceCount = $this->instanceCount;
-				$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$this->symbolCount;
-				$this->frameIndex = 1;
-				$this->instanceCount = 0;
-				$this->processTags($tag->tags);
-				$this->symbolName = $prevSymbolName;
-				$this->frameIndex = $prevFrameIndex;
-				$this->instanceCount = $prevInstanceCount;
-			} else if($tag instanceof SWFDefineBinaryDataTag) {
-				if($tag->swfFile) {
-					$dumper = clone $this;
-					$dumper->dump($tag->swfFile);
+					echo "</div>}\n";
+					$statements = null;
 				}
 			}
-			$tag = null;
+		} else if($tag instanceof SWFShowFrameTag) {
+			$this->frameIndex++;
+		} else if($tag instanceof SWFDefineSpriteTag) {
+			$prevSymbolName = $this->symbolName;
+			$prevFrameIndex = $this->frameIndex;
+			$prevInstanceCount = $this->instanceCount;
+			$this->symbolName = $this->symbolNames[$tag->characterId] = "symbol" . ++$this->symbolCount;
+			$this->frameIndex = 1;
+			$this->instanceCount = 0;
+			foreach($tag->tags as $tag) {
+				$this->processTag($tag);
+			}
+			$this->symbolName = $prevSymbolName;
+			$this->frameIndex = $prevFrameIndex;
+			$this->instanceCount = $prevInstanceCount;
+		} else if($tag instanceof SWFDefineBinaryDataTag) {
+			if($tag->swfFile) {
+				$dumper = clone $this;
+				$dumper->dump($tag->swfFile);
+			}
 		}
 	}
 	
@@ -150,6 +177,7 @@ class ASSourceCodeDumper {
 					echo ":";
 					$this->printExpression($expr->type);
 					if($expr->defaultValue !== null) {
+						echo " = ";
 						$this->printExpression($expr->defaultValue);
 					}
 				} else if($expr instanceof AS3Accessor)	{
@@ -386,16 +414,16 @@ class ASSourceCodeDumper {
 				echo "<span class='keyword'>try</span> {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->tryStatements);
 				echo "</div>}\n";
-				if($stmt->catchStatements) {
+				if($statements = $stmt->catchStatements) {
 					echo "<span class='keyword'>catch</span>(";
 					$this->printExpression($stmt->catchObject);
 					echo ") {\n<div class='code-block'>\n";
-					$this->printStatements($stmt->catchStatements);
+					$this->printStatements($statements);
 					echo "</div>}\n";
 				}
-				if($stmt->finallyStatements) {
+				if($statements = $stmt->finallyStatements) {
 					echo "<span class='keyword'>finally</span> {\n<div class='code-block'>\n";
-					$this->printStatements($stmt->catchStatements);
+					$this->printStatements($statements);
 					echo "</div>}\n";
 				}
 			} else if($stmt instanceof AS2With) {
@@ -411,6 +439,7 @@ class ASSourceCodeDumper {
 				$this->printStatements($stmt->statements);
 				echo "</div>}\n";
 			} else if($stmt instanceof AS3Package) {
+				echo "<div class='package'>";
 				echo "<span class='keyword'>package</span> ";
 				if($stmt->namespace) {
 					$this->printExpression($stmt->namespace);
@@ -436,6 +465,7 @@ class ASSourceCodeDumper {
 						echo "</div>\n";
 					}
 				}
+				echo "</div>";
 			} else if($stmt instanceof AS2Class || $stmt instanceof AS3Class) {
 				foreach($stmt->modifiers as $modifier) {
 					echo "<span class='keyword'>$modifier</span> ";

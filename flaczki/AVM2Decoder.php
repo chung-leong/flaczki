@@ -560,6 +560,7 @@ class AVM2Decoder {
 		$this->position = 0;
 		$endPosition = strlen($byteCodes);
 	 	$opCache = array();
+	 	$ops = array();
 		while($this->position < $endPosition) {
 			$opcodePosition = $this->position;
 			$opcode = $this->readU8();
