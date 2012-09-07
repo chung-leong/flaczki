@@ -7,10 +7,12 @@ class AS3Decompiler {
 	protected $nameMap;
 	protected $global;
 	protected $this;
+	protected $names;
 	
 	public function __construct() {
 		$this->decoder = new AVM2Decoder;
 		$this->global = new AVM2GlobalScope;
+		$this->names = array();
 	}
 	
 	public function decompile($abcFile) {
@@ -31,6 +33,14 @@ class AS3Decompiler {
 		return $packages;
 	}
 	
+	protected function getIdentifier($string) {
+		if(isset($this->names[$string])) {
+			return $this->names[$string];
+		}
+		$this->names[$string] = $name = new AS3Identifier($string);
+		return $name;
+	}
+	
 	protected function importName($vmName) {
 		if($vmName instanceof AVM2QName || $vmName instanceof AVM2Multiname) {
 			if(!isset($this->nameMap[$vmName->string])) {
@@ -38,14 +48,14 @@ class AS3Decompiler {
 				$namespace = ($vmName instanceof AVM2Multiname) ? $vmName->namespaceSet->namespaces[0] : $vmName->namespace;
 				if($vmName->string && $namespace->string && !preg_match('/^__AS3__./', $namespace->string)) {
 					$qname = "{$namespace->string}.{$vmName->string}";
-					$this->imports[] = new AS3Identifier($qname);
+					$this->imports[] = $this->getIdentifier($qname);
 				}
 			}
 			$identifier = $vmName->string ? $vmName->string : '*';
 			if($vmName instanceof AVM2QNameA || $vmName instanceof AVM2MultinameA) {
 				$identifier = "@$identifier";
 			}
-			return new AS3Identifier($identifier);
+			return $this->getIdentifier($identifier);
 		} else if($vmName instanceof AVM2GenericName) {
 			$name = $this->importName($vmName->name);
 			$name = $name->string;
@@ -55,14 +65,14 @@ class AS3Decompiler {
 				$types[] = $type->string;
 			}
 			$types = implode(', ', $types);
-			return new AS3Identifier("{$name}.<$types>");
+			return $this->getIdentifier("{$name}.<$types>");
 		}
 	}
 	
 	protected function importArguments($vmArguments) {
 		$arguments = array();
 		foreach($vmArguments as $vmArgument) {
-			$name = new AS3Identifier($vmArgument->name->string);
+			$name = $this->getIdentifier($vmArgument->name->string);
 			$type = $this->importName($vmArgument->type);
 			$arguments[] = new AS3Argument($name, $type, $vmArgument->value);
 		}
@@ -75,7 +85,7 @@ class AS3Decompiler {
 			if($vmName instanceof AVM2QNameA || $vmName instanceof AVM2MultinameA) {
 				$identifier = "@$identifier";
 			}
-			return new AS3Identifier($identifier);
+			return $this->getIdentifier($identifier);
 		} else if($vmName instanceof AVM2RTQName || $vmName instanceof AVM2MultinameL) {
 			$name = array_pop($cxt->stack);
 			return $name;
@@ -91,13 +101,13 @@ class AS3Decompiler {
 			}
 		} else if(is_scalar($value)) {
 			switch(gettype($value)) {
-				case 'string': return 'String';
-				case 'integer': return 'int';
-				case 'double': return 'Number';
-				case 'boolean': return 'Boolean';
+				case 'string': return $this->getIdentifier('String');
+				case 'integer': return $this->getIdentifier('int');
+				case 'double': return $this->getIdentifier('Number');
+				case 'boolean': return $this->getIdentifier('Boolean');
 			}
 		}
-		return '*';
+		return $this->getIdentifier('*');
 	}
 	
 	protected function searchScopeStack($cxt, $vmName) {
@@ -142,7 +152,7 @@ class AS3Decompiler {
 				continue;
 			}
 		
-			$name = new AS3Identifier($vmMember->name->string);
+			$name = $this->getIdentifier($vmMember->name->string);
 			$modifiers = array();
 			
 			// add inherietance modifier
@@ -162,7 +172,7 @@ class AS3Decompiler {
 			} else if($vmNamespace instanceof AVM2PackageNamespace) {
 				$modifiers[] = "public";
 				if($container instanceof AS3Package) {
-					$container->namespace = ($vmNamespace->string) ? new AS3Identifier($vmNamespace->string) : null;
+					$container->namespace = ($vmNamespace->string) ? $this->getIdentifier($vmNamespace->string) : null;
 				}
 			} else if($vmNamespace instanceof AVM2InternalNamespace) {
 				$modifiers[] = "internal";
@@ -192,14 +202,8 @@ class AS3Decompiler {
 				
 				// decompile static initializer
 				if($vmMember->object->constructor->body) {
-					$initializer = new AS3StaticInitializer;
-					$cxt = new AS3DecompilerContext;
-					$cxt->opQueue = $vmMember->object->constructor->body->operations;
-					$this->decompileFunctionBody($cxt, $initializer);
-					$stmt  = array_pop($initializer->statements);
-					if(!($stmt instanceof AS3Return)) {
-						$initializer->statements[] = $stmt;
-					}
+					$methodBody = new AS3DecompilerMethodbody($this, $vmMember->object->constructor->body);
+					$initializer = new AS3StaticInitializer($methodBody);
 					$member->members[] = $initializer;
 				}
 				
@@ -212,20 +216,8 @@ class AS3Decompiler {
 				
 				// decompile constructor
 				$arguments = $this->importArguments($vmMember->object->instance->constructor->arguments);
-				$constructor = new AS3ClassMethod($name, $arguments, null, array('public'));
-				if($vmMember->object->instance->constructor->body) {
-					$cxt = new AS3DecompilerContext;
-					$cxt->opQueue = $vmMember->object->instance->constructor->body->operations;
-					
-					// set register types of arguments
-					$registerTypes = array();
-					foreach($arguments as $index => $argument) {
-						$registerTypes[$index + 1] = $argument->type;
-					}
-					$cxt->registerTypes = $registerTypes;
-					$this->decompileFunctionBody($cxt, $constructor);
-				}
-				$member->members[] = $constructor;
+				$methodBody = new AS3DecompilerMethodbody($this, $vmMember->object->instance->constructor->body);
+				$member->members[] = new AS3ClassMethod($name, $arguments, null, $methodBody, array('public'));
 				
 				// decompile instance methods
 				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member, 'function');
@@ -237,22 +229,11 @@ class AS3Decompiler {
 				} else if($vmMember->type == AVM2ClassMember::TYPE_SETTER) {
 					$name = new AS3Accessor('set', $name);
 				}
+				$methodBody = new AS3DecompilerMethodbody($this, $vmMember->object->body);
 				if($container instanceof AS3Class) {
-					$member = new AS3ClassMethod($name, $arguments, $returnType, $modifiers);
+					$member = new AS3ClassMethod($name, $arguments, $returnType, $methodBody, $modifiers);
 				} else {
-					$member = new AS3Function($name, $arguments, $returnType, $modifiers);
-				}
-				if($vmMember->object->body) {
-					$cxt = new AS3DecompilerContext;
-					$cxt->opQueue = $vmMember->object->body->operations;
-					
-					// set register types of arguments
-					$registerTypes = array();
-					foreach($arguments as $index => $argument) {
-						$registerTypes[$index + 1] = $argument->type;
-					}
-					$cxt->registerTypes = $registerTypes;
-					$this->decompileFunctionBody($cxt, $member);
+					$member = new AS3Function($name, $arguments, $returnType, $methodBody, $modifiers);
 				}
 			} else if($vmMember->object instanceof AVM2Variable) {
 				$member = new AS3ClassVariable($name, $vmMember->object->value, $this->importName($vmMember->object->type), $modifiers);
@@ -266,7 +247,7 @@ class AS3Decompiler {
 		}
 	}
 	
-	protected function decompileFunctionBody($cxt, $function) {
+	public function decompileFunctionBody($cxt, $function) {
 		// decompile the ops into statements
 		$statements = array();	
 		$contexts = array($cxt);
@@ -760,7 +741,7 @@ class AS3Decompiler {
 						
 						// the last instruction should be a strict comparison branch
 						// except for the default case, which has a constant false as condition
-						if($conditions[$i] instanceof AS3BinaryOperation) {
+						if(isset($conditions[$i]) && $conditions[$i] instanceof AS3BinaryOperation) {
 							// the lookup object in $block->statements is only valid to the first case
 							// a different offset is put on the stack before every jump to the lookup instruction
 							// instead generating different statements from different paths, we'll just assume
@@ -932,7 +913,7 @@ class AS3Decompiler {
 		$types = implode(', ', $types);
 		$baseType = array_pop($cxt->stack);
 		$baseType = $baseType->string;
-		array_push($cxt->stack, new AS3Identifier("$baseType.<$types>"));
+		array_push($cxt->stack, $this->getIdentifier("$baseType.<$types>"));
 	}
 	
 	protected function do_astype($cxt) {
@@ -1023,7 +1004,7 @@ class AS3Decompiler {
 		$arguments = ($argumentCount > 0) ? array_splice($cxt->stack, -$argumentCount) : array();
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		$object = new AS3Identifier('super');
+		$object = $this->getIdentifier('super');
 		array_push($cxt->stack, new AS3FunctionCall($object, $name, $arguments));
 	}
 	
@@ -1046,7 +1027,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == '*') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('*', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('*'), $value)); 
 		}
 	}
 	
@@ -1055,7 +1036,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == 'String') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('String', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('String'), $value)); 
 		}
 	}
 	
@@ -1084,17 +1065,17 @@ class AS3Decompiler {
 		$argumentCount = $cxt->op->op1;
 		$arguments = ($argumentCount > 0) ? array_splice($cxt->stack, -$argumentCount) : array();
 		$object = array_pop($cxt->stack);
-		$name = new AS3Identifier('super');
+		$name = $this->getIdentifier('super');
 		return new AS3FunctionCall(null, $name, $arguments);
 	}
 	
 	protected function do_convert_b($cxt) {
 		$value = array_pop($cxt->stack);
 		if($value instanceof AS3TypeCoercion) {
-			$value->type = new AS3IDentifier('Boolean');
+			$value->type = $this->getIdentifier('Boolean');
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('Boolean', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('Boolean'), $value)); 
 		}
 	}
 	
@@ -1103,7 +1084,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == 'Number') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('Number', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('Number'), $value)); 
 		}
 	}
 	
@@ -1112,7 +1093,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == 'int') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('int', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('int'), $value)); 
 		}
 	}
 	
@@ -1121,7 +1102,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == 'Object') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('Object', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('Object'), $value)); 
 		}
 	}
 	
@@ -1130,7 +1111,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == 'String') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('String', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('String'), $value)); 
 		}
 	}
 	
@@ -1139,7 +1120,7 @@ class AS3Decompiler {
 		if($value instanceof AS3TypeCoercion && $value->type->string == 'uint') {
 			array_push($cxt->stack, $value);
 		} else {
-			array_push($cxt->stack, new AS3TypeCoercion('uint', $value)); 
+			array_push($cxt->stack, new AS3TypeCoercion($this->getIdentifier('uint'), $value)); 
 		}
 	}
 	
@@ -1204,12 +1185,12 @@ class AS3Decompiler {
 	
 	protected function do_esc_xattr($cxt) {
 		$value = array_pop($cxt->stack);
-		array_push($cxt->stack, new AS3FunctionCall($value, 'toString', array()));
+		array_push($cxt->stack, new AS3FunctionCall($value, $this->getIdentifier('toString'), array()));
 	}
 	
 	protected function do_esc_xelem($cxt) {
 		$value = array_pop($cxt->stack);
-		array_push($cxt->stack, new AS3FunctionCall($value, 'toString', array()));
+		array_push($cxt->stack, new AS3FunctionCall($value, $this->getIdentifier('toString'), array()));
 	}
 	
 	protected function do_findproperty($cxt) {
@@ -1288,7 +1269,7 @@ class AS3Decompiler {
 	protected function do_getsuper($cxt) {
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		$object = new AS3Identifier("super");
+		$object = $this->getIdentifier("super");
 		if($name instanceof AS3Identifier) {
 			array_push($cxt->stack, new AS3BinaryOperation($name, '.', $object, 1));
 		} else {
@@ -1638,7 +1619,6 @@ class AS3Decompiler {
 	protected function do_setlocal($cxt) {
 		$value = array_pop($cxt->stack);
 		$var = $cxt->op->op1;
-		$cxt->registerValues[$var->index] = $value;
 		if(!($value instanceof AVM2ActivionObject || $value instanceof AVM2GlobalScope)) {
 			$type = $this->getType($cxt, $value);
 
@@ -1700,7 +1680,7 @@ class AS3Decompiler {
 		$value = array_pop($cxt->stack);
 		$name = $this->resolveName($cxt, $cxt->op->op1);
 		$object = array_pop($cxt->stack);
-		$object = new AS3Identifier("super");
+		$object = $this->getIdentifier("super");
 		if($name instanceof AS3Identifier) {
 			$var = new AS3BinaryOperation($name, '.', $object, 1);
 		} else {
@@ -1808,9 +1788,7 @@ class AS3TypeCoercion extends AS3Expression {
 	public $type;
 	
 	public function __construct($type, $value) {
-		if(is_string($type)) {
-			$type = new AS3Identifier($type);
-		}		
+		$type = $type;
 		$this->value = $value;
 		$this->type = $type;
 	}
@@ -1822,9 +1800,6 @@ class AS3VariableDeclaration extends AS3Expression {
 	public $type;
 	
 	public function __construct($value, $name, $type) {
-		if(is_string($type)) {
-			$type = new AS3Identifier($type);
-		}		
 		$this->name = $name;
 		$this->value = $value;
 		$this->type = $type;
@@ -1907,9 +1882,6 @@ class AS3FunctionCall extends AS3Expression {
 	public $arguments;
 	
 	public function __construct($object, $name, $arguments) {
-		if(is_string($name)) {
-			$name = new AS3Identifier($name);
-		}
 		if($object) {
 			if(!($object instanceof AVM2GlobalScope)) {
 				$name = new AS3BinaryOperation($name, '.', $object, 1, '*');
@@ -2087,20 +2059,35 @@ class AS3ClassMethod extends AS3CompoundStatement {
 	public $name;
 	public $arguments;
 	public $returnType;
-	public $statements = array();
-	
-	public function __construct($name, $arguments, $returnType, $modifiers) {
+
+	protected $methodBody;
+
+	public function __construct($name, $arguments, $returnType, $methodBody, $modifiers) {
 		$this->name = $name;
 		$this->arguments = $arguments;
 		$this->returnType = $returnType;
 		$this->modifiers = $modifiers;
+		$this->methodBody = $methodBody;
+	}
+	
+	public function __get($name) {
+		if($name == 'statements') {
+			return $this->methodBody->getStatements($this->arguments);
+		}
 	}
 }
 
 class AS3StaticInitializer extends AS3CompoundStatement {
-	public $statements = array();
-
-	public function __construct() {
+	protected $body;
+	
+	public function __construct($methodBody) {
+		$this->methodBody = $methodBody;
+	}
+	
+	public function __get($name) {
+		if($name == 'statements') {
+			return $this->methodBody->getStatements(array());
+		}
 	}
 }
 
@@ -2231,6 +2218,39 @@ class AS3DecompilerLoop {
 class AS3DecompilerLabel {
 }
 
+class AS3DecompilerMethodBody {
+	protected $decompiler;
+	protected $vmMethodBody;
+	public $statements;
+	
+	public function __construct($decompiler, $vmMethodBody) {
+		$this->decompiler = $decompiler;
+		$this->vmMethodBody = $vmMethodBody;
+	}
+	
+	public function getStatements($arguments) {
+		if($this->vmMethodBody) {
+			$cxt = new AS3DecompilerContext;
+			$cxt->opQueue = $this->vmMethodBody->operations;
+						
+			// set register types of arguments
+			$registerTypes = array();
+			foreach($arguments as $index => $argument) {
+				$registerTypes[$index + 1] = $argument->type;
+			}
+			
+			$cxt->registerTypes = $registerTypes;
+			$this->statements = array();
+			$this->decompiler->decompileFunctionBody($cxt, $this);
+			$statements = $this->statements;
+			$this->statements = null;
+			return $statements;
+		} else {
+			return array();
+		}
+	}
+}
+
 class AS3DecompilerContext {
 	public $op;
 	public $opQueue;
@@ -2241,7 +2261,7 @@ class AS3DecompilerContext {
 	public $stack = array();
 	public $scopeStack = array();
 	public $registerTypes = array();
-	public $registerValues = array();
 }
+
 
 ?>

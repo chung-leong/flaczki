@@ -81,7 +81,8 @@ class AVM2Decoder {
 			$reg->index = $i + 1;
 			$registers[] = $reg;
 		}
-		return $this->decodeInstructions($methodBodyRec->byteCodes, $registers);
+		$function = new AVM2MethodBody($this, $methodBodyRec->byteCodes, $registers);
+		return $function;
 	}
 	
 	protected function decodeScript($scriptRec) {
@@ -317,7 +318,7 @@ class AVM2Decoder {
 		return $name;
 	}
 	
-	protected function decodeInstructions($byteCodes, $registers) {
+	public function decodeInstructions($byteCodes, $registers) {
 		static $opNames = array(
 			0xa0 => "add",
 			0xc5 => "add_i",
@@ -558,37 +559,43 @@ class AVM2Decoder {
 		$this->byteCodes = $byteCodes;
 		$this->position = 0;
 		$endPosition = strlen($byteCodes);
+	 	$opCache = array();
 		while($this->position < $endPosition) {
 			$opcodePosition = $this->position;
 			$opcode = $this->readU8();
 			if($opcode) {
 				$name = $opNames[$opcode];
-				$op = new AVM2Op;
-				$op->name = $name;
-				$op->code = $opcode;
-				
-				if(isset($operandHandlers[$opcode])) {
-					$handler = $operandHandlers[$opcode];
-					$this->$handler($op);
-				} else {
-					// exapnd getlocal_# and setlocal_# 
-					if($opcode >= 0xd0 && $opcode <= 0xd3) {
-						$op->code = 0x62;
-						$op->name = "getlocal";
-						$op->op1 = $this->registers[$opcode - 0xd0];
-					} else if($opcode >= 0xd4 && $opcode <= 0xd7) {
-						$op->code = 0x63;
-						$op->name = "setlocal";
-						$op->op1 = $this->registers[$opcode - 0xd4];
-					
+				$handler = isset($operandHandlers[$opcode]) ? $operandHandlers[$opcode] : null;
+				if(!$handler) {
+					// avoid creating the identical objects
+					if(isset($opCache[$opcode])) {						
+						$op = $opCache[$opcode];
+					} else {
+						$op = $opCache[$opcode] = new AVM2Op;
+						// exapnd getlocal_# and setlocal_# 
+						if($opcode >= 0xd0 && $opcode <= 0xd3) {
+							$op->code = 0x62;
+							$op->name = "getlocal";
+							$op->op1 = $this->registers[$opcode - 0xd0];
+						} else if($opcode >= 0xd4 && $opcode <= 0xd7) {
+							$op->code = 0x63;
+							$op->name = "setlocal";
+							$op->op1 = $this->registers[$opcode - 0xd4];
+						} else {
+							$op->name = $name;
+							$op->code = $opcode;
+						}
 					}
+				} else {
+					$op = new AVM2Op;
+					$op->name = $name;
+					$op->code = $opcode;
+					$this->$handler($op);
 				}
 				$ops[$opcodePosition] = $op;
 			}
 		}
-		$function = new AVM2MethodBody;
-		$function->operations = $ops;		
-		return $function;
+		return $ops;
 	}
 	
 	protected function decodeSwitchOperands($op) {
@@ -897,7 +904,21 @@ class AVM2Method {
 }
 
 class AVM2MethodBody {
-	public $operations;
+	protected $decoder;
+	protected $byteCodes;
+	protected $registers;
+	
+	public function __construct($decoder, $byteCodes, $registers) {
+		$this->decoder = $decoder;
+		$this->byteCodes = $byteCodes;
+		$this->registers = $registers;
+	}
+	
+	public function __get($name) {
+		if($name == 'operations') {
+			return $this->decoder->decodeInstructions($this->byteCodes, $this->registers);
+		}
+	}
 }
 
 class AVM2Op {

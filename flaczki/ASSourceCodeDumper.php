@@ -23,8 +23,8 @@ class ASSourceCodeDumper {
 		$this->processTags($swfFile->tags);
 	}
 
-	protected function processTags($tags) {
-		foreach($tags as $tag) {
+	protected function processTags(&$tags) {
+		foreach($tags as &$tag) {
 			if($tag instanceof SWFDoABCTag) {
 				if(!$this->decompilerAS3) {
 					$this->decompilerAS3 = new AS3Decompiler;
@@ -50,15 +50,15 @@ class ASSourceCodeDumper {
 				$this->instanceCount++;
 				if($tag->clipActions) {
 					static $eventNames = array(	0x00040000 => "construct",	0x00020000 => "keyPress", 
-									0x00010000 => "dragOut", 	0x00008000 => "dragOver",
-									0x00004000 => "rollOut", 	0x00002000 => "rollOver",
-									0x00001000 => "releaseOutside",	0x00000800 => "release",
-									0x00000400 => "press",		0x00000200 => "initialize",
-									0x00000100 => "data",		0x00000080 => "keyUp",
-									0x00000040 => "keyDown",	0x00000020 => "mouseUp",
-									0x00000010 => "mouseDown",	0x00000008 => "mouseMove",
-									0x00000004 => "inload",		0x00000002 => "enterFrame",
-									0x00000001 => "load"	);
+												0x00010000 => "dragOut", 	0x00008000 => "dragOver",
+												0x00004000 => "rollOut", 	0x00002000 => "rollOver",
+												0x00001000 => "releaseOutside",	0x00000800 => "release",
+												0x00000400 => "press",		0x00000200 => "initialize",
+												0x00000100 => "data",		0x00000080 => "keyUp",
+												0x00000040 => "keyDown",	0x00000020 => "mouseUp",
+												0x00000010 => "mouseDown",	0x00000008 => "mouseMove",
+												0x00000004 => "inload",		0x00000002 => "enterFrame",
+												0x00000001 => "load"	);
 					
 					$instanceName = ($tag->name) ? $tag->name : "instance$this->instanceCount";
 					$instancePath = "$this->symbolName.$instanceName";
@@ -104,6 +104,7 @@ class ASSourceCodeDumper {
 					$dumper->dump($tag->swfFile);
 				}
 			}
+			$tag = null;
 		}
 	}
 	
@@ -476,17 +477,17 @@ class ASSourceCodeDumper {
 					echo ":";
 					$this->printExpression($stmt->returnType);
 				}
-				if($stmt->statements) {
+				if($statements = $stmt->statements) {
 					echo " {\n<div class='code-block'>\n";
-					$this->printStatements($stmt->statements);
+					$this->printStatements($statements);
 					echo "</div>}\n";
 				} else {
 					echo ";";
 				}
 			} else if($stmt instanceof AS3StaticInitializer) {
-				if($stmt->statements) {
+				if($statements = $stmt->statements) {
 					echo " {\n<div class='code-block'>\n";
-					$this->printStatements($stmt->statements);
+					$this->printStatements($statements);
 					echo "</div>}\n";
 				}
 			}
