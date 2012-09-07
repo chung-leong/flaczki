@@ -909,7 +909,11 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
 			$name = new AS2Identifier($name);
-			array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
+			if($this->isThisVariable($object)) {
+				array_push($cxt->stack, $name);
+			} else {
+				array_push($cxt->stack, new AS2BinaryOperation($name, '.', $object, 1));
+			}
 		} else {
 			array_push($cxt->stack, new AS2ArrayAccess($name, $object));
 		}
@@ -920,7 +924,11 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		$name = $this->getPropertyName($index);
 		$var = new AS2Identifier($name);
-		array_push($cxt->stack, new AS2BinaryOperation($var, '.', $object, 1));
+		if($this->isThisVariable($object)) {
+			array_push($cxt->stack, $var);
+		} else {
+			array_push($cxt->stack, new AS2BinaryOperation($var, '.', $object, 1));
+		}
 	}
 
 	protected function doGetTime($cxt) {
@@ -1145,7 +1153,11 @@ class AS2Decompiler {
 		$object = array_pop($cxt->stack);
 		if(is_string($name) && preg_match('/^\w+$/', $name)) {
 			$name = new AS2Identifier($name);
-			$var = new AS2BinaryOperation($name, '.', $object, 1);
+			if($this->isThisVariable($object)) {
+				$var = $name;
+			} else {
+				$var = new AS2BinaryOperation($name, '.', $object, 1);
+			}
 		} else {
 			$var = new AS2ArrayAccess($name, $object);
 		}
@@ -1157,7 +1169,11 @@ class AS2Decompiler {
 		$index = array_pop($cxt->stack);
 		$object = array_pop($cxt->stack);
 		$name = new AS2Identifier($this->getPropertyName($index));
-		$var = new AS2BinaryOperation($name, '.', $object, 1);
+		if($this->isThisVariable($object)) {
+			$var = $name;
+		} else {
+			$var = new AS2BinaryOperation($name, '.', $object, 1);
+		}
 		return new AS2Assignment($value, $var);
 	}
 
@@ -1198,6 +1214,9 @@ class AS2Decompiler {
 		$arguments = array($lockCenter);
 		if($constrain) {
 			$arguments = array_splice($arguments, 1, 0, array_splice($cxt->stack, -4));
+		}
+		if($this->isThisVariable($object)) {
+			$object = null;
 		}
 		return new AS2FunctionCall($object, 'startDrag', $arguments);
 	}

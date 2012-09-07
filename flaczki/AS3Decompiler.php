@@ -130,11 +130,18 @@ class AS3Decompiler {
 		return $package;
 	}
 	
-	protected function decompileMembers($vmMembers, $vmObject, $container) {
+	protected function decompileMembers($vmMembers, $vmObject, $container, $memberType = null) {
 		$slots = array();
 		$this->this = $vmObject;
 		$scope = ($vmObject instanceof AVM2Class) ? 'static' : null;
 		foreach($vmMembers as $index => $vmMember) {
+			if(($memberType == 'var' && !($vmMember->object instanceof AVM2Variable))
+			|| ($memberType == 'const' && !($vmMember->object instanceof AVM2Constant))
+			|| ($memberType == 'function' && !($vmMember->object instanceof AVM2Method))
+			|| ($memberType == 'class' && !($vmMember->object instanceof AVM2Variable))) {
+				continue;
+			}
+		
 			$name = new AS3Identifier($vmMember->name->string);
 			$modifiers = array();
 			
@@ -166,6 +173,7 @@ class AS3Decompiler {
 				$modifiers[] = $scope;
 			}
 			
+			$member = null;
 			if($vmMember->object instanceof AVM2Class) {
 				if(!($vmMember->object->instance->flags & AVM2ClassInstance::ATTR_SEALED)) {
 					$modifiers[] = "dynamic";
@@ -178,9 +186,29 @@ class AS3Decompiler {
 					$member->interfaces[] = $this->importName($vmInterface);
 				}
 				
-				// decompile static and instance constants, variables, and methods
-				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member);
-				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member);
+				// decompile static constants and variables
+				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member, 'const');
+				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member, 'var');
+				
+				// decompile static initializer
+				if($vmMember->object->constructor->body) {
+					$initializer = new AS3StaticInitializer;
+					$cxt = new AS3DecompilerContext;
+					$cxt->opQueue = $vmMember->object->constructor->body->operations;
+					$this->decompileFunctionBody($cxt, $initializer);
+					$stmt  = array_pop($initializer->statements);
+					if(!($stmt instanceof AS3Return)) {
+						$initializer->statements[] = $stmt;
+					}
+					$member->members[] = $initializer;
+				}
+				
+				// decompile static methods
+				$this->decompileMembers($vmMember->object->members, $vmMember->object, $member, 'function');
+				
+				// decompile instance constants and variables
+				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member, 'const');
+				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member, 'var');
 				
 				// decompile constructor
 				$arguments = $this->importArguments($vmMember->object->instance->constructor->arguments);
@@ -199,18 +227,8 @@ class AS3Decompiler {
 				}
 				$member->members[] = $constructor;
 				
-				// decompile static initializer
-				if($vmMember->object->constructor->body) {
-					$initializer = new AS3ClassMethod($name, array(), null, array());
-					$cxt = new AS3DecompilerContext;
-					$cxt->opQueue = $vmMember->object->constructor->body->operations;
-					$this->decompileFunctionBody($cxt, $initializer);
-					$stmt  = array_pop($initializer->statements);
-					if(!($stmt instanceof AS3Return)) {
-						$initializer->statements[] = $stmt;
-					}
-					$member->initialization = $initializer->statements;
-				}
+				// decompile instance methods
+				$this->decompileMembers($vmMember->object->instance->members, $vmMember->object->instance, $member, 'function');
 			} else if($vmMember->object instanceof AVM2Method) {
 				$returnType = $this->importName($vmMember->object->returnType);
 				$arguments = $this->importArguments($vmMember->object->arguments);
@@ -742,7 +760,7 @@ class AS3Decompiler {
 						
 						// the last instruction should be a strict comparison branch
 						// except for the default case, which has a constant false as condition
-						if(isset($conditions[$i])) {
+						if($conditions[$i] instanceof AS3BinaryOperation) {
 							// the lookup object in $block->statements is only valid to the first case
 							// a different offset is put on the stack before every jump to the lookup instruction
 							// instead generating different statements from different paths, we'll just assume
@@ -2054,7 +2072,6 @@ class AS3Class extends AS3CompoundStatement {
 	public $parentName;
 	public $members = array();
 	public $interfaces = array();
-	public $initialization = array();
 	
 	public function __construct($name, $modifiers) {
 		$this->modifiers = $modifiers;
@@ -2077,6 +2094,13 @@ class AS3ClassMethod extends AS3CompoundStatement {
 		$this->arguments = $arguments;
 		$this->returnType = $returnType;
 		$this->modifiers = $modifiers;
+	}
+}
+
+class AS3StaticInitializer extends AS3CompoundStatement {
+	public $statements = array();
+
+	public function __construct() {
 	}
 }
 

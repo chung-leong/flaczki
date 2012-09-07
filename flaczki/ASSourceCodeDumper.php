@@ -460,11 +460,6 @@ class ASSourceCodeDumper {
 				}
 				echo " {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->members);
-				if(isset($stmt->initialization)) {
-					echo " {\n<div class='code-block'>\n";
-					$this->printStatements($stmt->initialization);
-					echo "</div>}\n";
-				}
 				echo "</div>}\n";
 			} else if($stmt instanceof AS2ClassMethod || $stmt instanceof AS3ClassMethod || $stmt instanceof AS3Function) {
 				foreach($stmt->modifiers as $modifier) {
@@ -487,6 +482,12 @@ class ASSourceCodeDumper {
 					echo "</div>}\n";
 				} else {
 					echo ";";
+				}
+			} else if($stmt instanceof AS3StaticInitializer) {
+				if($stmt->statements) {
+					echo " {\n<div class='code-block'>\n";
+					$this->printStatements($stmt->statements);
+					echo "</div>}\n";
 				}
 			}
 		}
