@@ -576,6 +576,7 @@ class AS2Decompiler {
 		$members = array();
 		$interfaces = array();
 		$parentName = null;
+		$variableCount = 0;
 		foreach($if->statementsIfTrue as $stmt) {
 			if($stmt instanceof AS2BasicStatement) {
 				$expr = $stmt->expression;
@@ -646,7 +647,10 @@ class AS2Decompiler {
 						if($value instanceof AS2Function) {
 							$members[] = new AS2ClassMethod($name, $value->arguments, $value->statements, $modifiers);
 						} else {
-							$members[] = new AS2ClassVariable($name, $value, $modifiers);
+							$member = new AS2ClassVariable($name, $value, $modifiers);
+							// insert variables ahead of methods
+							array_splice($members, $variableCount, 0, array($member));
+							$variableCount++;
 						}
 					} 
 				}
