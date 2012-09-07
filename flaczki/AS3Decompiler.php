@@ -738,18 +738,16 @@ class AS3Decompiler {
 					$cases = array();
 					for($i = count($caseAddresses) - 1; $i >= 0; $i--) {
 						$case = new AS3SwitchCase;
-						$case->statements = array();
-						$condition = ($i < count($conditions)) ? $conditions[$i] : null;
 						$caseAddress = $caseAddresses[$i];
 						
 						// the last instruction should be a strict comparison branch
 						// except for the default case, which has a constant false as condition
-						if($condition instanceof AS3BinaryOperation) {
+						if(isset($conditions[$i])) {
 							// the lookup object in $block->statements is only valid to the first case
 							// a different offset is put on the stack before every jump to the lookup instruction
 							// instead generating different statements from different paths, we'll just assume
 							// the offsets are sequential
-							$case->constant = $condition->operand1;
+							$case->constant = $conditions[$i]->operand1;
 						}
 						
 						// move all blocks into the case until we are at the break

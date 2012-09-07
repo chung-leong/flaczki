@@ -64,6 +64,8 @@ class AS2Decompiler {
 		
 		// recreate loops and conditional statements
 		$this->structureLoops($loops, $blocks, $function);
+		
+		$this->recreateClasses($function);
 	}
 
 	protected function decompileLogicalStatement($cxt, $branch) {
@@ -132,18 +134,17 @@ class AS2Decompiler {
 			// the value of the operator when the conditional expression evaluates to false
 			$valueF = end($cxtF->stack);
 			
-			// see where the false branch would end up at
-			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {
-				if($stmt) {
-					break;
-				}
-			}
-			
 			// get the value for the true branch by decompiling up to the destination of the unconditional jump 
 			while(($stmt = $this->decompileNextInstruction($cxtT)) !== false) {
 				if($stmt) {
-					// no statement should be generated
-					return false;
+					if($stmt instanceof AS2DecompilerBranch) {
+						// could be a ternary inside a ternary
+						if(!$this->decompileTernaryOperator($cxtT, $stmt)) {
+							return false;
+						}
+					} else {
+						return false;
+					}
 				}
 				if($cxtT->nextAddress == $uBranch->address) {
 					break;
@@ -294,6 +295,12 @@ class AS2Decompiler {
 				}
 			}
 
+			// recreate switchstatements
+			foreach($loop->contentAddresses as $blockAddress) {
+				$block = $blocks[$blockAddress];
+				$this->structureSwitch($block, $blocks);
+			}
+			
 			// recreate if statements
 			foreach($loop->contentAddresses as $blockAddress) {
 				$block = $blocks[$blockAddress];
@@ -317,6 +324,113 @@ class AS2Decompiler {
 						$block->destination[] = $stmt;
 					}
 				}
+			}
+		}
+	}
+	
+	protected function structureSwitch($block, $blocks) {
+		if($block->lastStatement instanceof AS2DecompilerBranch && !$block->structured) {
+			if($block->lastStatement->condition instanceof AS2BinaryOperation && $block->lastStatement->condition->operator == '===') {
+				$compareValue = $block->lastStatement->condition->operand1;
+				$firstBlock = $block;
+				$caseAddresses = array();
+				$conditions = array();
+				$defaultAddress = null;
+			
+				while($block->lastStatement instanceof AS2DecompilerBranch) {
+					if($block->lastStatement->condition instanceof AS2BinaryOperation && $block->lastStatement->condition->operator == '===' 
+					&& $block->lastStatement->condition->operand1 === $compareValue) {
+						$caseAddress = $block->lastStatement->addressIfTrue;
+						$caseAddresses[] = $caseAddress;
+						$caseBlock = $blocks[$caseAddress];
+						$defaultAddress = $caseBlock->next;
+						$conditions[] = $block->lastStatement->condition;
+						$block->structured = true;
+						$block = $blocks[$block->lastStatement->addressIfFalse];
+					} else {
+						return;
+					}
+				}
+				if(count($caseAddresses) < 2) {
+					return;
+				}
+				$caseAddresses[] = $defaultAddress;
+				
+				// find the block to which all the branches converge
+				$reachCounts = array();
+				foreach($caseAddresses as $caseAddress) {
+					$stack = array($caseAddress);
+					$scanned = array();
+					while($stack) {
+						$to = array_pop($stack);
+						$toBlock = $blocks[$to];
+						$scanned[$to] = true;
+						$reachCount =& $reachCounts[$to];
+						$reachCount++;
+						foreach($toBlock->to as $to) {
+							if(!isset($scanned[$to]) && $to > $caseAddress) {
+								array_push($stack, $to);
+							}
+						}
+					}
+				}
+				$breakAddress = null;
+				$caseCount = count($caseAddresses);
+				foreach($reachCounts as $address => $count) {
+					if($count == $caseCount) {
+						$breakAddress = $address;
+						break;
+					}
+				}
+				if(!$breakAddress) {
+					return false;
+				}
+				
+				// create the cases 
+				$cases = array();
+				for($i = count($caseAddresses) - 1; $i >= 0; $i--) {
+					$case = new AS2SwitchCase;
+					$caseAddress = $caseAddresses[$i];
+					
+					if(isset($conditions[$i])) {
+						$case->constant = $conditions[$i]->operand2;
+					}
+					
+					// move all blocks into the case until we are at the break
+					$stack = array($caseAddress);
+					$scanned = array();
+					while($stack) {
+						$to = array_pop($stack);
+						$toBlock = $blocks[$to];
+						if($toBlock->destination === null) {
+							$toBlock->destination =& $case->statements;
+	
+							// change jumps to break statements
+							if($toBlock->lastStatement instanceof AS2DecompilerJump && !$toBlock->structured) {
+								if($toBlock->lastStatement->address === $breakAddress) {
+									$toBlock->lastStatement = new AS2Break;
+									$toBlock->structured = true;
+								}
+							}
+						}
+						foreach($toBlock->to as $to) {
+							if(!isset($scanned[$to])) {
+								$scanned[$to] = true;
+								if($to < $breakAddress) {
+									array_push($stack, $to);
+								}
+							}
+						}
+					}
+					$cases[$i] = $case;
+				}
+				
+				$switch = new AS2Switch;
+				$switch->compareValue = $compareValue;
+				$switch->defaultCase = array_shift($cases);
+				$switch->cases = array_reverse($cases);
+				
+				$firstBlock->lastStatement = $switch;
 			}
 		}
 	}
@@ -394,6 +508,165 @@ class AS2Decompiler {
 			return 1;
 		}
 		return 0;
+	}
+	
+	protected function recreateClasses($function) {
+		$namespaces = array();
+		foreach($function->statements as &$stmt) {
+			if($stmt instanceof AS2IfElse && $stmt->condition instanceof AS2Negation) {
+				// statement checking if class exists already or not
+				$expr = $stmt->condition->operand;
+				$name = null;
+				$qname = null;
+				$root = null;
+				$namespaceRoot = null;
+				while($expr instanceof AS2BinaryOperation) {
+					// reconstruct the classpath (taking out _global)
+					if($name) {
+						$qname = new AS2BinaryOperation($qname, '.', $expr->operand2, 1);
+						$namespaceRoot = $expr->operand2;
+					} else {
+						$name = $qname = $expr->operand2;
+					}
+					$root = $expr = $expr->operand1;
+				} 
+				if($root && $root instanceof AS2Identifier && $root->string == '_global') {					
+					if($this->recreateClass($stmt, $name, $qname)) {
+						if($namespaceRoot instanceof AS2Identifier) {
+							// if a class was recreated, then we're sure the object is a namespace
+							$namespaces[] = $namespaceRoot->string;
+						}
+					}
+				}
+			} else if($stmt instanceof AS2BasicStatement) {
+				$expr = $stmt->expression;
+				if($expr instanceof AS2FunctionCall 
+				&& $expr->name instanceof AS2Identifier && $expr->name->string == 'ASSetPropFlags') {
+					$stmt = null;
+				}
+			}
+		}
+		
+		// remove namespace construction code
+		if($namespaces) {
+			foreach($function->statements as &$stmt) {
+				if($stmt instanceof AS2IfElse && $stmt->condition instanceof AS2Negation) {
+					$expr = $stmt->condition->operand;
+					$root = null;
+					$namespaceRoot = null;
+					while($expr instanceof AS2BinaryOperation) {
+						$namespaceRoot = $expr->operand2;
+						$root = $expr = $expr->operand1;
+					} 
+					if($root && $root instanceof AS2Identifier && $root->string == '_global') {
+						if($namespaceRoot instanceof AS2Identifier) {
+							if(in_array($namespaceRoot->string, $namespaces)) {
+								$stmt = null;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	protected function recreateClass(&$if, $className, $classQname) {
+		$constructorVar = null;
+		$prototypeVar = null;
+		$members = array();
+		$interfaces = array();
+		$parentName = null;
+		foreach($if->statementsIfTrue as $stmt) {
+			if($stmt instanceof AS2BasicStatement) {
+				$expr = $stmt->expression;
+				if($expr instanceof AS2VariableDeclaration) {
+					$var = $expr->name;
+					$value = $expr->value;
+					if($value instanceof AS2Function) {
+						// constructor is assigned to register first
+						if(!$constructorVar) {
+							$constructorVar = $var;
+							$modifiers = array('public');
+							$members[] = new AS2ClassMethod($className, $value->arguments, $value->statements, $modifiers);
+						}
+					} else if($value instanceof AS2BinaryOperation && $value->operator == '.' 
+		 				   && $value->operand2 instanceof AS2Identifier && $value->operand2->string == 'prototype') {
+		 				if(!$prototypeVar) {
+		 					$prototypeVar = $var;
+		 				}
+		 			}
+				} else if($expr instanceof AS2Assignment) {
+					$var = $expr->operand1;
+					$value = $expr->operand2;
+					$modifiers = array();
+					if($var instanceof AS2BinaryOperation && $var->operator == '.') {
+						if($var->operand1 === $prototypeVar) {
+							$modifiers[] = 'public';
+						} else if($var->operand1 === $constructorVar) {
+							$modifiers[] = 'public';
+							$modifiers[] = 'static';
+						} else {
+							if($value instanceof AS2Function) {
+								if(!$constructorVar) {
+									if($var->operand2->string == $className->string) {
+										// constructor is assigned directly to property
+										$constructorVar = $var;
+										$modifiers = array('public');
+										$members[] = new AS2ClassMethod($className, $value->arguments, $value->statements, $modifiers);
+									}
+								}
+							} else if($var->operand2->string == 'prototype') {
+								if($value instanceof AVM1Register) {
+									if(!$prototypeVar) {
+										// setting prototype property to a register (instead of the other way around)
+										$prototypeVar = $value;
+									}
+								} else if($value instanceof AS2ObjectInitializer) {
+									$index = array_search("__constructor__", $value->items);
+									if($index !== false) {
+										$parentName = $value->items[$index + 1];
+									}
+								}
+							} else if($var->operand2->string == '__interface__') {
+								if($value instanceof AS2ArrayInitializer) {
+									foreach($value->items as $expr) {
+										$qname = null;
+										while($expr instanceof AS2BinaryOperation) {
+											// take out _global
+											$qname = ($qname) ? new AS2BinaryOperation($qname, '.', $expr->operand2, 1) : $expr->operand2;
+											$expr = $expr->operand1;
+										}
+										$interfaces[] = $qname;
+									}
+								}
+							}
+							continue;
+						}
+						$name = $var->operand2;
+						if($value instanceof AS2Function) {
+							$members[] = new AS2ClassMethod($name, $value->arguments, $value->statements, $modifiers);
+						} else {
+							$members[] = new AS2ClassVariable($name, $value, $modifiers);
+						}
+					} 
+				}
+			}
+		}
+		if($constructorVar && $prototypeVar) {
+			$class = new AS2Class($classQname, $parentName, $members, $interfaces, array());
+			$if = $class;
+			return true;
+		} else if($constructorVar) {
+			if(count($members) == 1) {
+				$constructor = $members[0];
+				if(!$constructor->arguments && !$constructor->statements) {
+					// constructor is an empty function--the object probably represents an interface
+					$interface = new AS2Interface($classQname, array());
+					$if = $interface;
+					return true;
+				}
+			}
+		}
 	}
 	
 	protected function getPropertyName($index) {
@@ -621,10 +894,11 @@ class AS2Decompiler {
 	protected function doExtends($cxt) {
 		$superclass = array_pop($cxt->stack);
 		$subclass = array_pop($cxt->stack);
-		
+		$className = $subclass->operand2;
+		$this->classParents[$className->string] = $superclass;
 		// Subclass.prototype = { __proto__: Superclass.prototype, __constructor__: Superclass };
 		$prototype = new AS2Identifier('prototype');
-		$subclassPrototype = new AS2BinaryOperation($prototype, '.', $subclass, 1);
+		$subclassPrototype = new AS2BinaryOperation($prototype, '.', $subclass, 1);		
 		$superclassPrototype = new AS2BinaryOperation($prototype, '.', $superclass, 1);
 		$prototypeObject = new AS2ObjectInitializer(array( '__proto__', $superclassPrototype, '__constructor__', $superclass));
 		return new AS2Assignment($prototypeObject, $subclassPrototype);
@@ -719,16 +993,16 @@ class AS2Decompiler {
 	}
 
 	protected function doImplementsOp($cxt) {
-		/*$class = array_pop($cxt->stack);
+		$class = array_pop($cxt->stack);
 		$count = array_pop($cxt->stack);
-		$interfaces = new AS2ArrayInitializer;
+		$items = array();
 		for($i = 0; $i < $count; $i++) {
-			$interfaces->items[] = array_pop($cxt->stack);
+			$items[] = array_pop($cxt->stack);
 		}
-		array_push($cxt->stack, $class);
-		array_push($cxt->stack, 'interfaces');
-		array_push($cxt->stack, $interfaces);
-		return $this->doSetMember($cxt);*/
+		array_push($cxt->stack, new AS2BinaryOperation(new AS2Identifier('prototype'), '.', $class, 1));
+		array_push($cxt->stack, '__interface__');
+		array_push($cxt->stack, new AS2ArrayInitializer($items));
+		return $this->doSetMember($cxt);
 	}
 
 	protected function doIncrement($cxt) {
@@ -1294,6 +1568,17 @@ class AS2While extends AS2DoWhile {
 class AS2ForIn extends AS2DoWhile {
 }
 
+class AS2Switch extends AS2CompoundStatement {
+	public $compareValue;
+	public $cases = array();
+	public $defaultCase;
+}
+
+class AS2SwitchCase extends AS2CompoundStatement {
+	public $constant;
+	public $statements = array();
+}
+
 class AS2TryCatch extends AS2CompoundStatement {
 	public $tryStatements;
 	public $catchObject;
@@ -1337,6 +1622,55 @@ class AS2Function extends AS2CompoundStatement {
 		}
 		$this->name = $name;
 		$this->arguments = $arguments;
+	}
+}
+
+class AS2Class extends AS2CompoundStatement {
+	public $modifiers;
+	public $name;
+	public $parentName;
+	public $members = array();
+	public $interfaces = array();
+	
+	public function __construct($name, $parentName, $members, $interfaces, $modifiers) {
+		$this->modifiers = $modifiers;
+		$this->name = $name;
+		$this->parentName = $parentName;
+		$this->members = $members;
+		$this->interfaces = $interfaces;
+	}
+}
+
+class AS2ClassMethod extends AS2CompoundStatement {
+	public $modifiers;
+	public $name;
+	public $arguments;
+	public $statements;
+	
+	public function __construct($name, $arguments, $statements, $modifiers) {
+		$this->name = $name;
+		$this->arguments = $arguments;
+		$this->modifiers = $modifiers;
+		$this->statements = $statements;
+	}
+}
+
+class AS2ClassVariable extends AS2SimpleStatement {
+	public $modifiers;
+	public $name;
+	public $value;
+	
+	public function __construct($name, $value, $modifiers) {
+		$this->name = $name;
+		$this->value = $value;
+		$this->modifiers = $modifiers;
+	}
+}
+
+class AS2Interface extends AS2Class {
+	public function __construct($name, $modifiers) {
+		$this->modifiers = $modifiers;
+		$this->name = $name;
 	}
 }
 

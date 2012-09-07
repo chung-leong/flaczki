@@ -287,15 +287,17 @@ class ASSourceCodeDumper {
 				echo "<span class='keyword'>throw</span>(";
 				$this->printExpression($stmt->object);
 				echo ")";
-			} else if($stmt instanceof AS3ClassVariable) {
+			} else if($stmt instanceof AS2ClassVariable || $stmt instanceof AS3ClassVariable) {
 				foreach($stmt->modifiers as $modifier) {
 					echo "<span class='keyword'>$modifier</span> ";
 				}
 				echo "<span class='keyword'>var</span> ";
 				$this->printExpression($stmt->name);
-				echo ":";
-				$this->printExpression($stmt->type);
-				if(!($stmt->value instanceof AVM2Undefined)) {
+				if(isset($stmt->type)) {
+					echo ":";
+					$this->printExpression($stmt->type);
+				}
+				if(!($stmt->value instanceof AVM1Undefined) && !($stmt->value instanceof AVM2Undefined)) {
 					echo " = ";
 					$this->printExpression($stmt->value);
 				}
@@ -305,9 +307,11 @@ class ASSourceCodeDumper {
 				}
 				echo "<span class='keyword'>const</span> ";
 				$this->printExpression($stmt->name);
-				echo ":";
-				$this->printExpression($stmt->type);
-				if(!($stmt->value instanceof AVM2Undefined)) {
+				if(isset($stmt->type)) {
+					echo ":";
+					$this->printExpression($stmt->type);
+				}
+				if(!($stmt->value instanceof AVM1Undefined) && !($stmt->value instanceof AVM2Undefined)) {
 					echo " = ";
 					$this->printExpression($stmt->value);
 				}
@@ -358,7 +362,7 @@ class ASSourceCodeDumper {
 				echo "</div>} while(";
 				$this->printExpression($stmt->condition);
 				echo ");\n";
-			} else if($stmt instanceof AS3Switch) {
+			} else if($stmt instanceof AS2Switch || $stmt instanceof AS3Switch) {
 				echo "<span class='keyword'>switch</span>(";
 				$this->printExpression($stmt->compareValue);
 				echo ") {\n<div class='code-block'>\n";
@@ -431,11 +435,11 @@ class ASSourceCodeDumper {
 						echo "</div>\n";
 					}
 				}
-			} else if($stmt instanceof AS3Class) {
+			} else if($stmt instanceof AS2Class || $stmt instanceof AS3Class) {
 				foreach($stmt->modifiers as $modifier) {
 					echo "<span class='keyword'>$modifier</span> ";
 				}
-				if($stmt instanceof AS3Interface) {
+				if($stmt instanceof AS2Interface || $stmt instanceof AS3Interface) {
 					echo "<span class='keyword'>interface</span> ";
 				} else {
 					echo "<span class='keyword'>class</span> ";
@@ -456,13 +460,13 @@ class ASSourceCodeDumper {
 				}
 				echo " {\n<div class='code-block'>\n";
 				$this->printStatements($stmt->members);
-				if($stmt->initialization) {
+				if(isset($stmt->initialization)) {
 					echo " {\n<div class='code-block'>\n";
 					$this->printStatements($stmt->initialization);
 					echo "</div>}\n";
 				}
 				echo "</div>}\n";
-			} else if($stmt instanceof AS3ClassMethod || $stmt instanceof AS3Function) {
+			} else if($stmt instanceof AS2ClassMethod || $stmt instanceof AS3ClassMethod || $stmt instanceof AS3Function) {
 				foreach($stmt->modifiers as $modifier) {
 					echo "<span class='keyword'>$modifier</span> ";
 				}
@@ -473,7 +477,7 @@ class ASSourceCodeDumper {
 				echo "(";
 				$this->printExpressions($stmt->arguments);
 				echo ")";
-				if($stmt->returnType) {
+				if(isset($stmt->returnType)) {
 					echo ":";
 					$this->printExpression($stmt->returnType);
 				}
