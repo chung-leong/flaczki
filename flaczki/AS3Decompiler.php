@@ -364,7 +364,7 @@ class AS3Decompiler {
 		}
 		if($uBranch) {
 			// the value of the operator when the conditional expression evaluates to false
-			$valueF = end($cxtF->stack);
+			$valueF = $cxtF->stack[count($cxtF->stack) - 1];
 			
 			// see where the expression would end up
 			while(($stmt = $this->decompileNextInstruction($cxtF)) !== false) {

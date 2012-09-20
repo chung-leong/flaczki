@@ -254,7 +254,7 @@ class AVM1Decoder {
 	
 	protected function decodeGotoFrame2($op) {
 		$op->op1 = $this->readUI16();
-		$op->op2 = ($flags & 0x02) ? $this->readUI16() : null;
+		$op->op2 = ($op->op1 & 0x02) ? $this->readUI16() : null;
 	}
 	
 	protected function decodeGoToLabel($op) {

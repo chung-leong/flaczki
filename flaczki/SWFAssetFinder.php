@@ -235,7 +235,7 @@ class SWFImage extends SWFCharacter {
 		} else if($this->tag instanceof SWFDefineBitsLosslessTag && LosslessBitsConverter::isAvailable()) {
 			$converter = new LosslessBitsConverter;
 			return $converter->convertToPNG($this->tag);
-		} else if($this->tag instanceof SWFDefinesJPEG2Tag) {
+		} else if($this->tag instanceof SWFDefineBitsJPEG2Tag) {
 			return $this->tag->imageData;
 		} else if($this->tag instanceof SWFDefineBitsTag) {
 			return $this->tag->jpegTables . $this->tag->imageData;
@@ -247,7 +247,7 @@ class SWFImage extends SWFCharacter {
 			return 'image/png';
 		} else if($this->tag instanceof SWFDefineBitsLosslessTag && LosslessBitsConverter::isAvailable()) {
 			return 'image/png';
-		} else if($this->tag instanceof SWFDefinesJPEG2Tag) {
+		} else if($this->tag instanceof SWFDefineBitsJPEG2Tag) {
 			return $this->originalMimeType;
 		} else if($this->tag instanceof SWFDefineBitsTag) {
 			return 'image/jpeg';

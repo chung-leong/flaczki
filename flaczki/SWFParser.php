@@ -585,7 +585,7 @@ class SWFParser {
 		$tag->sampleSize = $this->readUB(1, $bytesAvailable);
 		$tag->type = $this->readUB(1, $bytesAvailable);
 		$tag->sampleCount = $this->readUI32($bytesAvailable);
-		$tag->data = $this->readBytes( $bytesAvailable);
+		$tag->data = $this->readBytes($bytesAvailable, $bytesAvailable);
 		return $tag;
 	}
 	

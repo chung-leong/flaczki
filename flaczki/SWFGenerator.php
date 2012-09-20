@@ -481,21 +481,26 @@ class SWFGenerator {
 				}
 			}
 			
-			$output = fopen("php://output", "wb");
+			$output_url = "php://output";
+			$output = fopen($output_url, "wb");
 			if(count($exportingModules) == 1) {
 				// just send the single file
 				$exportingModule = $exportingModules[0];
 				$mimeType = $exportingModule->getExportType();
 				$fileName = $exportingModule->getExportFileName();
-				header("Content-type: $mimeType");
-				header("Content-Disposition: attachment; filename=\"$fileName\"");
+				if($output_url == "php://output") {
+					header("Content-type: $mimeType");
+					header("Content-Disposition: attachment; filename=\"$fileName\"");
+				}
 				$exportingModule->export($output, $assets);
 			} else {
 				// put the files into a zip archive
 				$mimeType = "application/zip";
 				$fileName = "export.zip";
-				header("Content-type: $mimeType");
-				header("Content-Disposition: attachment; filename=\"$fileName\"");
+				if($output_url == "php://output") {
+					header("Content-type: $mimeType");
+					header("Content-Disposition: attachment; filename=\"$fileName\"");
+				}
 				$zipPath = StreamZipArchive::create($output);
 				foreach($exportingModules as $exportingModule) {
 					$name = $exportingModule->getExportFileName();
