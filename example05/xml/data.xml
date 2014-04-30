@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<coverflow 
+	imageWidth="350" 
+	imageHeight="240"
+	imagePadding="0"       
+	coverflowSpacing="40"
+	startIndex="0"
+	startIndexInCenter="yes" 
+	coverLabelPositionY="240"
+	coverSlidePositionY="270"
+	transitionTime="0.5"
+	centerCoverflowZPosition="-125"
+	target="_blank"
+    reflectionAlpha="35"
+    reflectionRatio="50"
+    reflectionDistance="0"
+    reflectionUpdateTime="-1"
+    reflectionDropoff="0.75"
+	>
+<cover 
+	img="images/Katyn.swf"
+	link="http://www.imdb.com/title/tt0879843/"/>
+<cover 
+	img="images/Ashes and Diamond.swf"
+	link="http://www.imdb.com/title/tt0052080/"/>
+<cover 
+	img="images/Danton.swf"
+	link="http://www.imdb.com/title/tt0083789/"/>
+<cover 
+	img="images/Promised Land.swf"
+	link="http://www.imdb.com/title/tt0072446/"/>
+<cover 
+	img="images/Man of Iron.swf"
+	link="http://www.imdb.com/title/tt0082222/"/>
+<cover 
+	img="images/Man of Marble.swf"
+	link="http://www.imdb.com/title/tt0075902/"/>
+<cover 
+	img="images/No End.swf"
+	link="http://www.imdb.com/title/tt0086961/"/>
+<cover 
+	img="images/Night Train.swf"
+	link="http://www.imdb.com/title/tt0053176/"/>
+<cover 
+	img="images/Mother Joan of the Angels.swf"
+	link="http://www.imdb.com/title/tt0055153/"/>
+</coverflow>

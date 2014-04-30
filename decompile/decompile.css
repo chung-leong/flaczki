@@ -1,0 +1,57 @@
+BODY {
+	font-family: monospace;
+}
+
+DIV {
+	white-space: nowrap;
+}
+
+.code-block {
+	margin-left: 2em;
+}
+
+.comments {
+	color: #999999;
+}
+
+.keyword {
+	font-weight: bold;
+	color: #000000;
+}
+
+.register {
+	color: #CC0000;
+}
+
+.undefined {
+	color: #00AA00;
+}
+
+.null {
+	color: #00AA00;
+}
+
+.string {
+	color: #0000CC;
+}
+
+.double {
+	color: #0000CC;
+}
+
+.integer {
+	color: #0000CC;
+}
+
+.name {
+	color: #880088;
+}
+
+.label {
+	color: #009999;
+	font-style: italic;
+}
+
+.package {
+	margin-bottom: 1em;
+}
